@@ -1,0 +1,160 @@
+// Quality scan rules — bad practice patterns and reliability checks
+// across multiple languages.
+
+import type { ScanRule } from './types'
+import { JS_TS, TS_ONLY, PY, GO, RUST, JAVA, KOTLIN, CSHARP } from './constants'
+
+// ===========================================================================
+// BAD PRACTICES — Cross-language & language-specific
+// ===========================================================================
+
+export const BAD_PRACTICE_RULES: ScanRule[] = [
+  {
+    id: 'console-log',
+    category: 'bad-practice',
+    severity: 'info',
+    title: 'console.log in Production Code',
+    description: 'Console statements leak information and clutter output in production. They can expose sensitive data in browser consoles.',
+    suggestion: 'Remove or replace with a structured logging library (pino, winston)',
+    pattern: '\\bconsole\\.(log|debug|info|trace)\\s*\\(',
+    patternOptions: { regex: true },
+    fileFilter: JS_TS,
+    excludePattern: /\/\/.*console|\/\*.*console|logger/,
+    excludeFiles: /\.test\.|\.spec\.|__tests__|__mocks__|\.stories\./,
+  },
+  {
+    id: 'any-type',
+    category: 'bad-practice',
+    severity: 'warning',
+    title: 'TypeScript "any" Type',
+    description: 'Using "any" disables type checking for that value and everything it flows into. It defeats TypeScript\'s purpose and hides bugs that would be caught at compile time.',
+    suggestion: 'Use "unknown" if the type is uncertain (requires narrowing), or define a proper type/interface',
+    cwe: 'CWE-20',
+    pattern: ':\\s*any\\b|<any>|as\\s+any\\b',
+    patternOptions: { regex: true },
+    fileFilter: TS_ONLY,
+    excludePattern: /eslint-disable|@ts-ignore|@ts-expect-error|\/\/.*any/i,
+  },
+  {
+    id: 'eslint-disable',
+    category: 'bad-practice',
+    severity: 'info',
+    title: 'Linting Suppression',
+    description: 'Suppressed linting rules may hide real issues. Each suppression should have a justification comment explaining why.',
+    suggestion: 'Fix the underlying issue. If suppression is necessary, add a comment explaining why.',
+    pattern: '(?:eslint-disable|@ts-ignore|@ts-expect-error|@ts-nocheck|noinspection|# noqa|# type: ignore|#nosec)',
+    patternOptions: { regex: true },
+  },
+  {
+    id: 'empty-catch',
+    category: 'bad-practice',
+    severity: 'warning',
+    title: 'Empty Catch Block',
+    description: 'Silently swallowing errors makes debugging impossible and can mask security-critical failures. At minimum, log the error.',
+    suggestion: 'Log the error, re-throw it, or handle it explicitly. Comment if intentional.',
+    cwe: 'CWE-390',
+    pattern: 'catch\\s*\\([^)]*\\)\\s*\\{\\s*\\}',
+    patternOptions: { regex: true },
+    fileFilter: [...JS_TS, ...JAVA, ...KOTLIN, ...CSHARP],
+  },
+  {
+    id: 'var-usage',
+    category: 'bad-practice',
+    severity: 'info',
+    title: '"var" Declaration (JS)',
+    description: '"var" has function scope and is hoisted, leading to subtle bugs. "let" and "const" have block scope and are safer.',
+    suggestion: 'Replace with "const" (preferred) or "let" for reassigned variables',
+    pattern: '\\bvar\\s+[a-zA-Z_$]',
+    patternOptions: { regex: true },
+    fileFilter: JS_TS,
+    excludePattern: /\/\/.*var|\.var|--var|CSS|custom property/,
+  },
+  {
+    id: 'python-bare-except',
+    category: 'bad-practice',
+    severity: 'warning',
+    title: 'Bare except Clause (Python)',
+    description: 'Bare except catches ALL exceptions including SystemExit and KeyboardInterrupt. This makes it impossible to terminate the program normally and hides real errors.',
+    suggestion: 'Catch specific exceptions, or at minimum use "except Exception:" to exclude system signals',
+    pattern: '\\bexcept\\s*:',
+    patternOptions: { regex: true },
+    fileFilter: PY,
+  },
+  {
+    id: 'python-star-import',
+    category: 'bad-practice',
+    severity: 'warning',
+    title: 'Wildcard Import (Python)',
+    description: '"from X import *" pollutes the namespace with all public names from X. It makes code harder to read, maintain, and debug because symbol origins are unclear.',
+    suggestion: 'Import specific names: from X import a, b, c',
+    pattern: 'from\\s+\\S+\\s+import\\s+\\*',
+    patternOptions: { regex: true },
+    fileFilter: PY,
+    excludePattern: /#.*import|__init__/,
+  },
+  {
+    id: 'go-error-discard',
+    category: 'bad-practice',
+    severity: 'warning',
+    title: 'Discarded Error Return Value',
+    description: 'Error return value assigned to _ (blank identifier). Silent error handling causes hard-to-debug failures and can mask security issues.',
+    suggestion: 'Handle the error: if err != nil { return fmt.Errorf("context: %w", err) }',
+    cwe: 'CWE-252',
+    pattern: '[^,]\\s*_\\s*(?::)?=\\s*\\S+\\(',
+    patternOptions: { regex: true },
+    fileFilter: GO,
+    excludePattern: /range|type assertion|ok.*:?=|defer/,
+  },
+  {
+    id: 'rust-unwrap',
+    category: 'bad-practice',
+    severity: 'info',
+    title: 'unwrap() / expect() Usage',
+    description: 'unwrap() and expect() panic on None/Err, crashing the program. In production code, handle errors gracefully.',
+    suggestion: 'Use ? operator, match, or unwrap_or_default() for production code',
+    pattern: '\\.(?:unwrap|expect)\\s*\\(',
+    patternOptions: { regex: true },
+    fileFilter: RUST,
+    excludeFiles: /test|example|bench/i,
+  },
+  {
+    id: 'go-unused-import-comment',
+    category: 'bad-practice',
+    severity: 'info',
+    title: 'Blank Import Without Justification',
+    description: 'Blank imports (_ "pkg") import a package only for its side effects. Without a comment, it is unclear why the import exists.',
+    suggestion: 'Add a comment: _ "pkg" // for init() side effect',
+    pattern: '_\\s+"[^"]+(?<!_test)"\\s*$',
+    patternOptions: { regex: true },
+    fileFilter: GO,
+    excludePattern: /\/\//,
+  },
+  {
+    id: 'hardcoded-ip',
+    category: 'bad-practice',
+    severity: 'info',
+    title: 'Hardcoded IP Address',
+    description: 'IP addresses in code break when infrastructure changes. They should be configurable via environment variables or service discovery.',
+    suggestion: 'Use environment variables or DNS names instead of hardcoded IPs',
+    pattern: '["\']\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}(?::\\d+)?["\']',
+    patternOptions: { regex: true },
+    excludePattern: /127\.0\.0\.1|0\.0\.0\.0|localhost|example|test|mock|placeholder|192\.168\.|10\.|172\.\d{2}\./i,
+  },
+]
+
+// ===========================================================================
+// RELIABILITY
+// ===========================================================================
+
+export const RELIABILITY_RULES: ScanRule[] = [
+  {
+    id: 'todo-fixme',
+    category: 'reliability',
+    severity: 'info',
+    title: 'TODO / FIXME / HACK Comment',
+    description: 'Unresolved task markers in code indicate incomplete work. These should be tracked in an issue tracker and addressed before release.',
+    suggestion: 'Create a tracking issue and address it, or remove if no longer relevant',
+    pattern: '(?://|#|/\\*|--|%%)\\s*(?:TODO|FIXME|HACK|XXX|BUG|TEMP|WORKAROUND)\\b',
+    patternOptions: { regex: true, caseSensitive: false },
+  },
+]

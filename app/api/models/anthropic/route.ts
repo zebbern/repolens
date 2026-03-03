@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { apiKeyRequestSchema } from '@/types/types'
 
 // Anthropic doesn't have a models endpoint, so we validate the key
 // and return known available models
@@ -12,11 +13,14 @@ const ANTHROPIC_MODELS = [
 
 export async function POST(request: Request) {
   try {
-    const { apiKey } = await request.json()
+    const body: unknown = await request.json()
+    const parsed = apiKeyRequestSchema.safeParse(body)
 
-    if (!apiKey) {
+    if (!parsed.success) {
       return NextResponse.json({ error: 'API key required' }, { status: 400 })
     }
+
+    const apiKey = parsed.data.apiKey
 
     // Validate the API key by making a minimal request
     const response = await fetch('https://api.anthropic.com/v1/messages', {

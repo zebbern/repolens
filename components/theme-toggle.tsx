@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useRef } from "react"
+import { useCallback } from "react"
 import { useTheme } from "next-themes"
 import { Moon, Sun, Monitor } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -13,30 +13,18 @@ import {
 
 export function ThemeToggle() {
   const { theme, setTheme, resolvedTheme } = useTheme()
-  const hasTransitioned = useRef(false)
 
   const handleThemeChange = useCallback(
     (newTheme: string) => {
-      // Add transition class for smooth color change
-      if (!hasTransitioned.current) {
-        hasTransitioned.current = true
-      }
       document.documentElement.classList.add("theme-transition")
       setTheme(newTheme)
       // Remove transition class after animation completes
-      const timeout = setTimeout(() => {
+      setTimeout(() => {
         document.documentElement.classList.remove("theme-transition")
       }, 250)
-      return () => clearTimeout(timeout)
     },
     [setTheme],
   )
-
-  // Suppress hydration mismatch — render a placeholder until mounted
-  const mounted = useRef(false)
-  useEffect(() => {
-    mounted.current = true
-  }, [])
 
   return (
     <DropdownMenu>

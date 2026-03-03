@@ -562,6 +562,15 @@ function ToolActivity({ messages }: { messages: UIMessage[] }) {
 }
 
 /** Renders the assistant text from chat messages as formatted markdown. */
+function escapeHtml(text: string): string {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;')
+}
+
 function MarkdownContent({ messages }: { messages: UIMessage[] }) {
   const text = messages
     .filter(m => m.role === 'assistant')
@@ -570,8 +579,8 @@ function MarkdownContent({ messages }: { messages: UIMessage[] }) {
 
   if (!text) return null
 
-  // Basic markdown -> HTML (reusing the pattern from the project)
-  const html = text
+  // Escape HTML first to prevent XSS, then apply markdown transformations
+  const html = escapeHtml(text)
     .replace(/```(\w+)?\n([\s\S]*?)```/g, '<pre class="bg-foreground/5 rounded-lg p-4 my-3 overflow-x-auto text-xs leading-relaxed"><code>$2</code></pre>')
     .replace(/`([^`]+)`/g, '<code class="bg-foreground/5 px-1.5 py-0.5 rounded text-xs">$1</code>')
     .replace(/^### (.+)$/gm, '<h3 class="text-base font-semibold text-text-primary mt-6 mb-2">$1</h3>')

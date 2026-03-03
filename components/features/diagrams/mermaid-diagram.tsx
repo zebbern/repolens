@@ -8,7 +8,7 @@ import { cn } from '@/lib/utils'
 mermaid.initialize({
   startOnLoad: false,
   theme: 'dark',
-  securityLevel: 'loose',
+  securityLevel: 'strict',
   themeVariables: {
     primaryColor: '#3b82f6',
     primaryTextColor: '#f8fafc',

@@ -1,16 +1,25 @@
 import { NextResponse } from 'next/server'
+import { z } from 'zod'
+import { apiKeyRequestSchema } from '@/types/types'
 
-export async function POST(request: Request) {
+const openAIModelsResponseSchema = z.object({
+  data: z.array(z.object({
+    id: z.string(),
+  })),
+})
+
+export async function POST(request: Request): Promise<NextResponse> {
   try {
-    const { apiKey } = await request.json()
+    const body: unknown = await request.json()
+    const parsed = apiKeyRequestSchema.safeParse(body)
 
-    if (!apiKey) {
+    if (!parsed.success) {
       return NextResponse.json({ error: 'API key required' }, { status: 400 })
     }
 
     const response = await fetch('https://api.openai.com/v1/models', {
       headers: {
-        'Authorization': `Bearer ${apiKey}`,
+        'Authorization': `Bearer ${parsed.data.apiKey}`,
       },
     })
 
@@ -18,22 +27,27 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Invalid API key' }, { status: 401 })
     }
 
-    const data = await response.json()
-    
+    const data: unknown = await response.json()
+    const modelsResult = openAIModelsResponseSchema.safeParse(data)
+
+    if (!modelsResult.success) {
+      return NextResponse.json({ error: 'Failed to fetch models' }, { status: 500 })
+    }
+
     // Filter to only include chat models
-    const chatModels = data.data
-      .filter((model: any) => 
+    const chatModels = modelsResult.data.data
+      .filter((model) => 
         model.id.includes('gpt') && 
         !model.id.includes('instruct') &&
         !model.id.includes('vision') &&
         !model.id.includes('realtime') &&
         !model.id.includes('audio')
       )
-      .map((model: any) => ({
+      .map((model) => ({
         id: model.id,
         name: formatModelName(model.id),
       }))
-      .sort((a: any, b: any) => {
+      .sort((a, b) => {
         // Prioritize newer models
         const order = ['gpt-4o', 'gpt-4-turbo', 'gpt-4', 'gpt-3.5']
         const aIndex = order.findIndex(o => a.id.includes(o))

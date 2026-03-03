@@ -1,3 +1,12 @@
+import { z } from 'zod'
+
+// Shared API route schemas
+export const apiKeyRequestSchema = z.object({
+  apiKey: z.string().min(1),
+})
+
+export type ApiKeyRequest = z.infer<typeof apiKeyRequestSchema>
+
 // API Provider types
 export type AIProvider = 'openai' | 'google' | 'anthropic' | 'openrouter'
 
@@ -66,6 +75,17 @@ export interface GeneratedFile {
     type: 'component' | 'page' | 'api' | 'config'
 }
 
+// API model response types (from /api/models/{provider})
+export interface ModelResponseItem {
+  id: string
+  name?: string
+  contextLength?: number
+}
+
+export interface ModelsResponse {
+  models: ModelResponseItem[]
+}
+
 // UI Component types
 export interface ResizableLayoutProps {
     defaultSidebarWidth?: number
@@ -81,6 +101,17 @@ export interface PreviewPanelProps {
 export interface SidebarProps {
     setPreviewUrl: (url: string | null) => void
     className?: string
+}
+
+// Normalized model listing response from provider endpoints
+export interface ModelListItem {
+  id: string
+  name: string
+  contextLength?: number
+}
+
+export interface ModelResponse {
+  models: ModelListItem[]
 }
 
 

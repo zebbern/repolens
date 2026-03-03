@@ -1,7 +1,7 @@
 "use client"
 
 import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from "react"
-import type { AIProvider, APIKeysState, APIKeyConfig, ProviderModel, ProviderInfo } from "@/types/types"
+import type { AIProvider, APIKeysState, APIKeyConfig, ProviderModel, ProviderInfo, ModelResponseItem } from "@/types/types"
 
 // Provider information
 export const PROVIDERS: Record<AIProvider, ProviderInfo> = {
@@ -135,7 +135,7 @@ export function APIKeysProvider({ children }: { children: ReactNode }) {
 
       if (isValid && data.models) {
         // Add provider's models to the list
-        const providerModels: ProviderModel[] = data.models.map((m: any) => ({
+        const providerModels: ProviderModel[] = data.models.map((m: ModelResponseItem) => ({
           id: m.id,
           name: m.name || m.id,
           provider,
@@ -178,7 +178,7 @@ export function APIKeysProvider({ children }: { children: ReactNode }) {
       if (!response.ok) return []
 
       const data = await response.json()
-      const providerModels: ProviderModel[] = (data.models || []).map((m: any) => ({
+      const providerModels: ProviderModel[] = (data.models || []).map((m: ModelResponseItem) => ({
         id: m.id,
         name: m.name || m.id,
         provider,

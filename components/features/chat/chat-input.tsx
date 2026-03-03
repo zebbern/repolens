@@ -1,4 +1,4 @@
-import { type FormEvent, type KeyboardEvent } from 'react'
+import { type KeyboardEvent, useRef } from 'react'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { ArrowUp, Paperclip, Sparkles } from 'lucide-react'
@@ -8,7 +8,7 @@ import { ModelSelector } from './model-selector'
 interface ChatInputProps {
   value: string
   onChange: (value: string) => void
-  onSubmit: (e: FormEvent<HTMLFormElement>) => void
+  onSubmit: () => void
   isLoading?: boolean
   placeholder?: string
   className?: string
@@ -24,17 +24,24 @@ export function ChatInput({
   className,
   disabled = false
 }: ChatInputProps) {
+  const formRef = useRef<HTMLFormElement>(null)
+
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
-      onSubmit(e as any)
+      formRef.current?.requestSubmit()
     }
+  }
+
+  const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault()
+    onSubmit()
   }
 
   const isDisabled = isLoading || disabled
 
   return (
-    <form onSubmit={onSubmit} className={cn('relative rounded-lg border border-interactive-border bg-surface', disabled && 'opacity-60', className)}>
+    <form ref={formRef} onSubmit={handleSubmit} className={cn('relative rounded-lg border border-interactive-border bg-surface', disabled && 'opacity-60', className)}>
       <Textarea
         value={value}
         onChange={(e) => onChange(e.target.value)}

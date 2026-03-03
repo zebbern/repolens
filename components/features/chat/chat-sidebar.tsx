@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, type FormEvent, useMemo } from "react"
+import { useState, useMemo } from "react"
 import { useChat } from "@ai-sdk/react"
 import { DefaultChatTransport } from "ai"
 import { Button } from "@/components/ui/button"
@@ -64,8 +64,7 @@ export function ChatSidebar({ className }: { className?: string }) {
 
   const isLoading = status === 'streaming' || status === 'submitted'
 
-  const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
-    e.preventDefault()
+  const handleSubmit = async () => {
     if (!input.trim() || isLoading || !hasValidKey || !transport) return
 
     const currentInput = input.trim()

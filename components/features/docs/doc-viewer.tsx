@@ -305,11 +305,14 @@ export function DocViewer({ className }: DocViewerProps) {
           {generatedDocs.map(doc => {
             const preset = DOC_PRESETS.find(p => p.id === doc.type)
             return (
-              <button
+              <div
                 key={doc.id}
+                role="button"
+                tabIndex={0}
                 onClick={() => { setActiveDocId(doc.id); setShowNewDoc(false) }}
+                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setActiveDocId(doc.id); setShowNewDoc(false) } }}
                 className={cn(
-                  'w-full flex items-start gap-2 px-3 py-2 text-left hover:bg-foreground/5 transition-colors group',
+                  'w-full flex items-start gap-2 px-3 py-2 text-left hover:bg-foreground/5 transition-colors group cursor-pointer',
                   activeDocId === doc.id && 'bg-foreground/[0.07]'
                 )}
               >
@@ -324,7 +327,7 @@ export function DocViewer({ className }: DocViewerProps) {
                 >
                   <Trash2 className="h-3 w-3" />
                 </button>
-              </button>
+              </div>
             )
           })}
         </div>

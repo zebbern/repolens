@@ -77,7 +77,11 @@ export const MermaidDiagram = forwardRef<MermaidDiagramHandle, MermaidDiagramPro
         }
       }
 
-      renderDiagram()
+      // Debounce: wait 300ms after last chart change before attempting render.
+      // This prevents flash of error states during streaming when chart prop
+      // updates rapidly with incomplete mermaid syntax.
+      const timer = setTimeout(renderDiagram, 300)
+      return () => clearTimeout(timer)
     }, [chart])
 
     // Attach click handlers to Mermaid nodes after render

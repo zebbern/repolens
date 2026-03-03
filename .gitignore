@@ -11,9 +11,7 @@
 /build
 /test
 /test-screenshots
-.tasks
-*.log
-*.txt
+
 
 # debug
 npm-debug.log*

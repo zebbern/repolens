@@ -19,7 +19,7 @@ const docsRequestSchema = z.object({
     structure: z.string(),
   }),
   fileContents: z.record(z.string(), z.string()),
-  targetFile: z.string().optional(),
+  targetFile: z.string().nullish(),
 })
 
 /**

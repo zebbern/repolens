@@ -1,3 +1,0 @@
-   [1m[38;2;173;127;168mÔû▓ Next.js 15.2.6[39m[22m
-
- [37m[1m [22m[39m Creating an optimized production build ...

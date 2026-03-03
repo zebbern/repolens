@@ -64,7 +64,7 @@ export function ChatSidebar({ className }: { className?: string }) {
 
   const isLoading = status === 'streaming' || status === 'submitted'
 
-  const handleSubmit = async () => {
+  const handleSubmit = () => {
     if (!input.trim() || isLoading || !hasValidKey || !transport) return
 
     const currentInput = input.trim()

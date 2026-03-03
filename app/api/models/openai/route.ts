@@ -5,7 +5,7 @@ import { apiKeyRequestSchema } from '@/types/types'
 const openAIModelsResponseSchema = z.object({
   data: z.array(z.object({
     id: z.string(),
-  })),
+  })).default([]),
 })
 
 export async function POST(request: Request): Promise<NextResponse> {

@@ -103,15 +103,4 @@ export interface SidebarProps {
     className?: string
 }
 
-// Normalized model listing response from provider endpoints
-export interface ModelListItem {
-  id: string
-  name: string
-  contextLength?: number
-}
-
-export interface ModelResponse {
-  models: ModelListItem[]
-}
-
 

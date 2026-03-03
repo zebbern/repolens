@@ -3,9 +3,12 @@
 import ReactMarkdown, { type Components } from "react-markdown"
 import remarkGfm from "remark-gfm"
 import { useTheme } from "next-themes"
-import { useState, useEffect, memo } from "react"
+import { useState, useEffect, useRef, useCallback, memo } from "react"
 import { cn } from "@/lib/utils"
 import type { BundledLanguage, BundledTheme, HighlighterGeneric } from "shiki"
+import mermaid from "mermaid"
+import { MermaidDiagram, type MermaidDiagramHandle } from "@/components/features/diagrams/mermaid-diagram"
+import { Download } from "lucide-react"
 
 // ---------------------------------------------------------------------------
 // Singleton Shiki highlighter (mirrors pattern in use-syntax-highlighting.ts)
@@ -153,6 +156,95 @@ function InlineCode({ children }: { children: React.ReactNode }) {
 }
 
 // ---------------------------------------------------------------------------
+// Mermaid diagram block — theme-aware wrapper for MermaidDiagram
+// ---------------------------------------------------------------------------
+
+function MermaidDiagramBlock({ children }: { children: string }) {
+  const { resolvedTheme } = useTheme()
+  const mermaidRef = useRef<MermaidDiagramHandle>(null)
+
+  // Re-initialize mermaid with correct theme variables when theme changes
+  useEffect(() => {
+    const isDark = resolvedTheme === "dark"
+    mermaid.initialize({
+      startOnLoad: false,
+      theme: isDark ? "dark" : "default",
+      securityLevel: "strict",
+      themeVariables: isDark
+        ? {
+            primaryColor: "#3b82f6",
+            primaryTextColor: "#f8fafc",
+            primaryBorderColor: "#60a5fa",
+            lineColor: "#64748b",
+            secondaryColor: "#1e293b",
+            tertiaryColor: "#0f172a",
+            background: "#0a0a0a",
+            mainBkg: "#1e293b",
+            nodeBorder: "#475569",
+            clusterBkg: "#1e293b",
+            titleColor: "#f8fafc",
+            edgeLabelBackground: "#1e293b",
+          }
+        : {
+            primaryColor: "#3b82f6",
+            primaryTextColor: "#1e293b",
+            primaryBorderColor: "#3b82f6",
+            lineColor: "#94a3b8",
+            secondaryColor: "#f1f5f9",
+            tertiaryColor: "#e2e8f0",
+            background: "#ffffff",
+            mainBkg: "#f1f5f9",
+            nodeBorder: "#94a3b8",
+            clusterBkg: "#f8fafc",
+            titleColor: "#1e293b",
+            edgeLabelBackground: "#f8fafc",
+          },
+      flowchart: {
+        htmlLabels: true,
+        curve: "basis",
+      },
+    })
+  }, [resolvedTheme])
+
+  const handleDownloadSvg = useCallback(() => {
+    const svgEl = mermaidRef.current?.getSvgElement()
+    if (!svgEl) return
+    const blob = new Blob(
+      [new XMLSerializer().serializeToString(svgEl)],
+      { type: "image/svg+xml" },
+    )
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement("a")
+    a.href = url
+    a.download = "mermaid-diagram.svg"
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+  }, [])
+
+  return (
+    <div className="relative group my-3 rounded-lg border border-foreground/[0.06] overflow-hidden">
+      <div className="absolute top-0 right-0 flex items-center gap-1 z-10">
+        <button
+          onClick={handleDownloadSvg}
+          className="opacity-0 group-hover:opacity-100 transition-opacity px-1.5 py-1 text-text-muted hover:text-text-primary bg-foreground/5 hover:bg-foreground/10"
+          aria-label="Download SVG"
+        >
+          <Download className="h-3 w-3" />
+        </button>
+        <div className="px-2 py-1 text-[10px] text-text-muted bg-foreground/5 rounded-bl font-mono">
+          mermaid
+        </div>
+      </div>
+      <div className="p-4">
+        <MermaidDiagram ref={mermaidRef} chart={children} />
+      </div>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // Stable props for ReactMarkdown — defined at module level to prevent
 // cascading re-renders during streaming when these objects are re-created.
 // ---------------------------------------------------------------------------
@@ -162,6 +254,15 @@ const REMARK_PLUGINS = [remarkGfm]
 const MARKDOWN_COMPONENTS: Components = {
   code({ className: codeClassName, children }) {
     const match = /language-(\w+)/.exec(codeClassName || "")
+
+    if (match?.[1] === "mermaid") {
+      return (
+        <MermaidDiagramBlock>
+          {String(children).replace(/\n$/, "")}
+        </MermaidDiagramBlock>
+      )
+    }
+
     const isBlock = Boolean(match || codeClassName)
 
     if (isBlock) {

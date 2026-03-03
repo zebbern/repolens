@@ -47,8 +47,8 @@ export async function POST(request: Request): Promise<NextResponse> {
         contextLength: model.inputTokenLimit,
       }))
       .sort((a, b) => {
-        // Prioritize flash and pro models
-        const order = ['gemini-1.5-pro', 'gemini-1.5-flash', 'gemini-pro']
+        // Prioritize newest models first
+        const order = ['gemini-2.5-pro', 'gemini-2.5-flash', 'gemini-1.5-pro', 'gemini-1.5-flash', 'gemini-pro']
         const aIndex = order.findIndex(o => a.id.includes(o))
         const bIndex = order.findIndex(o => b.id.includes(o))
         return (aIndex === -1 ? 99 : aIndex) - (bIndex === -1 ? 99 : bIndex)

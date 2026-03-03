@@ -3,6 +3,7 @@ import { Copy, Check } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import { buildSearchRegex } from "@/lib/code/code-index"
+import { useSyntaxHighlighting, type SyntaxToken } from "./hooks/use-syntax-highlighting"
 import type { SearchOptions } from "./types"
 
 interface CodeEditorProps {
@@ -14,13 +15,100 @@ interface CodeEditorProps {
   onHighlightComplete?: () => void
 }
 
-/** Code viewer with line numbers, search highlighting, and copy support. */
+// ---------------------------------------------------------------------------
+// Merge syntax tokens with search-match ranges for a single line.
+// Splits syntax tokens at match boundaries so search highlights overlay
+// on top of syntax colours without disrupting inline flow.
+// ---------------------------------------------------------------------------
+
+interface MatchRange {
+  start: number
+  end: number
+}
+
+function getMatchRanges(line: string, regex: RegExp): MatchRange[] {
+  const ranges: MatchRange[] = []
+  regex.lastIndex = 0
+  let m: RegExpExecArray | null
+  while ((m = regex.exec(line)) !== null) {
+    ranges.push({ start: m.index, end: m.index + m[0].length })
+    if (regex.lastIndex === m.index) regex.lastIndex++ // zero-length guard
+  }
+  return ranges
+}
+
+/** Split syntax tokens at search-match boundaries and tag matched spans. */
+function mergeTokensWithMatches(
+  tokens: SyntaxToken[],
+  matchRanges: MatchRange[],
+): { content: string; color?: string; isMatch: boolean }[] {
+  if (matchRanges.length === 0) {
+    return tokens.map((t) => ({ ...t, isMatch: false }))
+  }
+
+  const result: { content: string; color?: string; isMatch: boolean }[] = []
+  let charOffset = 0
+
+  for (const token of tokens) {
+    const tokenStart = charOffset
+    const tokenEnd = charOffset + token.content.length
+    let cursor = tokenStart
+
+    for (const range of matchRanges) {
+      // Skip ranges entirely before this token
+      if (range.end <= cursor) continue
+      // Stop if range starts at or after token end
+      if (range.start >= tokenEnd) break
+
+      const matchStart = Math.max(range.start, cursor)
+      const matchEnd = Math.min(range.end, tokenEnd)
+
+      // Text before the match (within this token)
+      if (matchStart > cursor) {
+        result.push({
+          content: token.content.slice(cursor - tokenStart, matchStart - tokenStart),
+          color: token.color,
+          isMatch: false,
+        })
+      }
+
+      // The matched slice
+      result.push({
+        content: token.content.slice(matchStart - tokenStart, matchEnd - tokenStart),
+        color: token.color,
+        isMatch: true,
+      })
+
+      cursor = matchEnd
+    }
+
+    // Remaining text after all matches in this token
+    if (cursor < tokenEnd) {
+      result.push({
+        content: token.content.slice(cursor - tokenStart),
+        color: token.color,
+        isMatch: false,
+      })
+    }
+
+    charOffset = tokenEnd
+  }
+
+  return result
+}
+
+// ---------------------------------------------------------------------------
+// Component
+// ---------------------------------------------------------------------------
+
+/** Code viewer with syntax highlighting, line numbers, search highlighting, and copy support. */
 const CodeEditor = React.forwardRef<HTMLDivElement, CodeEditorProps>(
   ({ content, language, highlightedLine, searchQuery, searchOptions, onHighlightComplete }, ref) => {
     const [copied, setCopied] = useState(false)
     const containerRef = useRef<HTMLDivElement>(null)
     const highlightedRowRef = useRef<HTMLTableRowElement>(null)
     const lines = content.split('\n')
+    const syntaxLines = useSyntaxHighlighting(content, language)
 
     // Build match-count-per-line map for gutter indicators
     const lineMatchCounts = useMemo(() => {
@@ -28,7 +116,8 @@ const CodeEditor = React.forwardRef<HTMLDivElement, CodeEditorProps>(
       if (!searchQuery) return map
       const pattern = buildSearchRegex(searchQuery, searchOptions || { caseSensitive: false, regex: false, wholeWord: false })
       if (!pattern) return map
-      lines.forEach((line, idx) => {
+      const splitLines = content.split('\n')
+      splitLines.forEach((line, idx) => {
         pattern.lastIndex = 0
         let count = 0
         while (pattern.exec(line) !== null) {
@@ -38,7 +127,16 @@ const CodeEditor = React.forwardRef<HTMLDivElement, CodeEditorProps>(
         if (count > 0) map.set(idx + 1, count)
       })
       return map
-    }, [searchQuery, searchOptions, lines])
+    }, [searchQuery, searchOptions, content])
+
+    // Pre-compute the search regex once (for merging into tokens)
+    const searchRegex = useMemo(() => {
+      if (!searchQuery) return null
+      return buildSearchRegex(
+        searchQuery,
+        searchOptions || { caseSensitive: false, regex: false, wholeWord: false },
+      )
+    }, [searchQuery, searchOptions])
 
     // Scroll to highlighted line
     useEffect(() => {
@@ -68,28 +166,34 @@ const CodeEditor = React.forwardRef<HTMLDivElement, CodeEditorProps>(
       setTimeout(() => setCopied(false), 2000)
     }
 
-    // Highlight matches in a line - uses shared buildSearchRegex
-    const highlightMatches = (line: string, _lineNumber: number) => {
-      if (!searchQuery) return line || ' '
+    /** Render a single line's tokens (syntax-highlighted, with optional search highlights merged in). */
+    const renderLine = (lineIndex: number) => {
+      const tokens = syntaxLines[lineIndex]
+      if (!tokens) return " "
 
-      const searchPattern = buildSearchRegex(
-        searchQuery,
-        searchOptions || { caseSensitive: false, regex: false, wholeWord: false },
-        true, // capture group for .split()
-      )
-      if (!searchPattern) return line || ' '
+      // If no active search, render syntax tokens directly
+      if (!searchRegex) {
+        return tokens.map((tok, i) => (
+          <span key={i} style={tok.color ? { color: tok.color } : undefined}>
+            {tok.content}
+          </span>
+        ))
+      }
 
-      const parts = line.split(searchPattern)
+      // Merge search matches into the token stream
+      const rawLine = lines[lineIndex] ?? ""
+      const matchRanges = getMatchRanges(rawLine, searchRegex)
+      const merged = mergeTokensWithMatches(tokens, matchRanges)
 
-      if (parts.length === 1) return line || ' '
-
-      return parts.map((part, i) => {
-        searchPattern.lastIndex = 0
-        if (searchPattern.test(part)) {
-          return <span key={i} className="bg-code-highlight-bg text-code-highlight-text">{part}</span>
-        }
-        return <span key={i}>{part}</span>
-      })
+      return merged.map((tok, i) => (
+        <span
+          key={i}
+          className={tok.isMatch ? "bg-code-highlight-bg text-code-highlight-text" : undefined}
+          style={tok.color && !tok.isMatch ? { color: tok.color } : undefined}
+        >
+          {tok.content}
+        </span>
+      ))
     }
 
     return (
@@ -138,7 +242,7 @@ const CodeEditor = React.forwardRef<HTMLDivElement, CodeEditorProps>(
                     </td>
                     {/* Code */}
                     <td className="text-text-primary pl-4 whitespace-pre align-top">
-                      {highlightMatches(line, lineNum)}
+                      {renderLine(i)}
                     </td>
                   </tr>
                 )

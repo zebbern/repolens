@@ -1,10 +1,10 @@
 "use client"
 
-import React, { useState, useEffect, useCallback, useRef } from "react"
+import React, { useState, useEffect, useCallback, useRef, useMemo } from "react"
 import {
   Search, X, File, Folder, ChevronRight,
   Code2, FileText, Loader2, Download,
-  Undo2, FolderDown
+  Undo2, FolderDown, ListTree
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -22,10 +22,14 @@ import { useFileOperations } from "./hooks/use-file-operations"
 import { useSearch } from "./hooks/use-search"
 import { useReplace } from "./hooks/use-replace"
 import { useDownloads } from "./hooks/use-downloads"
-import { FileTreeNode } from "./file-tree-node"
+import { FileTreeNode, type FileIssueCounts } from "./file-tree-node"
+import { scanIssues } from "@/lib/code/issue-scanner"
+import { analyzeCodebase } from "@/lib/code/import-parser"
 import { CodeEditor } from "./code-editor"
 import { SearchResultItem } from "./search-result-item"
 import { SearchSidebar } from "./search-sidebar"
+import { SymbolOutline } from "./symbol-outline"
+import { useSymbolExtraction } from "./hooks/use-symbol-extraction"
 
 export function CodeBrowser({ navigateToFile, onNavigateComplete }: CodeBrowserProps) {
   const { repo, files, codeIndex, updateCodeIndex, indexingProgress: sharedIndexingProgress, modifiedContents, setModifiedContents, getFileContent } = useRepository()
@@ -141,6 +145,27 @@ export function CodeBrowser({ navigateToFile, onNavigateComplete }: CodeBrowserP
     getFileContent,
     repo,
   })
+
+  // Symbol extraction for outline sidebar
+  const outlineSymbols = useSymbolExtraction(activeTab?.content, activeTab?.language)
+
+  // Compute lightweight issue-count-by-file map for tree badges
+  const issueCountByFile = useMemo<Map<string, FileIssueCounts>>(() => {
+    const map = new Map<string, FileIssueCounts>()
+    if (codeIndex.totalFiles === 0) return map
+    try {
+      const analysis = analyzeCodebase(codeIndex)
+      const results = scanIssues(codeIndex, analysis)
+      for (const issue of results.issues) {
+        const existing = map.get(issue.file) ?? { critical: 0, warning: 0, info: 0 }
+        existing[issue.severity] += 1
+        map.set(issue.file, existing)
+      }
+    } catch {
+      // Scanner failure should not break the tree
+    }
+    return map
+  }, [codeIndex])
 
   // Debounce search query
   useEffect(() => {
@@ -321,6 +346,20 @@ export function CodeBrowser({ navigateToFile, onNavigateComplete }: CodeBrowserP
         >
           <Search className="h-5 w-5" />
         </Button>
+        <Button
+          variant="ghost"
+          size="icon"
+          className={cn(
+            "h-10 w-10",
+            sidebarMode === 'outline' 
+              ? "text-text-primary bg-foreground/10" 
+              : "text-text-muted hover:text-text-primary"
+          )}
+          onClick={() => setSidebarMode('outline')}
+          title="Outline"
+        >
+          <ListTree className="h-5 w-5" />
+        </Button>
       </div>
       
       {/* Sidebar */}
@@ -360,6 +399,8 @@ export function CodeBrowser({ navigateToFile, onNavigateComplete }: CodeBrowserP
                   onDownloadFolder={downloadExplorerFolder}
                   activeFilePath={activeTabPath}
                   depth={0}
+                  codeIndex={codeIndex}
+                  issueCountByFile={issueCountByFile}
                 />
               </div>
             </div>
@@ -414,7 +455,7 @@ export function CodeBrowser({ navigateToFile, onNavigateComplete }: CodeBrowserP
               </div>
             )}
           </>
-        ) : (
+        ) : sidebarMode === 'search' ? (
           <SearchSidebar
             searchInputRef={searchInputRef}
             searchQuery={searchQuery}
@@ -443,6 +484,16 @@ export function CodeBrowser({ navigateToFile, onNavigateComplete }: CodeBrowserP
             replaceAllInAllFiles={replaceAllInAllFiles}
             expandAllMatches={expandAllMatches}
             setExpandAllMatches={setExpandAllMatches}
+          />
+        ) : (
+          <SymbolOutline
+            symbols={outlineSymbols}
+            onSymbolClick={(line) => {
+              if (activeTab) {
+                setHighlightedLine({ path: activeTab.path, line })
+              }
+            }}
+            activeSymbol={highlightedLine?.path === activeTab?.path ? highlightedLine?.line : undefined}
           />
         )}
       </div>
@@ -493,19 +544,37 @@ export function CodeBrowser({ navigateToFile, onNavigateComplete }: CodeBrowserP
         {activeTab && (
           <div className="h-6 flex items-center px-4 bg-background border-b border-foreground/[0.06]">
             <div className="flex items-center gap-1 text-xs text-text-muted">
-              {activeTab.path.split('/').map((part, i, arr) => (
-                <span key={i} className="flex items-center gap-1">
-                  {i > 0 && <ChevronRight className="h-3 w-3" />}
-                  <button className={cn(
-                    "hover:text-text-primary hover:underline",
-                    i === arr.length - 1 ? "text-text-primary" : ""
-                  )}>
-                    {i === 0 ? <Folder className="h-3 w-3 inline mr-1" /> : null}
-                    {i === arr.length - 1 ? <File className="h-3 w-3 inline mr-1" /> : null}
-                    {part}
-                  </button>
-                </span>
-              ))}
+              {activeTab.path.split('/').map((part, i, arr) => {
+                const isFile = i === arr.length - 1
+                return (
+                  <span key={i} className="flex items-center gap-1">
+                    {i > 0 && <ChevronRight className="h-3 w-3" />}
+                    {isFile ? (
+                      <span className="text-text-primary">
+                        <File className="h-3 w-3 inline mr-1" />
+                        {part}
+                      </span>
+                    ) : (
+                      <button
+                        className="hover:text-text-primary"
+                        onClick={() => {
+                          const segments = arr.slice(0, i + 1)
+                          for (let s = 1; s <= segments.length; s++) {
+                            const folderPath = segments.slice(0, s).join('/')
+                            if (!expandedFolders.has(folderPath)) {
+                              toggleFolder(folderPath)
+                            }
+                          }
+                          setSidebarMode('explorer')
+                        }}
+                      >
+                        {i === 0 ? <Folder className="h-3 w-3 inline mr-1" /> : null}
+                        {part}
+                      </button>
+                    )}
+                  </span>
+                )
+              })}
             </div>
           </div>
         )}

@@ -66,6 +66,7 @@
     "react-dom": "^19",
     "react-hook-form": "^7.60.0",
     "recharts": "2.15.4",
+    "shiki": "^4.0.1",
     "sonner": "^1.7.4",
     "tailwind-merge": "^2.5.5",
     "tailwindcss-animate": "^1.0.7",

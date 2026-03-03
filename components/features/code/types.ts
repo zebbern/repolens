@@ -11,7 +11,7 @@ export interface OpenTab {
   isModified: boolean
 }
 
-export type SidebarMode = 'explorer' | 'search'
+export type SidebarMode = 'explorer' | 'search' | 'outline'
 
 export interface CodeBrowserProps {
   navigateToFile?: string | null

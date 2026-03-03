@@ -172,20 +172,7 @@ describe('fetchRepoZipball', () => {
     ).rejects.toThrow('Zipball download failed: 500')
   })
 
-  it('passes the Authorization header when a token is provided', async () => {
-    const zipBuffer = await createMockZip({ 'file.ts': 'x' })
-    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
-      new Response(zipBuffer, { status: 200 }),
-    )
-
-    await fetchRepoZipball('owner', 'repo', 'main', { token: 'ghp_test123' })
-
-    const [, init] = fetchSpy.mock.calls[0]
-    const headers = init?.headers as Record<string, string>
-    expect(headers['Authorization']).toBe('Bearer ghp_test123')
-  })
-
-  it('constructs the correct GitHub API URL', async () => {
+  it('sends a POST to the proxy API with owner, repo, ref in body', async () => {
     const zipBuffer = await createMockZip({ 'file.ts': 'x' })
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
       new Response(zipBuffer, { status: 200 }),
@@ -193,7 +180,10 @@ describe('fetchRepoZipball', () => {
 
     await fetchRepoZipball('acme', 'project', 'v2.0')
 
-    const [url] = fetchSpy.mock.calls[0]
-    expect(url).toBe('https://api.github.com/repos/acme/project/zipball/v2.0')
+    const [url, init] = fetchSpy.mock.calls[0]
+    expect(url).toBe('/api/github/zipball')
+    expect(init?.method).toBe('POST')
+    const body = JSON.parse(init?.body as string)
+    expect(body).toEqual({ owner: 'acme', repo: 'project', ref: 'v2.0' })
   })
 })

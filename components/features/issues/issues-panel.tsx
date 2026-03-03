@@ -53,8 +53,9 @@ export function IssuesPanel({ codeIndex, onNavigateToFile }: IssuesPanelProps) {
     return (
       <div className="flex items-center justify-center h-full">
         <div className="flex flex-col items-center gap-3 text-text-muted">
-          <Loader2 className="h-6 w-6 animate-spin" />
-          <p className="text-sm">Waiting for code index...</p>
+          <Shield className="h-6 w-6" />
+          <p className="text-sm font-medium">Load a repository to see code issues</p>
+          <p className="text-xs text-center max-w-[240px]">Enter a GitHub repository URL to analyze code quality</p>
         </div>
       </div>
     )

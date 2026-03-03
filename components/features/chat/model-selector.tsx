@@ -7,7 +7,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger 
 } from '@/components/ui/dropdown-menu'
-import { BarChart, ChevronDown, Check, Settings } from 'lucide-react'
+import { BrainCircuit, ChevronDown, Check, Settings } from 'lucide-react'
 import { useAPIKeys } from '@/providers'
 import { PROVIDERS } from '@/providers/api-keys-provider'
 import { cn } from '@/lib/utils'
@@ -44,7 +44,7 @@ export function ModelSelector({ className, onOpenSettings }: ModelSelectorProps)
             className
           )}
         >
-          <BarChart className={cn(
+          <BrainCircuit className={cn(
             "h-4 w-4",
             hasModels ? "text-status-success" : "text-text-muted"
           )} />

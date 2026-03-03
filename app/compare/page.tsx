@@ -2,6 +2,8 @@
 
 import { useEffect } from "react"
 import { useSearchParams } from "next/navigation"
+import Link from "next/link"
+import { ArrowLeft } from "lucide-react"
 import { Header } from "@/components/layout/header"
 import { RepoInputBar } from "@/components/features/compare/repo-input-bar"
 import { LoadedReposList } from "@/components/features/compare/loaded-repos-list"
@@ -33,6 +35,13 @@ export default function ComparePage() {
       <Header />
       <main className="flex-1 overflow-y-auto px-4 py-6 md:px-8">
         <div className="mx-auto max-w-5xl space-y-6">
+          <Link
+            href="/"
+            className="inline-flex items-center gap-1 text-sm text-text-secondary hover:text-text-primary transition-colors"
+          >
+            <ArrowLeft className="h-4 w-4" />
+            Back
+          </Link>
           <div>
             <h1 className="text-xl font-semibold">Compare Repositories</h1>
             <p className="mt-1 text-sm text-text-secondary">

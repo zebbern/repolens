@@ -295,8 +295,8 @@ export function PreviewPanel({ className }: { className?: string }) {
                   <div className="flex h-12 w-12 items-center justify-center rounded-full bg-foreground/5 border border-foreground/10">
                     <Github className="h-6 w-6 text-text-secondary" />
                   </div>
-                  <h2 className="text-lg font-medium text-text-primary">Connect a Repository</h2>
-                  <p className="text-sm text-text-secondary text-center">Enter a GitHub repository URL to get started</p>
+                  <h2 className="text-lg font-medium text-text-primary">Explore Any GitHub Repository</h2>
+                  <p className="text-sm text-text-secondary text-center">Paste a GitHub URL to get AI-powered code analysis, documentation, and insights instantly</p>
                 </div>
                 <div className="w-full space-y-3">
                   <Input
@@ -324,6 +324,9 @@ export function PreviewPanel({ className }: { className?: string }) {
                       "Connect Repository"
                     )}
                   </Button>
+                  <p className="text-xs text-text-muted text-center">
+                    Tip: Add <span className="font-medium text-text-secondary">m</span> before github.com — e.g. <span className="font-medium text-text-secondary">mgithub.com/owner/repo</span>
+                  </p>
                 </div>
               </div>
             </div>
@@ -331,13 +334,15 @@ export function PreviewPanel({ className }: { className?: string }) {
         ) : activeTab === "issues" ? (
           codeIndex && codeIndex.totalFiles > 0 ? (
             <IssuesPanel codeIndex={codeIndex} onNavigateToFile={handleNavigateToFile} />
-          ) : (
+          ) : repo ? (
             <div className="flex items-center justify-center h-full">
               <div className="flex flex-col items-center gap-3 text-text-muted">
                 <Loader2 className="h-6 w-6 animate-spin" />
                 <p className="text-sm">Indexing codebase...</p>
               </div>
             </div>
+          ) : (
+            <IssuesPanel codeIndex={codeIndex} onNavigateToFile={handleNavigateToFile} />
           )
         ) : activeTab === "docs" ? (
           <DocViewer />

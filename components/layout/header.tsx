@@ -3,7 +3,8 @@
 import { useEffect, useState } from "react"
 import { useSession } from "next-auth/react"
 import { Button } from "@/components/ui/button"
-import { Code2, GitCompareArrows, GitFork, Github, Settings } from "lucide-react"
+import { GitCompareArrows, GitFork, Github, Settings } from "lucide-react"
+import Image from "next/image"
 import Link from "next/link"
 import { SettingsModal } from "@/components/features/settings/settings-modal"
 import { ThemeToggle } from "@/components/theme-toggle"
@@ -36,7 +37,7 @@ export function Header({ className }: HeaderProps) {
     <>
       <header className={`flex h-11 items-center bg-primary-background border-b border-foreground/[0.06] px-4 justify-between ${className || ''}`}>
         <div className="flex items-center gap-2">
-          <Code2 className="h-5 w-5 text-text-primary" />
+          <Image src="/repolens.svg" alt="RepoLens" width={20} height={20} className="dark:invert" />
           <Link
             href="/compare"
             className="flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-text-secondary hover:text-text-primary hover:bg-foreground/5 transition-colors"

@@ -244,7 +244,7 @@ function compactToolMessage(msg: ToolModelMessage, limitMultiplier: number): Too
 
       // Default truncation for all other tools
       return truncateToolOutput(part, output, toolName, limitMultiplier)
-    }),
+    }) as ToolModelMessage['content'],
   }
 }
 

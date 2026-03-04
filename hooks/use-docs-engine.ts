@@ -43,6 +43,7 @@ export function useDocsEngine() {
     customPrompt: '',
   })
   const isSubmittingRef = useRef(false)
+  const hasSavedRef = useRef(false)
   const sendTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // Cleanup timer on unmount
@@ -60,6 +61,22 @@ export function useDocsEngine() {
       status === 'ready' &&
       messages.length > 0
     ) {
+      // Guard: skip intermediate ready transitions during multi-step tool calling
+      const lastMsg = messages[messages.length - 1]
+      const hasPendingToolCalls =
+        lastMsg?.role === 'assistant' &&
+        Array.isArray(lastMsg?.parts) &&
+        lastMsg.parts.some(
+          (p: any) => p.type === 'tool-invocation' && p.state !== 'result',
+        )
+      if (hasPendingToolCalls) return
+
+      // Only save once per generation cycle
+      if (hasSavedRef.current) {
+        prevStatus.current = status
+        return
+      }
+      hasSavedRef.current = true
       isSubmittingRef.current = false
       const ctx = genContextRef.current
       const preset = DOC_PRESETS.find(p => p.id === ctx.docType)
@@ -118,6 +135,7 @@ export function useDocsEngine() {
     // Let React flush setMessages([]) before sending
     if (sendTimerRef.current) clearTimeout(sendTimerRef.current)
     isSubmittingRef.current = true
+    hasSavedRef.current = false
     sendTimerRef.current = setTimeout(() => {
       sendMessage({ text: prompt })
       isSubmittingRef.current = false
@@ -148,6 +166,7 @@ export function useDocsEngine() {
 
     if (sendTimerRef.current) clearTimeout(sendTimerRef.current)
     isSubmittingRef.current = true
+    hasSavedRef.current = false
     sendTimerRef.current = setTimeout(() => {
       sendMessage({ text: prompt })
       isSubmittingRef.current = false

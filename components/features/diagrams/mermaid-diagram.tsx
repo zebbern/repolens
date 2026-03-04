@@ -130,19 +130,52 @@ interface MermaidDiagramProps {
 
 /**
  * Sanitize mermaid source to fix common AI-generated syntax issues.
- * Primary fix: quote node labels that contain forward slashes to prevent
- * mermaid interpreting `[/text]` as trapezoid syntax.
+ * Handles markdown fencing, special-char labels, invalid arrows, HTML tags,
+ * and other patterns that frequently appear in LLM output.
  */
 function sanitizeMermaidSource(source: string): string {
-  return source.replace(
-    // Match node patterns: ID[label] where label contains / and is not already quoted
-    /(\w+)\[([^\]"]*\/[^\]"]*)](?!\()/g,
+  let sanitized = source.trim()
+
+  // 1. Remove markdown fencing that AI might include
+  sanitized = sanitized.replace(/^```(?:mermaid)?\s*\n?/i, '').replace(/\n?```\s*$/i, '')
+
+  // 2. Fix labels containing special characters that break Mermaid
+  //    NodeId[Label with (parens) or <brackets>] → NodeId["Label..."]
+  sanitized = sanitized.replace(
+    /(\w+)\[([^\]"]*[<>(){}][^\]"]*)\]/g,
+    (_, id: string, label: string) => `${id}["${label.replace(/"/g, '#quot;')}"]`,
+  )
+
+  // 3. Fix labels with slashes (original pattern, improved)
+  sanitized = sanitized.replace(
+    /(\w+)\[([^\]"]*\/[^\]"]*)\](?!\()/g,
     (_match, id: string, content: string) => {
-      // Don't modify intentional trapezoid syntax: [/ ... \]
       if (content.startsWith('/') && content.endsWith('\\')) return _match
       return `${id}["${content}"]`
     },
   )
+
+  // 4. Fix double-quoted labels that contain unescaped inner quotes
+  sanitized = sanitized.replace(
+    /\["([^"]*)"([^"]+)"([^"]*)"\]/g,
+    (_, before: string, middle: string, after: string) => `["${before}${middle}${after}"]`,
+  )
+
+  // 5. Replace HTML-like tags that AI sometimes generates in node labels
+  sanitized = sanitized.replace(/<br\s*\/?>/gi, '\\n')
+  sanitized = sanitized.replace(/<\/?[a-z][a-z0-9]*(?:\s[^>]*)?>/gi, '')
+
+  // 6. Fix invalid arrow syntax: "- ->" → "-->" and "<- -" → "<--"
+  sanitized = sanitized.replace(/- ->/g, '-->')
+  sanitized = sanitized.replace(/<- -/g, '<--')
+
+  // 7. Normalize line endings
+  sanitized = sanitized.replace(/\r\n/g, '\n')
+
+  // 8. Collapse runs of 3+ blank lines to avoid parse errors
+  sanitized = sanitized.replace(/\n{3,}/g, '\n\n')
+
+  return sanitized
 }
 
 export function MermaidDiagram({ chart, className, onNodeClick, onShowRawCode, ref }: MermaidDiagramProps & { ref?: Ref<MermaidDiagramHandle> }) {

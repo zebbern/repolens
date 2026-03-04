@@ -4,6 +4,7 @@ import { useState } from "react"
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
@@ -28,6 +29,9 @@ export function SettingsModal({ open, onOpenChange }: SettingsModalProps) {
       <DialogContent className="sm:max-w-[500px] bg-popover border-foreground/10">
         <DialogHeader>
           <DialogTitle className="text-text-primary">API Settings</DialogTitle>
+          <DialogDescription className="sr-only">
+            Configure API keys for AI providers
+          </DialogDescription>
         </DialogHeader>
 
         <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as AIProvider)}>

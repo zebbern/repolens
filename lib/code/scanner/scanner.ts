@@ -9,6 +9,7 @@ import { SKIP_VENDORED, detectLanguages } from './constants'
 import { SECURITY_RULES } from './rules-security'
 import { SECURITY_LANG_RULES } from './rules-security-lang'
 import { BAD_PRACTICE_RULES, RELIABILITY_RULES } from './rules-quality'
+import { FRAMEWORK_RULES } from './rules-framework'
 import { COMPOSITE_RULES, scanCompositeRules } from './rules-composite'
 import { scanStructuralIssues } from './structural-scanner'
 import { classifyLine, computeBlockCommentLines } from './context-classifier'
@@ -20,6 +21,7 @@ const RULES: ScanRule[] = [
   ...SECURITY_LANG_RULES,
   ...BAD_PRACTICE_RULES,
   ...RELIABILITY_RULES,
+  ...FRAMEWORK_RULES,
 ]
 
 // Rule IDs related to secrets/passwords (used for entropy & type-annotation suppression).

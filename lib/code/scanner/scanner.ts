@@ -50,6 +50,7 @@ export function scanIssues(
 
   const MAX_PER_RULE = 15
   const ruleOverflow = new Map<string, number>()
+  let suppressionCount = 0
 
   const isPartialScan = changedFiles !== undefined && changedFiles.length > 0
 
@@ -145,7 +146,11 @@ export function scanIssues(
 
         // --- Inline suppression check ---
         const prevLine = allLines && match.line >= 2 ? allLines[match.line - 2] : undefined
-        if (hasInlineSuppression(match.content, prevLine, rule.id)) continue
+        const requireScoped = rule.severity === 'critical'
+        if (hasInlineSuppression(match.content, prevLine, rule.id, requireScoped)) {
+          suppressionCount++
+          continue
+        }
 
         // --- Compute dynamic confidence ---
         let issueConfidence = computeDynamicConfidence(rule.confidence, ctx, match.content)
@@ -341,5 +346,6 @@ export function scanIssues(
     qualityGrade,
     issuesPerKloc,
     isPartialScan,
+    suppressionCount,
   }
 }

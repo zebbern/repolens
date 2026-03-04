@@ -4,6 +4,7 @@
 import type { CodeIndex } from '../code-index'
 import type { CompositeRule, CodeIssue } from './types'
 import { JS_TS, PY, SKIP_VENDORED } from './constants'
+import { isExampleOrDocsFile, hasInlineSuppression } from './context-classifier'
 
 // ---------------------------------------------------------------------------
 // Composite file-level rules
@@ -479,8 +480,8 @@ export function scanCompositeRules(codeIndex: CodeIndex): CodeIssue[] {
       if (!rule.fileFilter.includes(ext)) continue
       if (SKIP_VENDORED.test(path)) continue
 
-      // Build full file content from lines
-      const content = file.lines.join('\n')
+      // Use pre-computed file content
+      const content = file.content
 
       // Check ALL required patterns are present
       const allPresent = rule.requiredPatterns.every(p => p.test(content))
@@ -540,6 +541,26 @@ export function scanCompositeRules(codeIndex: CodeIndex): CodeIssue[] {
           sinkSnippet = file.lines[i].trim()
           break
         }
+      }
+
+      // --- Context-aware suppression for composite rules ---
+      // Test/example file: skip non-security composite findings
+      const isTestFile = /\.test\.|\.spec\.|__tests__[\/\\]/i.test(path)
+      const isExampleFile = isExampleOrDocsFile(path)
+      if ((isTestFile || isExampleFile) && rule.category !== 'security') continue
+
+      // Inline suppression: check first required pattern's match line
+      let firstPatternMatchLine = -1
+      for (let i = 0; i < file.lines.length; i++) {
+        if (rule.requiredPatterns[0].test(file.lines[i])) {
+          firstPatternMatchLine = i
+          break
+        }
+      }
+      if (firstPatternMatchLine >= 0) {
+        const matchLineContent = file.lines[firstPatternMatchLine]
+        const prevLineContent = firstPatternMatchLine > 0 ? file.lines[firstPatternMatchLine - 1] : undefined
+        if (hasInlineSuppression(matchLineContent, prevLineContent, rule.id)) continue
       }
 
       const description = hasPartialMitigation

@@ -172,12 +172,13 @@ export function hasInlineSuppression(
   line: string,
   previousLine: string | undefined,
   ruleId: string,
+  requireScoped = false,
 ): boolean {
   // Check the current line for an inline comment
-  if (matchesSuppression(line, ruleId)) return true
+  if (matchesSuppression(line, ruleId, false, requireScoped)) return true
 
   // Check the previous line for a "next-line" suppression
-  if (previousLine !== undefined && matchesSuppression(previousLine, ruleId, true)) return true
+  if (previousLine !== undefined && matchesSuppression(previousLine, ruleId, true, requireScoped)) return true
 
   return false
 }
@@ -186,7 +187,7 @@ export function hasInlineSuppression(
  * @internal  Test a single line against the suppression pattern.
  * When `nextLineOnly` is true, only "ignore-next-line" variants match.
  */
-function matchesSuppression(line: string, ruleId: string, nextLineOnly = false): boolean {
+function matchesSuppression(line: string, ruleId: string, nextLineOnly = false, requireScoped = false): boolean {
   const m = SUPPRESSION_PATTERN.exec(line)
   if (!m) return false
 
@@ -194,7 +195,7 @@ function matchesSuppression(line: string, ruleId: string, nextLineOnly = false):
   if (nextLineOnly && !/ignore-next-line/i.test(line)) return false
 
   const ruleList = m[1]
-  if (!ruleList) return true  // No specific rules → suppress all
+  if (!ruleList) return !requireScoped  // No specific rules → suppress all (unless scoped required for critical rules)
 
   const ids = ruleList.split(/\s*,\s*/).map(s => s.trim().toLowerCase())
   return ids.includes(ruleId.toLowerCase())

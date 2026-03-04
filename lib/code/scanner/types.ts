@@ -88,6 +88,8 @@ export interface ScanResults {
   issuesPerKloc: number
   /** True when only a subset of files were scanned (differential scan) */
   isPartialScan: boolean
+  /** Number of issues suppressed by inline comments */
+  suppressionCount: number
 }
 
 export interface CompositeRule {

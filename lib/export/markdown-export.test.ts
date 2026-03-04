@@ -98,6 +98,7 @@ function createScanResults(
     qualityGrade: 'A',
     issuesPerKloc: 0,
     isPartialScan: false,
+    suppressionCount: 0,
     ...overrides,
   }
 }

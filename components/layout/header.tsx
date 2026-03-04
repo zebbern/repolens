@@ -37,7 +37,7 @@ export function Header({ className }: HeaderProps) {
     <>
       <header className={`flex h-11 items-center bg-primary-background border-b border-foreground/[0.06] px-4 justify-between ${className || ''}`}>
         <div className="flex items-center gap-2">
-          <Image src="/repolens.svg" alt="RepoLens" width={20} height={20} className="dark:invert" />
+          <Image src="/repolens.svg" alt="RepoLens" width={24} height={20} className="dark:invert" />
           <Link
             href="/compare"
             className="flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-text-secondary hover:text-text-primary hover:bg-foreground/5 transition-colors"

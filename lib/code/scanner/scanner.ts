@@ -15,6 +15,8 @@ import { scanStructuralIssues } from './structural-scanner'
 import { scanSupplyChain } from './supply-chain-scanner'
 import { classifyLine, computeBlockCommentLines, hasInlineSuppression, hasSanitizerNearby, computeDynamicConfidence } from './context-classifier'
 import { isLikelyRealSecret } from './entropy'
+import { getAST, analyzeAST, AST_LANGUAGES } from './ast-analyzer'
+import { scoreIssue, scoreProject, getRiskDistribution, buildCvssVector } from './risk-scorer'
 
 // Combined rule set (all regex-based rules)
 const RULES: ScanRule[] = [
@@ -206,7 +208,27 @@ export function scanIssues(
     }
   }
 
-  // 2. Run composite file-level rules
+  // 2. AST-based analysis (scope-aware issue detection)
+  for (const [path, file] of filesToScan) {
+    if (SKIP_VENDORED.test(path)) continue
+    const lang = file.language ?? ''
+    if (!AST_LANGUAGES.has(lang)) continue
+    try {
+      const ast = getAST(file)
+      if (!ast) continue
+      const astIssues = analyzeAST(ast, file)
+      for (const issue of astIssues) {
+        if (!seenIds.has(issue.id)) {
+          seenIds.add(issue.id)
+          issues.push(issue)
+        }
+      }
+    } catch {
+      // Parse failure for one file should not abort the scan
+    }
+  }
+
+  // 3. Run composite file-level rules
   const compositeIssues = scanCompositeRules(codeIndex)
   rulesEvaluated += COMPOSITE_RULES.length
   for (const issue of compositeIssues) {
@@ -218,7 +240,7 @@ export function scanIssues(
     }
   }
 
-  // 3. Run structural rules
+  // 4. Run structural rules
   const structuralIssues = scanStructuralIssues(codeIndex, analysis)
   const structuralRuleIds = new Set(structuralIssues.map(i => i.ruleId))
   rulesEvaluated += structuralRuleIds.size
@@ -230,7 +252,7 @@ export function scanIssues(
     }
   }
 
-  // 4. Supply chain rules (package.json, lockfiles, GitHub Actions, Python deps)
+  // 5. Supply chain rules (package.json, lockfiles, GitHub Actions, Python deps)
   const supplyChainIssues = scanSupplyChain(scanCodeIndex)
   const supplyChainRuleIds = new Set(supplyChainIssues.map(i => i.ruleId))
   rulesEvaluated += supplyChainRuleIds.size
@@ -242,7 +264,7 @@ export function scanIssues(
     }
   }
 
-  // 5. Structural context cross-reference (when import graph is available)
+  // 6. Structural context cross-reference (when import graph is available)
   if (analysis) {
     for (const issue of issues) {
       const importers = analysis.graph.reverseEdges.get(issue.file)
@@ -274,6 +296,17 @@ export function scanIssues(
     if (sev !== 0) return sev
     return a.file.localeCompare(b.file)
   })
+
+  // ---------------------------------------------------------------------------
+  // Risk scoring — assign per-issue risk score and CVSS vector
+  // ---------------------------------------------------------------------------
+  for (const issue of issues) {
+    issue.riskScore = scoreIssue(issue)
+    issue.cvssVector = buildCvssVector(issue)
+  }
+
+  const projectRiskScore = scoreProject(issues)
+  const riskDistribution = getRiskDistribution(issues)
 
   // ---------------------------------------------------------------------------
   // Health scoring
@@ -347,5 +380,7 @@ export function scanIssues(
     issuesPerKloc,
     isPartialScan,
     suppressionCount,
+    projectRiskScore,
+    riskDistribution,
   }
 }

@@ -27,6 +27,10 @@ export interface CodeIssue {
   fix?: string
   /** Description of the fix approach */
   fixDescription?: string
+  /** CVSS-like risk score (0.0–10.0, one decimal) */
+  riskScore?: number
+  /** Human-readable scoring breakdown, e.g. "S:critical/C:high/CAT:security/CWE:79" */
+  cvssVector?: string
 }
 
 export interface ScanRule {
@@ -90,6 +94,12 @@ export interface ScanResults {
   isPartialScan: boolean
   /** Number of issues suppressed by inline comments */
   suppressionCount: number
+  /** CVSS-like project risk score (0.0–10.0), weighted average of issue scores */
+  projectRiskScore?: number
+  /** Count of issues per risk band */
+  riskDistribution?: { critical: number; high: number; medium: number; low: number }
+  /** Compliance coverage summary for each standard */
+  complianceSummary?: { standard: string; coveredCount: number; totalCount: number; coveragePercent: number }[]
 }
 
 export interface CompositeRule {

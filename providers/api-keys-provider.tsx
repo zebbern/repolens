@@ -86,6 +86,17 @@ const APIKeysContext = createContext<APIKeysContextType | null>(null)
 
 const STORAGE_KEY = 'codedoc-api-keys'
 const MODEL_STORAGE_KEY = 'codedoc-selected-model'
+const API_KEY_PROVIDERS: AIProvider[] = ['openai', 'google', 'anthropic', 'openrouter']
+
+/** Validate that parsed localStorage data has the expected APIKeysState shape. */
+function isValidAPIKeysState(data: unknown): data is APIKeysState {
+  if (!data || typeof data !== 'object') return false
+  const obj = data as Record<string, unknown>
+  return API_KEY_PROVIDERS.every(p => {
+    const entry = obj[p]
+    return entry && typeof entry === 'object' && 'key' in entry && typeof (entry as Record<string, unknown>).key === 'string'
+  })
+}
 
 export function APIKeysProvider({ children }: { children: ReactNode }) {
   const [apiKeys, setAPIKeys] = useState<APIKeysState>(defaultAPIKeysState)
@@ -107,10 +118,15 @@ export function APIKeysProvider({ children }: { children: ReactNode }) {
     try {
       const stored = localStorage.getItem(STORAGE_KEY)
       if (stored) {
-        setAPIKeys(JSON.parse(stored))
+        const parsed: unknown = JSON.parse(stored)
+        if (isValidAPIKeysState(parsed)) {
+          setAPIKeys(parsed)
+        } else {
+          localStorage.removeItem(STORAGE_KEY)
+        }
       }
     } catch {
-      // Ignore invalid stored data
+      localStorage.removeItem(STORAGE_KEY)
     }
 
     try {
@@ -315,7 +331,7 @@ export function APIKeysProvider({ children }: { children: ReactNode }) {
 
     // Find all providers that have a stored key
     const providersWithKeys = (Object.keys(apiKeys) as AIProvider[]).filter(
-      provider => apiKeys[provider].key.length > 0
+      provider => apiKeys[provider]?.key?.length > 0
     )
 
     if (providersWithKeys.length === 0) return
@@ -335,7 +351,7 @@ export function APIKeysProvider({ children }: { children: ReactNode }) {
 
   const getValidProviders = useCallback((): AIProvider[] => {
     return (Object.keys(apiKeys) as AIProvider[]).filter(
-      provider => apiKeys[provider].isValid === true
+      provider => apiKeys[provider]?.isValid === true
     )
   }, [apiKeys])
 

@@ -18,7 +18,7 @@ export function executeToolLocally(
 
   switch (toolName) {
     case 'readFile':
-      return JSON.stringify(executeReadFile(input as { path: string }, codeIndex))
+      return JSON.stringify(executeReadFile(input as { path: string; startLine?: number; endLine?: number }, codeIndex))
     case 'readFiles':
       return JSON.stringify(executeReadFiles(input as { paths: string[] }, codeIndex))
     case 'searchFiles':
@@ -73,20 +73,35 @@ function findFile(codeIndex: CodeIndex, path: string): IndexedFile | undefined {
 // ---------------------------------------------------------------------------
 
 function executeReadFile(
-  input: { path: string },
+  input: { path: string; startLine?: number; endLine?: number },
   codeIndex: CodeIndex,
 ): Record<string, unknown> {
-  const content = getContent(codeIndex, input.path)
+  const resolvedPath = input.path
+  let content = getContent(codeIndex, resolvedPath)
+  let usedPath = resolvedPath
+
   if (!content) {
     const paths = allPaths(codeIndex)
-    const match = paths.find(p => p.endsWith('/' + input.path)) ?? paths.find(p => p.endsWith(input.path))
+    const match = paths.find(p => p.endsWith('/' + resolvedPath)) ?? paths.find(p => p.endsWith(resolvedPath))
     if (match) {
-      const matchedContent = getContent(codeIndex, match)!
-      return { path: match, content: matchedContent, lineCount: matchedContent.split('\n').length }
+      content = getContent(codeIndex, match)!
+      usedPath = match
+    } else {
+      return { error: `File not found: ${resolvedPath}. Use searchFiles or check the file tree.` }
     }
-    return { error: `File not found: ${input.path}. Use searchFiles or check the file tree.` }
   }
-  return { path: input.path, content, lineCount: content.split('\n').length }
+
+  const lines = content.split('\n')
+  const totalLines = lines.length
+
+  if (input.startLine !== undefined || input.endLine !== undefined) {
+    const start = Math.max(1, input.startLine ?? 1) - 1 // 0-based
+    const end = Math.min(totalLines, input.endLine ?? totalLines)
+    const sliced = lines.slice(start, end)
+    return { path: usedPath, content: sliced.join('\n'), startLine: start + 1, endLine: end, totalLines }
+  }
+
+  return { path: usedPath, content, lineCount: totalLines, totalLines }
 }
 
 function executeReadFiles(
@@ -103,7 +118,7 @@ function executeSearchFiles(
 ): Record<string, unknown> {
   const limit = input.maxResults ?? 15
   const paths = allPaths(codeIndex)
-  const results: Array<{ path: string; matchType: 'path' | 'content'; preview?: string }> = []
+  const results: Array<{ path: string; matchType: 'path' | 'content'; matches?: Array<{ line: number; content: string; context?: string[] }>; totalMatches?: number }> = []
 
   // Build matcher: regex or plain case-insensitive substring
   const matcher = buildMatcher(input.query, input.isRegex)
@@ -124,18 +139,32 @@ function executeSearchFiles(
       if (results.length >= limit) break
       if (results.some(r => r.path === path)) continue
       const lines = file.lines
+      const matches: Array<{ line: number; content: string; context?: string[] }> = []
+      let totalMatches = 0
       for (let i = 0; i < lines.length; i++) {
         if (test(lines[i])) {
-          results.push({
-            path,
-            matchType: 'content',
-            preview: `L${i + 1}: ${lines[i].trim().slice(0, 120)}`,
-          })
-          break
+          totalMatches++
+          if (matches.length < 3) {
+            const contextLines: string[] = []
+            if (i > 0) contextLines.push(`L${i}: ${lines[i - 1].trim().slice(0, 120)}`)
+            contextLines.push(`L${i + 1}: ${lines[i].trim().slice(0, 120)}`)
+            if (i < lines.length - 1) contextLines.push(`L${i + 2}: ${lines[i + 1].trim().slice(0, 120)}`)
+            matches.push({ line: i + 1, content: lines[i].trim().slice(0, 120), context: contextLines })
+          }
         }
+      }
+      if (totalMatches > 0) {
+        results.push({ path, matchType: 'content', matches, totalMatches })
       }
     }
   }
+
+  // Sort content matches by totalMatches descending for relevance
+  results.sort((a, b) => {
+    if (a.matchType === 'path' && b.matchType !== 'path') return -1
+    if (a.matchType !== 'path' && b.matchType === 'path') return 1
+    return (b.totalMatches ?? 0) - (a.totalMatches ?? 0)
+  })
 
   return { totalFiles: paths.length, matchCount: results.length, results, ...(warning && { warning }) }
 }

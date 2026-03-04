@@ -1,12 +1,18 @@
 import { streamText, convertToModelMessages, stepCountIs, consumeStream, tool } from 'ai'
 import * as z from 'zod'
-import { createAIModel } from '@/lib/ai/providers'
+import { createAIModel, getModelContextWindow } from '@/lib/ai/providers'
 import { createContextCompactor } from '@/lib/ai/context-compactor'
 import {
   readFileSchema,
   readFilesSchema,
   searchFilesSchema,
   listDirectorySchema,
+  findSymbolSchema,
+  getFileStatsSchema,
+  analyzeImportsSchema,
+  scanIssuesSchema,
+  generateDiagramSchema,
+  getProjectOverviewSchema,
 } from '@/lib/ai/tool-schemas'
 
 export const maxDuration = 120
@@ -63,7 +69,14 @@ Produce a clear, well-structured **Architecture Overview** document.
 - Reference specific file paths as \`inline code\`
 - Use mermaid diagrams where helpful (wrap in \`\`\`mermaid blocks)
 - In mermaid diagrams, ALWAYS quote node labels containing file paths or slashes: \`A["src/lib/utils.ts"]\` NOT \`A[src/lib/utils.ts]\`. Unquoted \`[/text]\` triggers trapezoid syntax and causes parse errors
-- Cite actual functions, classes, and patterns from code you inspected`,
+- Cite actual functions, classes, and patterns from code you inspected
+
+## Step Budget
+You have 25 tool-call rounds. Plan efficiently:
+- Use readFiles (batch, up to 10 files) to maximize reads per round
+- Use readFile with startLine/endLine for large files
+- Budget: ~15 rounds reading, ~5 writing, ~5 verifying
+- Prioritize the most important files first -- not every file needs to be read`,
 
   'setup': `You are a developer experience expert writing a **Getting Started / Setup Guide**.
 
@@ -84,7 +97,14 @@ Produce a clear, well-structured **Architecture Overview** document.
 ## Rules
 - ONLY include setup steps you can verify from the code
 - Put all commands in fenced code blocks
-- If you can't determine something, say "check with the team" rather than guessing`,
+- If you can't determine something, say "check with the team" rather than guessing
+
+## Step Budget
+You have 25 tool-call rounds. Plan efficiently:
+- Use readFiles (batch, up to 10 files) to maximize reads per round
+- Use readFile with startLine/endLine for large files
+- Budget: ~15 rounds reading, ~5 writing, ~5 verifying
+- Prioritize the most important files first -- not every file needs to be read`,
 
   'api-reference': `You are a technical writer creating an **API Reference**.
 
@@ -106,7 +126,14 @@ Produce a clear, well-structured **Architecture Overview** document.
 - Group by file or module
 - Use \`typescript\` (or appropriate language) fenced code blocks
 - Focus on PUBLIC API -- skip internal helpers unless important
-- Read every file before documenting its exports`,
+- Read every file before documenting its exports
+
+## Step Budget
+You have 25 tool-call rounds. Plan efficiently:
+- Use readFiles (batch, up to 10 files) to maximize reads per round
+- Use readFile with startLine/endLine for large files
+- Budget: ~15 rounds reading, ~5 writing, ~5 verifying
+- Prioritize the most important files first -- not every file needs to be read`,
 
   'file-explanation': `You are a code educator explaining a specific file in detail.
 
@@ -127,7 +154,14 @@ Produce a clear, well-structured **Architecture Overview** document.
 - Read the actual file and its dependencies before explaining
 - Reference specific line content when discussing code
 - Quote short snippets in fenced blocks
-- Explain WHY, not just WHAT`,
+- Explain WHY, not just WHAT
+
+## Step Budget
+You have 25 tool-call rounds. Plan efficiently:
+- Use readFiles (batch, up to 10 files) to maximize reads per round
+- Use readFile with startLine/endLine for large files
+- Budget: ~15 rounds reading, ~5 writing, ~5 verifying
+- Prioritize the most important files first -- not every file needs to be read`,
 
   'custom': `You are a senior developer and technical writer. The user will ask you to generate specific documentation.
 
@@ -141,7 +175,14 @@ Produce a clear, well-structured **Architecture Overview** document.
 - Reference specific files, functions, and code
 - Use markdown with clear headings
 - Put code examples in fenced blocks with correct language tags
-- Be thorough but concise`,
+- Be thorough but concise
+
+## Step Budget
+You have 25 tool-call rounds. Plan efficiently:
+- Use readFiles (batch, up to 10 files) to maximize reads per round
+- Use readFile with startLine/endLine for large files
+- Budget: ~15 rounds reading, ~5 writing, ~5 verifying
+- Prioritize the most important files first -- not every file needs to be read`,
 }
 
 export async function POST(req: Request) {
@@ -158,10 +199,16 @@ export async function POST(req: Request) {
 
     // Client-side tools — no execute function, tool calls stream to client
     const codeTools = {
-      readFile: tool({ description: 'Read the full contents of a file. Always read files before making claims about their code.', inputSchema: readFileSchema }),
+      readFile: tool({ description: 'Read the full contents of a file, or a specific line range. Use startLine/endLine to read sections of large files efficiently. Always read files before making claims about their code.', inputSchema: readFileSchema }),
       readFiles: tool({ description: 'Read multiple files at once (max 10). More efficient than calling readFile repeatedly.', inputSchema: readFilesSchema }),
       searchFiles: tool({ description: 'Search for files by path pattern or search for text content across all files. Set isRegex=true for regex patterns.', inputSchema: searchFilesSchema }),
       listDirectory: tool({ description: 'List files and subdirectories in a specific directory.', inputSchema: listDirectorySchema }),
+      findSymbol: tool({ description: 'Find function, class, interface, type, or enum definitions across the codebase by name. Returns file path and line number.', inputSchema: findSymbolSchema }),
+      getFileStats: tool({ description: 'Get statistics for a file: line count, language, imports, and exports.', inputSchema: getFileStatsSchema }),
+      analyzeImports: tool({ description: 'Analyze import relationships for a file. Shows what it imports and what other files import it.', inputSchema: analyzeImportsSchema }),
+      scanIssues: tool({ description: 'Run the code quality and security scanner on a specific file. Returns issues found with severity.', inputSchema: scanIssuesSchema }),
+      generateDiagram: tool({ description: 'Generate a Mermaid diagram of the codebase. Types: summary, topology, import-graph, class-diagram, entry-points, module-usage, treemap, external-deps, focus-diagram.', inputSchema: generateDiagramSchema }),
+      getProjectOverview: tool({ description: 'Get a comprehensive overview of the project: file count, languages, folder structure, and key patterns.', inputSchema: getProjectOverviewSchema }),
     }
 
     // Build system prompt
@@ -196,10 +243,13 @@ Start by reading this file with readFile.`
     }
 
     systemPrompt += `\n\n## Important
-- You have access to readFile, readFiles, searchFiles, and listDirectory tools
+- You have access to readFile, readFiles, searchFiles, listDirectory, findSymbol, getFileStats, analyzeImports, scanIssues, generateDiagram, and getProjectOverview tools
 - ALWAYS read files before documenting them -- never guess or hallucinate
 - Read at least the key files for the doc type before writing
-- Your final response should be the complete documentation in markdown`
+- Your final response should be the complete documentation in markdown
+
+## Model Context
+Your context window is approximately ${getModelContextWindow(model).toLocaleString()} tokens. The structural index has been sized accordingly.`
 
     const result = streamText({
       model: createAIModel(provider, model, apiKey),

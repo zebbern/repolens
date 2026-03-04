@@ -4,6 +4,8 @@ import { z } from 'zod'
 
 export const readFileSchema = z.object({
   path: z.string().describe('File path relative to repo root'),
+  startLine: z.number().int().positive().optional().describe('Start line (1-based, inclusive). Use with endLine to read specific sections.'),
+  endLine: z.number().int().positive().optional().describe('End line (1-based, inclusive). Use with startLine to read specific sections.'),
 })
 
 export const readFilesSchema = z.object({

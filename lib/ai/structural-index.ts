@@ -33,9 +33,13 @@ const MAX_INDEX_BYTES = 300_000
  * The enriched index includes exports, imports, and key symbol definitions
  * so the AI can make informed decisions about which files to read.
  */
-export function buildStructuralIndex(codeIndex: CodeIndex | null): string {
+export function buildStructuralIndex(
+  codeIndex: CodeIndex | null,
+  options?: { maxIndexBytes?: number },
+): string {
   if (!codeIndex?.files || codeIndex.files.size === 0) return ''
 
+  const maxBytes = options?.maxIndexBytes ?? MAX_INDEX_BYTES
   const metadata: FileMetadata[] = []
 
   for (const [path, file] of codeIndex.files) {
@@ -62,7 +66,7 @@ export function buildStructuralIndex(codeIndex: CodeIndex | null): string {
   )
 
   let result = JSON.stringify(filtered)
-  if (result.length <= MAX_INDEX_BYTES) return result
+  if (result.length <= maxBytes) return result
 
   // Progressive trimming: drop symbols → imports → exports,
   // starting from files with fewest exports
@@ -75,7 +79,7 @@ export function buildStructuralIndex(codeIndex: CodeIndex | null): string {
       if (entry[field]) {
         delete entry[field]
         result = JSON.stringify(filtered)
-        if (result.length <= MAX_INDEX_BYTES) return result
+        if (result.length <= maxBytes) return result
       }
     }
   }
@@ -133,33 +137,120 @@ export function extractSignature(line: string, name: string, kind: string): stri
   return name
 }
 
+/** Get language-specific symbol patterns for structural extraction. */
+function getLanguagePatterns(language: string): ReadonlyArray<{ regex: RegExp; kind: string }> {
+  switch (language) {
+    case 'python':
+      return [
+        { regex: /(?:async\s+)?def\s+(\w+)/g, kind: 'fn' },
+        { regex: /class\s+(\w+)/g, kind: 'class' },
+      ]
+    case 'rust':
+      return [
+        { regex: /(?:pub(?:\([^)]*\))?\s+)?(?:async\s+)?fn\s+(\w+)/g, kind: 'fn' },
+        { regex: /(?:pub(?:\([^)]*\))?\s+)?struct\s+(\w+)/g, kind: 'struct' },
+        { regex: /(?:pub(?:\([^)]*\))?\s+)?enum\s+(\w+)/g, kind: 'enum' },
+        { regex: /(?:pub(?:\([^)]*\))?\s+)?trait\s+(\w+)/g, kind: 'trait' },
+        { regex: /impl(?:<[^>]*>)?\s+(?:\w+\s+for\s+)?(\w+)/g, kind: 'impl' },
+        { regex: /(?:pub(?:\([^)]*\))?\s+)?mod\s+(\w+)/g, kind: 'mod' },
+      ]
+    case 'go':
+      return [
+        { regex: /func\s+(?:\([^)]+\)\s+)?(\w+)/g, kind: 'fn' },
+        { regex: /type\s+(\w+)\s+struct/g, kind: 'struct' },
+        { regex: /type\s+(\w+)\s+interface/g, kind: 'iface' },
+      ]
+    case 'java':
+      return [
+        { regex: /(?:public|private|protected)\s+(?:static\s+)?(?:abstract\s+)?class\s+(\w+)/g, kind: 'class' },
+        { regex: /(?:public|private|protected)\s+(?:static\s+)?interface\s+(\w+)/g, kind: 'iface' },
+        { regex: /(?:public|private|protected)\s+(?:static\s+)?enum\s+(\w+)/g, kind: 'enum' },
+        { regex: /(?:public|private|protected)\s+(?:static\s+)?(?:abstract\s+)?(?:\w+(?:<[^>]*>)?)\s+(\w+)\s*\(/g, kind: 'fn' },
+      ]
+    default:
+      // TypeScript / JavaScript
+      return SYMBOL_PATTERNS
+  }
+}
+
+/** Get the import regex for a specific language. */
+function getImportRegex(language: string): RegExp | null {
+  switch (language) {
+    case 'python':
+      return /(?:from\s+(\S+)\s+import|import\s+(\S+))/g
+    case 'rust':
+      return /use\s+([^;{]+)/g
+    case 'go':
+      return /import\s+"([^"]+)"/g
+    case 'java':
+      return /import\s+([^;]+)/g
+    default:
+      return IMPORT_REGEX // TS/JS default
+  }
+}
+
+/** Get the export regex for a specific language. Returns null for languages without explicit exports. */
+function getExportRegex(language: string): RegExp | null {
+  switch (language) {
+    case 'python':
+    case 'go':
+      return null // No explicit export syntax; all top-level defs are "exports"
+    case 'rust':
+      return /^pub\s+(?:(?:async\s+)?fn|struct|enum|trait|type|const|static|mod)\s+(\w+)/
+    case 'java':
+      return /^public\s+(?:static\s+)?(?:abstract\s+)?(?:class|interface|enum|(?:\w+(?:<[^>]*>)?)\s+)(\w+)/
+    default:
+      return EXPORT_REGEX
+  }
+}
+
 /** Extract exports, imports, and symbol definitions from a file. */
 function extractStructure(file: IndexedFile): {
   exports: string[]
   imports: string[]
   symbols: string[]
 } {
+  const language = inferLanguage(file.path)
+  const symbolPatterns = getLanguagePatterns(language)
+  const importRegex = getImportRegex(language)
+  const exportRegex = getExportRegex(language)
+
   const exports: string[] = []
   const imports: string[] = []
   const symbols = new Set<string>()
 
   // Extract imports
-  IMPORT_REGEX.lastIndex = 0
-  let m: RegExpExecArray | null
-  while ((m = IMPORT_REGEX.exec(file.content)) !== null) {
-    imports.push(m[1])
+  if (importRegex) {
+    importRegex.lastIndex = 0
+    let m: RegExpExecArray | null
+    while ((m = importRegex.exec(file.content)) !== null) {
+      // Some language regexes have multiple capture groups (e.g. Python)
+      const importName = m[1] || m[2]
+      if (importName) imports.push(importName.trim())
+    }
   }
 
   // Extract exports + symbols line-by-line
   for (const line of file.lines) {
     // Named exports
-    const exportMatch = EXPORT_REGEX.exec(line)
-    if (exportMatch) {
-      exports.push(exportMatch[1])
+    if (exportRegex) {
+      const exportMatch = exportRegex.exec(line)
+      if (exportMatch) {
+        exports.push(exportMatch[1])
+      }
+    } else if (language === 'python' || language === 'go') {
+      // For Python/Go: treat top-level defs as exports
+      for (const pat of symbolPatterns) {
+        pat.regex.lastIndex = 0
+        const sm = pat.regex.exec(line)
+        if (sm && !line.startsWith(' ') && !line.startsWith('\t')) {
+          exports.push(sm[1])
+        }
+      }
     }
 
     // Symbol definitions (exported or not)
-    for (const pat of SYMBOL_PATTERNS) {
+    for (const pat of symbolPatterns) {
       pat.regex.lastIndex = 0
       let sm: RegExpExecArray | null
       while ((sm = pat.regex.exec(line)) !== null) {
@@ -169,13 +260,16 @@ function extractStructure(file: IndexedFile): {
     }
   }
 
-  // Also catch `export default` and `export { ... }` patterns
-  const reExportRegex = /export\s*\{([^}]+)\}/g
-  reExportRegex.lastIndex = 0
-  while ((m = reExportRegex.exec(file.content)) !== null) {
-    const names = m[1].split(',').map(s => s.trim().split(/\s+as\s+/).pop()?.trim()).filter(Boolean)
-    for (const name of names) {
-      if (name) exports.push(name)
+  // Also catch re-exports for JS/TS
+  if (language === 'typescript' || language === 'tsx' || language === 'javascript' || language === 'jsx') {
+    const reExportRegex = /export\s*\{([^}]+)\}/g
+    reExportRegex.lastIndex = 0
+    let m: RegExpExecArray | null
+    while ((m = reExportRegex.exec(file.content)) !== null) {
+      const names = m[1].split(',').map(s => s.trim().split(/\s+as\s+/).pop()?.trim()).filter(Boolean)
+      for (const name of names) {
+        if (name) exports.push(name)
+      }
     }
   }
 

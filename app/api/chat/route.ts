@@ -1,6 +1,6 @@
 import { streamText, convertToModelMessages, stepCountIs, consumeStream, tool } from 'ai'
 import * as z from 'zod'
-import { createAIModel } from '@/lib/ai/providers'
+import { createAIModel, getModelContextWindow } from '@/lib/ai/providers'
 import { createContextCompactor } from '@/lib/ai/context-compactor'
 import {
   readFileSchema,
@@ -49,7 +49,7 @@ export async function POST(req: Request) {
 
     // Client-side tools — no execute function, tool calls stream to client
     const codeTools = {
-      readFile: tool({ description: 'Read the full contents of a file. Always read files before making claims about their code.', inputSchema: readFileSchema }),
+      readFile: tool({ description: 'Read the full contents of a file, or a specific line range. Use startLine/endLine to read sections of large files efficiently. Always read files before making claims about their code.', inputSchema: readFileSchema }),
       readFiles: tool({ description: 'Read multiple files at once (max 10). More efficient than calling readFile repeatedly.', inputSchema: readFilesSchema }),
       searchFiles: tool({ description: 'Search for files by path pattern or search for text content across all files. Returns matching file paths and line matches. Set isRegex=true to use regular expression patterns (e.g. "export\\s+function\\s+handle" to find exported functions starting with handle).', inputSchema: searchFilesSchema }),
       listDirectory: tool({ description: 'List files and subdirectories in a specific directory. Useful to explore folder structure.', inputSchema: listDirectorySchema }),
@@ -89,6 +89,17 @@ After generating documentation or making claims about code:
 1. Re-read the key files you referenced to verify accuracy
 2. Cross-check function signatures, type definitions, and import chains
 3. If you find a discrepancy, correct your output and note the correction
+
+## Step Budget
+You have up to 50 tool-call rounds. Plan your approach:
+- Use readFiles (batch) to read up to 10 files in a single round — this is far more efficient than individual readFile calls
+- Use readFile with startLine/endLine to read only the section you need from large files
+- For broad exploration: listDirectory + searchFiles first, then targeted reads
+- Budget roughly: 60% exploration/reading, 25% generating output, 15% verification
+- If approaching the step limit, prioritize completing your output over reading more files
+
+## Model Context
+Your context window is approximately ${getModelContextWindow(model).toLocaleString()} tokens. The structural index has been sized accordingly.
 
 ## Response Guidelines
 - Use markdown formatting: headings, lists, tables, code blocks

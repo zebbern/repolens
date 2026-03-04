@@ -67,7 +67,7 @@ export function Header({ className }: HeaderProps) {
             className="h-7 w-7 text-text-secondary hover:text-text-primary hover:bg-foreground/5"
             asChild
           >
-            <a href="https://github.com/zebbern" target="_blank" rel="noopener noreferrer">
+            <a href="https://github.com/zebbern/repolens/fork" target="_blank" rel="noopener noreferrer">
               <GitFork className="h-3.5 w-3.5" />
             </a>
           </Button>
@@ -77,7 +77,7 @@ export function Header({ className }: HeaderProps) {
             className="h-7 w-7 text-text-secondary hover:text-text-primary hover:bg-foreground/5"
             asChild
           >
-            <a href="https://github.com/zebbern" target="_blank" rel="noopener noreferrer">
+            <a href="https://github.com/zebbern/repolens" target="_blank" rel="noopener noreferrer">
               <Github className="h-3.5 w-3.5" />
             </a>
           </Button>

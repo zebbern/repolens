@@ -40,7 +40,7 @@ export function ModelSelector({ className, onOpenSettings }: ModelSelectorProps)
           variant="ghost"
           size="sm"
           className={cn(
-            'flex items-center gap-1 text-sm text-text-secondary hover:bg-foreground/5',
+            'flex items-center gap-2 text-sm text-text-secondary hover:bg-foreground/5',
             className
           )}
         >

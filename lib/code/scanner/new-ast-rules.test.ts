@@ -99,10 +99,10 @@ function outer() {
   it('detects let shadowing outer let', () => {
     const code = `
 function outer() {
-  let result = 1;
+  let total = 1;
   if (true) {
-    let result = 2;
-    console.log(result);
+    let total = 2;
+    console.log(total);
   }
 }
 `

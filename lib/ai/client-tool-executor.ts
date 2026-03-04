@@ -1,24 +1,27 @@
 import type { CodeIndex, IndexedFile } from '@/lib/code/code-index'
-import { createEmptyIndex, indexFile } from '@/lib/code/code-index'
+import { createEmptyIndex, indexFile, searchIndex } from '@/lib/code/code-index'
 import { scanIssues } from '@/lib/code/scanner/scanner'
 import { LANG_EXTENSIONS } from '@/lib/code/scanner/constants'
+import { SYMBOL_PATTERNS } from '@/lib/ai/structural-index'
+import {
+  readFileSchema,
+  readFilesSchema,
+  searchFilesSchema,
+  listDirectorySchema,
+  findSymbolSchema,
+  getFileStatsSchema,
+  analyzeImportsSchema,
+  scanIssuesSchema,
+  generateDiagramSchema,
+} from '@/lib/ai/tool-schemas'
 
 // ---------------------------------------------------------------------------
-// Input validation
+// Zod validation helper
 // ---------------------------------------------------------------------------
 
-/**
- * Validate that required fields exist on the AI-provided tool input.
- * Returns an error message string if validation fails, or null if valid.
- */
-function validateInput(input: unknown, required: Record<string, string>): string | null {
-  if (!input || typeof input !== 'object') return 'Input must be an object'
-  for (const [key, type] of Object.entries(required)) {
-    if (typeof (input as Record<string, unknown>)[key] !== type) {
-      return `Missing or invalid required field: ${key} (expected ${type})`
-    }
-  }
-  return null
+/** Format Zod issues into a single actionable error string. */
+function formatZodError(issues: Array<{ message: string }>): string {
+  return `Validation failed: ${issues.map(i => i.message).join(', ')}`
 }
 
 // ---------------------------------------------------------------------------
@@ -39,50 +42,49 @@ export function executeToolLocally(
 
   switch (toolName) {
     case 'readFile': {
-      const err = validateInput(input, { path: 'string' })
-      if (err) return JSON.stringify({ error: err })
-      return JSON.stringify(executeReadFile(input as { path: string; startLine?: number; endLine?: number }, codeIndex))
+      const result = readFileSchema.safeParse(input)
+      if (!result.success) return JSON.stringify({ error: formatZodError(result.error.issues) })
+      return JSON.stringify(executeReadFile(result.data, codeIndex))
     }
     case 'readFiles': {
-      const err = validateInput(input, {})
-      if (err) return JSON.stringify({ error: err })
-      if (!Array.isArray((input as Record<string, unknown>).paths)) return JSON.stringify({ error: 'Missing or invalid required field: paths (expected array)' })
-      return JSON.stringify(executeReadFiles(input as { paths: string[] }, codeIndex))
+      const result = readFilesSchema.safeParse(input)
+      if (!result.success) return JSON.stringify({ error: formatZodError(result.error.issues) })
+      return JSON.stringify(executeReadFiles(result.data, codeIndex))
     }
     case 'searchFiles': {
-      const err = validateInput(input, { query: 'string' })
-      if (err) return JSON.stringify({ error: err })
-      return JSON.stringify(executeSearchFiles(input as { query: string; maxResults?: number | null; isRegex?: boolean }, codeIndex))
+      const result = searchFilesSchema.safeParse(input)
+      if (!result.success) return JSON.stringify({ error: formatZodError(result.error.issues) })
+      return JSON.stringify(executeSearchFiles(result.data, codeIndex))
     }
     case 'listDirectory': {
-      const err = validateInput(input, { path: 'string' })
-      if (err) return JSON.stringify({ error: err })
-      return JSON.stringify(executeListDirectory(input as { path: string }, codeIndex))
+      const result = listDirectorySchema.safeParse(input)
+      if (!result.success) return JSON.stringify({ error: formatZodError(result.error.issues) })
+      return JSON.stringify(executeListDirectory(result.data, codeIndex))
     }
     case 'findSymbol': {
-      const err = validateInput(input, { name: 'string' })
-      if (err) return JSON.stringify({ error: err })
-      return JSON.stringify(executeFindSymbol(input as { name: string; kind?: string }, codeIndex))
+      const result = findSymbolSchema.safeParse(input)
+      if (!result.success) return JSON.stringify({ error: formatZodError(result.error.issues) })
+      return JSON.stringify(executeFindSymbol(result.data, codeIndex))
     }
     case 'getFileStats': {
-      const err = validateInput(input, { path: 'string' })
-      if (err) return JSON.stringify({ error: err })
-      return JSON.stringify(executeGetFileStats(input as { path: string }, codeIndex))
+      const result = getFileStatsSchema.safeParse(input)
+      if (!result.success) return JSON.stringify({ error: formatZodError(result.error.issues) })
+      return JSON.stringify(executeGetFileStats(result.data, codeIndex))
     }
     case 'analyzeImports': {
-      const err = validateInput(input, { path: 'string' })
-      if (err) return JSON.stringify({ error: err })
-      return JSON.stringify(executeAnalyzeImports(input as { path: string }, codeIndex))
+      const result = analyzeImportsSchema.safeParse(input)
+      if (!result.success) return JSON.stringify({ error: formatZodError(result.error.issues) })
+      return JSON.stringify(executeAnalyzeImports(result.data, codeIndex))
     }
     case 'scanIssues': {
-      const err = validateInput(input, { path: 'string' })
-      if (err) return JSON.stringify({ error: err })
-      return JSON.stringify(executeScanIssues(input as { path: string }, codeIndex))
+      const result = scanIssuesSchema.safeParse(input)
+      if (!result.success) return JSON.stringify({ error: formatZodError(result.error.issues) })
+      return JSON.stringify(executeScanIssues(result.data, codeIndex))
     }
     case 'generateDiagram': {
-      const err = validateInput(input, { type: 'string' })
-      if (err) return JSON.stringify({ error: err })
-      return JSON.stringify(executeGenerateDiagram(input as { type: string; focusFile?: string }, codeIndex))
+      const result = generateDiagramSchema.safeParse(input)
+      if (!result.success) return JSON.stringify({ error: formatZodError(result.error.issues) })
+      return JSON.stringify(executeGenerateDiagram(result.data, codeIndex))
     }
     case 'getProjectOverview':
       return JSON.stringify(executeGetProjectOverview(codeIndex))
@@ -162,82 +164,68 @@ function executeReadFiles(
 }
 
 function executeSearchFiles(
-  input: { query: string; maxResults?: number | null; isRegex?: boolean },
+  input: { query: string; maxResults?: number; isRegex?: boolean },
   codeIndex: CodeIndex,
 ): Record<string, unknown> {
   const limit = input.maxResults ?? 15
   const paths = allPaths(codeIndex)
   const results: Array<{ path: string; matchType: 'path' | 'content'; matches?: Array<{ line: number; content: string; context?: string[] }>; totalMatches?: number }> = []
 
-  // Build matcher: regex or plain case-insensitive substring
-  const matcher = buildMatcher(input.query, input.isRegex)
-  if (matcher.error) {
-    return { error: matcher.error }
-  }
-  const { test, warning } = matcher
-
+  // Path matching: case-insensitive substring match against file paths
+  const queryLower = input.query.toLowerCase()
   for (const path of paths) {
     if (results.length >= limit) break
-    if (test(path)) {
+    if (path.toLowerCase().includes(queryLower)) {
       results.push({ path, matchType: 'path' })
     }
   }
 
+  // Content matching: delegate to searchIndex for accurate regex/substring search
   if (results.length < limit) {
-    for (const [path, file] of codeIndex.files) {
+    const searchResults = searchIndex(codeIndex, input.query, { regex: input.isRegex })
+    const pathsAlreadyMatched = new Set(results.map(r => r.path))
+
+    for (const sr of searchResults) {
       if (results.length >= limit) break
-      if (results.some(r => r.path === path)) continue
-      const lines = file.lines
+      if (pathsAlreadyMatched.has(sr.file)) continue
+
+      const file = codeIndex.files.get(sr.file)
+      if (!file) continue
+
+      const totalMatches = sr.matches.length
       const matches: Array<{ line: number; content: string; context?: string[] }> = []
-      let totalMatches = 0
-      for (let i = 0; i < lines.length; i++) {
-        if (test(lines[i])) {
-          totalMatches++
-          if (matches.length < 3) {
-            const contextLines: string[] = []
-            if (i > 0) contextLines.push(`L${i}: ${lines[i - 1].trim().slice(0, 120)}`)
-            contextLines.push(`L${i + 1}: ${lines[i].trim().slice(0, 120)}`)
-            if (i < lines.length - 1) contextLines.push(`L${i + 2}: ${lines[i + 1].trim().slice(0, 120)}`)
-            matches.push({ line: i + 1, content: lines[i].trim().slice(0, 120), context: contextLines })
+
+      // Show up to 5 match locations per file with ±3 lines of context
+      for (const match of sr.matches.slice(0, 5)) {
+        const contextLines: string[] = []
+        const lineIdx = match.line - 1 // 0-based index into file.lines
+
+        for (let offset = -3; offset <= 3; offset++) {
+          const idx = lineIdx + offset
+          if (idx >= 0 && idx < file.lines.length) {
+            contextLines.push(`L${idx + 1}: ${file.lines[idx].trim().slice(0, 200)}`)
           }
         }
+
+        matches.push({
+          line: match.line,
+          content: match.content.trim().slice(0, 200),
+          context: contextLines,
+        })
       }
-      if (totalMatches > 0) {
-        results.push({ path, matchType: 'content', matches, totalMatches })
-      }
+
+      results.push({ path: sr.file, matchType: 'content', matches, totalMatches })
     }
   }
 
-  // Sort content matches by totalMatches descending for relevance
+  // Sort: path matches first, then by match count descending
   results.sort((a, b) => {
     if (a.matchType === 'path' && b.matchType !== 'path') return -1
     if (a.matchType !== 'path' && b.matchType === 'path') return 1
     return (b.totalMatches ?? 0) - (a.totalMatches ?? 0)
   })
 
-  return { totalFiles: paths.length, matchCount: results.length, results, ...(warning && { warning }) }
-}
-
-/** Build a test function for search: regex or case-insensitive substring. */
-function buildMatcher(query: string, isRegex?: boolean): { test: (s: string) => boolean; error?: string; warning?: string } {
-  if (isRegex) {
-    if (query.length > 200) {
-      return { test: () => false, error: 'Regex query too long (max 200 characters)' }
-    }
-    try {
-      const re = new RegExp(query, 'i')
-      return { test: (s: string) => re.test(s) }
-    } catch (e) {
-      // Fall back to case-insensitive substring matching
-      const q = query.toLowerCase()
-      return {
-        test: (s: string) => s.toLowerCase().includes(q),
-        warning: `Invalid regex (${e instanceof Error ? e.message : 'unknown error'}), falling back to substring match`,
-      }
-    }
-  }
-  const q = query.toLowerCase()
-  return { test: (s: string) => s.toLowerCase().includes(q) }
+  return { totalFiles: paths.length, matchCount: results.length, results }
 }
 
 function executeListDirectory(
@@ -274,19 +262,20 @@ function executeListDirectory(
   }
 }
 
+/** Map structural-index kind labels to the labels used by findSymbolSchema. */
+const KIND_MAP: Record<string, string> = { fn: 'function', iface: 'interface' }
+
 function executeFindSymbol(
   input: { name: string; kind?: string },
   codeIndex: CodeIndex,
 ): Record<string, unknown> {
   const results: Array<{ path: string; line: number; kind: string; match: string }> = []
-  const patterns = [
-    { regex: /(?:export\s+)?(?:async\s+)?function\s+(\w+)/g, kind: 'function' },
-    { regex: /(?:export\s+)?(?:const|let)\s+(\w+)\s*=\s*(?:async\s+)?\(/g, kind: 'function' },
-    { regex: /(?:export\s+)?class\s+(\w+)/g, kind: 'class' },
-    { regex: /(?:export\s+)?interface\s+(\w+)/g, kind: 'interface' },
-    { regex: /(?:export\s+)?type\s+(\w+)\s*[=<{]/g, kind: 'type' },
-    { regex: /(?:export\s+)?enum\s+(\w+)/g, kind: 'enum' },
-  ]
+  // Derive patterns from the shared SYMBOL_PATTERNS, remapping kind labels and
+  // cloning each RegExp to avoid shared /g lastIndex state across iterations.
+  const patterns = SYMBOL_PATTERNS.map(p => ({
+    regex: new RegExp(p.regex.source, p.regex.flags),
+    kind: KIND_MAP[p.kind] ?? p.kind,
+  }))
   const nameL = input.name.toLowerCase()
 
   for (const [filePath, file] of codeIndex.files) {

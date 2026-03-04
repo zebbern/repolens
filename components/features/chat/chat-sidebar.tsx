@@ -15,7 +15,7 @@ import { buildFileTreeString } from "@/lib/github/fetcher"
 import { downloadFile } from "@/lib/export"
 import { buildStructuralIndex } from "@/lib/ai/structural-index"
 import { getMaxIndexBytesForModel } from "@/lib/ai/providers"
-import { executeToolLocally } from "@/lib/ai/client-tool-executor"
+import { handleToolCall } from "@/lib/ai/tool-call-handler"
 import type { CodeIndex } from "@/lib/code/code-index"
 
 export function ChatSidebar({ className }: { className?: string }) {
@@ -52,31 +52,7 @@ export function ChatSidebar({ className }: { className?: string }) {
     transport,
     id: 'codedoc-chat',
 
-    onToolCall: async ({ toolCall }) => {
-      if (toolCall.dynamic) return
-
-      try {
-        const result = executeToolLocally(
-          toolCall.toolName,
-          toolCall.input as Record<string, unknown>,
-          codeIndexRef.current,
-        )
-        addToolOutput({
-          // AI SDK expects a literal tool name type, but dynamic tool names require this cast
-          tool: toolCall.toolName as never,
-          toolCallId: toolCall.toolCallId,
-          output: result,
-        })
-      } catch (err) {
-        addToolOutput({
-          state: 'output-error' as const,
-          // AI SDK expects a literal tool name type, but dynamic tool names require this cast
-          tool: toolCall.toolName as never,
-          toolCallId: toolCall.toolCallId,
-          errorText: err instanceof Error ? err.message : 'Tool execution failed',
-        })
-      }
-    },
+    onToolCall: async ({ toolCall }): Promise<void> => handleToolCall(toolCall, addToolOutput, codeIndexRef),
 
     sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithToolCalls,
   })

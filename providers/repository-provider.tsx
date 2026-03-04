@@ -5,7 +5,7 @@ import type { GitHubRepo, FileNode, ParsedFile, RepositoryContext } from "@/type
 import { parseGitHubUrl } from "@/lib/github/parser"
 import { fetchRepoMetadata, fetchRepoTree, buildFileTree, fetchFileContent, detectLanguage } from "@/lib/github/fetcher"
 import type { CodeIndex } from "@/lib/code/code-index"
-import { createEmptyIndex, batchIndexFiles, flattenFiles, buildAIContext } from "@/lib/code/code-index"
+import { createEmptyIndex, batchIndexFiles, flattenFiles } from '@/lib/code/code-index'
 import { fetchRepoZipball, isFileIndexable } from "@/lib/github/zipball"
 import { getCachedRepo, setCachedRepo } from "@/lib/cache/repo-cache"
 import { analyzeCodebase, type FullAnalysis } from "@/lib/code/import-parser"
@@ -60,7 +60,6 @@ interface RepositoryContextType extends RepositoryContext {
   getFileByPath: (path: string) => FileNode | null
   codeIndex: CodeIndex
   updateCodeIndex: (index: CodeIndex) => void
-  getAIContext: (query: string) => string
   indexingProgress: IndexingProgress
   searchState: SearchState
   setSearchState: Dispatch<SetStateAction<SearchState>>
@@ -353,10 +352,6 @@ export function RepositoryProvider({ children }: { children: ReactNode }) {
     setCodeIndex(index)
   }, [])
   
-  const getAIContext = useCallback((query: string): string => {
-    return buildAIContext(codeIndex, query)
-  }, [codeIndex])
-
   const loadFileContent = useCallback(async (path: string): Promise<string | null> => {
     // B4: Check code index first before hitting the network
     const existingFile = codeIndex?.files?.get(path)
@@ -413,7 +408,6 @@ export function RepositoryProvider({ children }: { children: ReactNode }) {
         getFileByPath,
         codeIndex,
         updateCodeIndex,
-        getAIContext,
         indexingProgress,
         searchState,
         setSearchState,

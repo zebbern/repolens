@@ -215,57 +215,6 @@ export function getLineContext(
 }
 
 /**
- * Build AI context from indexed files - returns most relevant files
- */
-export function buildAIContext(
-  index: CodeIndex,
-  query: string,
-  maxFiles: number = 10,
-  maxLinesPerFile: number = 100
-): string {
-  // First, search for relevant files
-  const searchResults = searchIndex(index, query)
-  
-  let context = ''
-  let filesAdded = 0
-  
-  // Add files with search matches first
-  for (const result of searchResults) {
-    if (filesAdded >= maxFiles) break
-    
-    const file = index.files.get(result.file)
-    if (!file) continue
-    
-    const truncatedContent = file.lines.slice(0, maxLinesPerFile).join('\n')
-    const truncated = file.lineCount > maxLinesPerFile ? `\n... (${file.lineCount - maxLinesPerFile} more lines)` : ''
-    
-    context += `\n### File: ${file.path}\n\`\`\`${file.language || ''}\n${truncatedContent}${truncated}\n\`\`\`\n`
-    filesAdded++
-  }
-  
-  // If we still have room, add some key files
-  if (filesAdded < maxFiles) {
-    const keyPatterns = ['readme', 'package.json', 'index', 'main', 'app']
-    
-    for (const [path, file] of index.files) {
-      if (filesAdded >= maxFiles) break
-      if (searchResults.some(r => r.file === path)) continue
-      
-      const lowerPath = path.toLowerCase()
-      if (keyPatterns.some(p => lowerPath.includes(p))) {
-        const truncatedContent = file.lines.slice(0, maxLinesPerFile).join('\n')
-        const truncated = file.lineCount > maxLinesPerFile ? `\n... (${file.lineCount - maxLinesPerFile} more lines)` : ''
-        
-        context += `\n### File: ${file.path}\n\`\`\`${file.language || ''}\n${truncatedContent}${truncated}\n\`\`\`\n`
-        filesAdded++
-      }
-    }
-  }
-  
-  return context
-}
-
-/**
  * Get all file paths that match a pattern
  */
 export function getMatchingPaths(files: FileNode[], pattern: string): string[] {

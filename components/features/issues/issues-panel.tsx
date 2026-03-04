@@ -70,6 +70,8 @@ function getRiskScoreColor(score: number): { color: string; bg: string; border: 
 export function IssuesPanel({ codeIndex, onNavigateToFile }: IssuesPanelProps) {
   const [viewMode, setViewMode] = useState<ViewMode>('issues')
   const [filter, setFilter] = useState<FilterMode>('all')
+  const [hideInfo, setHideInfo] = useState(true)
+  const [hideLowConfidence, setHideLowConfidence] = useState(true)
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set())
   const [expandedIssues, setExpandedIssues] = useState<Set<string>>(new Set())
   const [fixCache, setFixCache] = useState<Map<string, FixSuggestion | null>>(new Map())
@@ -164,10 +166,25 @@ export function IssuesPanel({ codeIndex, onNavigateToFile }: IssuesPanelProps) {
   if (!results) return null
 
   const filteredIssues = results.issues.filter(issue => {
+    // Apply severity/confidence visibility filters
+    if (hideInfo && issue.severity === 'info') return false
+    if (hideLowConfidence && issue.confidence === 'low') return false
+    // Apply category/severity filter mode
     if (filter === 'all') return true
     if (filter === 'critical' || filter === 'warning' || filter === 'info') return issue.severity === filter
     return issue.category === filter
   })
+
+  // Compute filtered counts for summary display
+  const filteredSummary = {
+    total: filteredIssues.length,
+    critical: filteredIssues.filter(i => i.severity === 'critical').length,
+    warning: filteredIssues.filter(i => i.severity === 'warning').length,
+    info: filteredIssues.filter(i => i.severity === 'info').length,
+    bySecurity: filteredIssues.filter(i => i.category === 'security').length,
+    byBadPractice: filteredIssues.filter(i => i.category === 'bad-practice').length,
+    byReliability: filteredIssues.filter(i => i.category === 'reliability').length,
+  }
 
   const groupedByFile = new Map<string, CodeIssue[]>()
   for (const issue of filteredIssues) {
@@ -340,7 +357,7 @@ export function IssuesPanel({ codeIndex, onNavigateToFile }: IssuesPanelProps) {
 
         {/* Summary badges */}
         <div className="grid grid-cols-3 gap-2 mb-3">
-          {summary.critical > 0 && (
+          {filteredSummary.critical > 0 && (
             <button
               onClick={() => setFilter(f => f === 'critical' ? 'all' : 'critical')}
               aria-pressed={filter === 'critical'}
@@ -349,11 +366,11 @@ export function IssuesPanel({ codeIndex, onNavigateToFile }: IssuesPanelProps) {
                 filter === 'critical' ? 'border-red-500/40 bg-red-500/15' : 'border-red-500/20 bg-red-500/5 hover:bg-red-500/10'
               )}
             >
-              <p className="text-lg font-bold text-red-400 tabular-nums">{summary.critical}</p>
+              <p className="text-lg font-bold text-red-400 tabular-nums">{filteredSummary.critical}</p>
               <p className="text-[10px] text-red-400/70">Critical</p>
             </button>
           )}
-          {summary.warning > 0 && (
+          {filteredSummary.warning > 0 && (
             <button
               onClick={() => setFilter(f => f === 'warning' ? 'all' : 'warning')}
               aria-pressed={filter === 'warning'}
@@ -362,11 +379,11 @@ export function IssuesPanel({ codeIndex, onNavigateToFile }: IssuesPanelProps) {
                 filter === 'warning' ? 'border-amber-500/40 bg-amber-500/15' : 'border-amber-500/20 bg-amber-500/5 hover:bg-amber-500/10'
               )}
             >
-              <p className="text-lg font-bold text-amber-400 tabular-nums">{summary.warning}</p>
+              <p className="text-lg font-bold text-amber-400 tabular-nums">{filteredSummary.warning}</p>
               <p className="text-[10px] text-amber-400/70">Warnings</p>
             </button>
           )}
-          {summary.info > 0 && (
+          {filteredSummary.info > 0 && (
             <button
               onClick={() => setFilter(f => f === 'info' ? 'all' : 'info')}
               aria-pressed={filter === 'info'}
@@ -375,7 +392,7 @@ export function IssuesPanel({ codeIndex, onNavigateToFile }: IssuesPanelProps) {
                 filter === 'info' ? 'border-blue-500/40 bg-blue-500/15' : 'border-blue-500/20 bg-blue-500/5 hover:bg-blue-500/10'
               )}
             >
-              <p className="text-lg font-bold text-blue-400 tabular-nums">{summary.info}</p>
+              <p className="text-lg font-bold text-blue-400 tabular-nums">{filteredSummary.info}</p>
               <p className="text-[10px] text-blue-400/70">Info</p>
             </button>
           )}
@@ -393,10 +410,10 @@ export function IssuesPanel({ codeIndex, onNavigateToFile }: IssuesPanelProps) {
                 : 'border-foreground/[0.06] text-text-muted hover:text-text-secondary hover:bg-foreground/5'
             )}
           >
-            All ({summary.total})
+            All ({filteredSummary.total})
           </button>
           {(Object.keys(CATEGORY_CONFIG) as IssueCategory[]).map(cat => {
-            const count = cat === 'security' ? summary.bySecurity : cat === 'bad-practice' ? summary.byBadPractice : summary.byReliability
+            const count = cat === 'security' ? filteredSummary.bySecurity : cat === 'bad-practice' ? filteredSummary.byBadPractice : filteredSummary.byReliability
             if (count === 0) return null
             const cfg = CATEGORY_CONFIG[cat]
             return (
@@ -416,6 +433,33 @@ export function IssuesPanel({ codeIndex, onNavigateToFile }: IssuesPanelProps) {
               </button>
             )
           })}
+        </div>
+
+        {/* Visibility toggles */}
+        <div className="flex items-center gap-3 mt-2 pt-2 border-t border-foreground/[0.04]">
+          <label className="flex items-center gap-1.5 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={!hideInfo}
+              onChange={() => setHideInfo(h => !h)}
+              className="h-3 w-3 rounded border-foreground/20 accent-blue-500"
+            />
+            <span className="text-[10px] text-text-muted">Show info</span>
+          </label>
+          <label className="flex items-center gap-1.5 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={!hideLowConfidence}
+              onChange={() => setHideLowConfidence(h => !h)}
+              className="h-3 w-3 rounded border-foreground/20 accent-blue-500"
+            />
+            <span className="text-[10px] text-text-muted">Show low confidence</span>
+          </label>
+          {(hideInfo || hideLowConfidence) && filteredSummary.total < summary.total && (
+            <span className="text-[9px] text-text-muted/60 ml-auto">
+              {summary.total - filteredSummary.total} hidden
+            </span>
+          )}
         </div>
       </div>
 

@@ -9,8 +9,8 @@ interface FileMetadata {
   symbols?: string[]
 }
 
-// Regex patterns for extracting symbol definitions (mirrored in client-tool-executor.ts executeFindSymbol with different kind labels)
-const SYMBOL_PATTERNS = [
+// Regex patterns for extracting symbol definitions
+export const SYMBOL_PATTERNS = [
   { regex: /(?:export\s+)?(?:async\s+)?function\s+(\w+)/g, kind: 'fn' },
   { regex: /(?:export\s+)?(?:const|let)\s+(\w+)\s*=\s*(?:async\s+)?\(/g, kind: 'fn' },
   { regex: /(?:export\s+)?class\s+(\w+)/g, kind: 'class' },

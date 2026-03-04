@@ -14,6 +14,9 @@ import type { File } from '@babel/types'
 import type { IndexedFile } from '../code-index'
 import type { CodeIssue, IssueCategory, IssueSeverity } from './types'
 
+/** Common variable names expected to be reused across scopes (loop vars, error vars, etc.) */
+const COMMON_SHADOW_NAMES = new Set(['i', 'j', 'k', 'err', 'error', 'e', 'result', 'data', 'item', 'index', 'key', 'value'])
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -76,6 +79,8 @@ function createASTIssue(
     column: number
     suggestion?: string
     cwe?: string
+    fix?: string
+    fixDescription?: string
   },
 ): CodeIssue {
   const lineIdx = opts.line - 1
@@ -97,6 +102,8 @@ function createASTIssue(
     suggestion: opts.suggestion,
     cwe: opts.cwe,
     confidence: 'high',
+    fix: opts.fix,
+    fixDescription: opts.fixDescription,
   }
 }
 
@@ -129,6 +136,8 @@ export function analyzeAST(ast: ParseResult<File>, file: IndexedFile): CodeIssue
               line: loc.start.line,
               column: loc.start.column,
               suggestion: 'Replace eval() with JSON.parse() or a safe expression parser.',
+              fix: 'JSON.parse(data)',
+              fixDescription: 'Replace eval() with JSON.parse() for data parsing or a safe expression evaluator',
             }))
           }
         }
@@ -148,6 +157,8 @@ export function analyzeAST(ast: ParseResult<File>, file: IndexedFile): CodeIssue
               line: loc.start.line,
               column: loc.start.column,
               suggestion: 'Replace with a static function or safe expression evaluator.',
+              fix: 'Use a static function definition instead',
+              fixDescription: 'Replace Function constructor with a static function definition',
             }))
           }
         }
@@ -170,6 +181,8 @@ export function analyzeAST(ast: ParseResult<File>, file: IndexedFile): CodeIssue
               line: loc.start.line,
               column: loc.start.column,
               suggestion: 'Replace with a static function or safe expression evaluator.',
+              fix: 'Use a static function definition instead',
+              fixDescription: 'Replace Function constructor with a static function definition',
             }))
           }
         }
@@ -240,6 +253,7 @@ export function analyzeAST(ast: ParseResult<File>, file: IndexedFile): CodeIssue
       VariableDeclarator(path: NodePath<t.VariableDeclarator>) {
         if (!t.isIdentifier(path.node.id)) return
         const name = path.node.id.name
+        if (COMMON_SHADOW_NAMES.has(name)) return
         if (path.scope.parent && path.scope.parent.hasBinding(name)) {
           const loc = path.node.loc
           if (loc) {

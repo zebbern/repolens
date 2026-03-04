@@ -5,7 +5,7 @@
 // O(n) scans when multiple components (code-browser, issues-panel) call it
 // with the same index.
 
-import type { CodeIndex, SearchResult } from '../code-index'
+import type { CodeIndex, SearchResult, IndexedFile } from '../code-index'
 import { searchIndex } from '../code-index'
 import type { FullAnalysis } from '../import-parser'
 import type { ScanRule, CodeIssue, IssueSeverity, HealthGrade, ScanResults } from './types'
@@ -22,6 +22,8 @@ import { isLikelyRealSecret } from './entropy'
 import { getAST, analyzeAST, AST_LANGUAGES, clearASTCache } from './ast-analyzer'
 import { trackTaint, taintFlowsToIssues } from './taint-tracker'
 import { scoreIssue, scoreProject, getRiskDistribution, buildCvssVector } from './risk-scorer'
+
+const MAX_PER_RULE = 15
 
 // Combined rule set (all regex-based rules)
 const RULES: ScanRule[] = [
@@ -71,12 +73,12 @@ export function clearScanCache(): void {
 
 /** Shared context for scan helper functions. */
 interface ScanContext {
-  filesToScan: Map<string, { path: string; content: string; language?: string | null; lineCount: number; lines: string[] }>
+  filesToScan: Map<string, IndexedFile>
   scanCodeIndex: CodeIndex
   isPartialScan: boolean
   blockCommentCache: Map<string, Set<number> | undefined>
   presentExtensions: Set<string>
-  filesByExtension: Map<string, Map<string, { path: string; content: string; language?: string | null; lineCount: number; lines: string[] }>>
+  filesByExtension: Map<string, Map<string, IndexedFile>>
 }
 
 /** Result returned by runRegexRules helper. */
@@ -98,7 +100,6 @@ function runRegexRules(ctx: ScanContext): RegexRulesResult {
   let rulesEvaluated = 0
   let suppressionCount = 0
   const ruleOverflow = new Map<string, number>()
-  const MAX_PER_RULE = 15
 
   for (const rule of RULES) {
     if (!rule.pattern) continue
@@ -255,7 +256,7 @@ function runRegexRules(ctx: ScanContext): RegexRulesResult {
 // ---------------------------------------------------------------------------
 
 function runAstAnalysis(
-  filesToScan: Map<string, { path: string; content: string; language?: string | null; lineCount: number; lines: string[] }>,
+  filesToScan: Map<string, IndexedFile>,
 ): CodeIssue[] {
   const issues: CodeIssue[] = []
   for (const [path, file] of filesToScan) {
@@ -279,7 +280,7 @@ function runAstAnalysis(
 // ---------------------------------------------------------------------------
 
 function runTaintAnalysis(
-  filesToScan: Map<string, { path: string; content: string; language?: string | null; lineCount: number; lines: string[] }>,
+  filesToScan: Map<string, IndexedFile>,
 ): CodeIssue[] {
   const issues: CodeIssue[] = []
   for (const [path, file] of filesToScan) {
@@ -453,6 +454,46 @@ export function scanIssues(
       if (issue.ruleId === 'empty-catch' && astEmptyCatchKeys.has(`${issue.file}:${issue.line}`)) {
         issues.splice(i, 1)
       }
+    }
+  }
+
+  // 2d. Dedup: prefer regex eval-usage (has CWE, suppression, MAX_PER_RULE metadata)
+  // over ast-eval-usage at the same file+line. Normalize remaining AST-only findings.
+  const regexEvalKeys = new Set(
+    issues.filter(i => i.ruleId === 'eval-usage').map(i => `${i.file}:${i.line}`)
+  )
+  if (regexEvalKeys.size > 0) {
+    for (let i = issues.length - 1; i >= 0; i--) {
+      const issue = issues[i]
+      if (issue.ruleId === 'ast-eval-usage' && regexEvalKeys.has(`${issue.file}:${issue.line}`)) {
+        issues.splice(i, 1)
+      }
+    }
+  }
+  // Normalize any remaining ast-eval-usage (AST-only findings) to eval-usage
+  // and apply MAX_PER_RULE cap + inline suppression that the regex scanner already handles
+  const existingEvalCount = issues.filter(i => i.ruleId === 'eval-usage').length
+  let normalizedEvalCount = existingEvalCount
+  for (let i = issues.length - 1; i >= 0; i--) {
+    const issue = issues[i]
+    if (issue.ruleId !== 'ast-eval-usage') continue
+    issue.ruleId = 'eval-usage'
+    issue.id = issue.id.replace('ast-eval-usage', 'eval-usage')
+    if (!issue.cwe) issue.cwe = 'CWE-94'
+    // Apply inline suppression check for normalized issues
+    const indexedFile = scanCodeIndex.files.get(issue.file)
+    const allLines = indexedFile?.lines
+    const lineContent = allLines && issue.line >= 1 && issue.line <= allLines.length ? allLines[issue.line - 1] : ''
+    const prevLine = allLines && issue.line >= 2 ? allLines[issue.line - 2] : undefined
+    if (hasInlineSuppression(lineContent, prevLine, 'eval-usage', true)) {
+      issues.splice(i, 1)
+      continue
+    }
+    // Apply MAX_PER_RULE cap
+    normalizedEvalCount++
+    if (normalizedEvalCount > MAX_PER_RULE) {
+      ruleOverflow.set('eval-usage', (ruleOverflow.get('eval-usage') || 0) + 1)
+      issues.splice(i, 1)
     }
   }
 

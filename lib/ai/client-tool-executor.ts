@@ -279,6 +279,118 @@ function executeGetFileStats(
   }
 }
 
+// ---------------------------------------------------------------------------
+// Import resolution helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Pre-built lookup structure for efficient import path resolution.
+ * Built once per analyzeImports call, reused across all files.
+ */
+interface PathLookup {
+  /** Normalized path -> original path */
+  exact: Map<string, string>
+  /** Normalized path without extension -> original path */
+  withoutExt: Map<string, string>
+  /** Directory path (for index / __init__ barrel files) -> original path */
+  indexDirs: Map<string, string>
+}
+
+function buildPathLookup(paths: string[]): PathLookup {
+  const exact = new Map<string, string>()
+  const withoutExt = new Map<string, string>()
+  const indexDirs = new Map<string, string>()
+
+  for (const p of paths) {
+    const normalized = p.replace(/\\/g, '/')
+    exact.set(normalized, p)
+
+    const stripped = normalized.replace(/\.(tsx?|jsx?|mts|mjs|py|rs|go|java)$/i, '')
+    // First file wins to avoid overwriting with later duplicates
+    if (!withoutExt.has(stripped)) {
+      withoutExt.set(stripped, p)
+    }
+
+    // Map directory to barrel/index file
+    const indexMatch = stripped.match(/^(.+)\/(index|__init__)$/)
+    if (indexMatch && !indexDirs.has(indexMatch[1])) {
+      indexDirs.set(indexMatch[1], p)
+    }
+  }
+
+  return { exact, withoutExt, indexDirs }
+}
+
+/** Resolve a relative path (with ./ or ../ segments) against a base directory. Returns null if '..' exceeds root. */
+function resolveRelativePath(fromDir: string, relativePath: string): string | null {
+  const parts = fromDir.split('/').filter(Boolean)
+  const relParts = relativePath.split('/').filter(Boolean)
+
+  for (const part of relParts) {
+    if (part === '..') {
+      if (parts.length === 0) return null // can't go above root
+      parts.pop()
+    } else if (part !== '.') {
+      parts.push(part)
+    }
+  }
+
+  return parts.join('/')
+}
+
+/**
+ * Resolve an import source string to the actual file path in the code index.
+ *
+ * Handles:
+ * - Relative imports (`./foo`, `../bar`)
+ * - Alias imports (`@/lib/utils`)
+ * - Extension-less imports (tries .ts, .tsx, .js, .jsx, .mts, .mjs, .py, etc.)
+ * - Index / barrel file imports (`./components` -> `components/index.ts`)
+ *
+ * Returns `null` if no matching file is found (external package).
+ */
+function resolveImportToFilePath(
+  importSource: string,
+  importerPath: string,
+  lookup: PathLookup,
+): string | null {
+  let candidateBase: string
+
+  if (importSource.startsWith('@/')) {
+    // Alias — treat as project-root-relative
+    candidateBase = importSource.slice(2)
+  } else if (importSource.startsWith('.')) {
+    // Relative import — resolve against importer's directory
+    const importerDir = importerPath.replace(/\\/g, '/').split('/').slice(0, -1).join('/')
+    const resolved = resolveRelativePath(importerDir, importSource)
+    if (resolved === null) return null // unresolvable — '..' exceeded root
+    candidateBase = resolved
+  } else {
+    // Bare specifier — unlikely to match project files but try anyway
+    candidateBase = importSource
+  }
+
+  const normalized = candidateBase.replace(/\\/g, '/')
+
+  // 1. Exact match (import source already includes extension)
+  const exactMatch = lookup.exact.get(normalized)
+  if (exactMatch) return exactMatch
+
+  // 2. Extension-less match (most common: `import './utils'` -> `utils.ts`)
+  const extMatch = lookup.withoutExt.get(normalized)
+  if (extMatch) return extMatch
+
+  // 3. Index/barrel file resolution (`import './components'` -> `components/index.ts`)
+  const indexMatch = lookup.indexDirs.get(normalized)
+  if (indexMatch) return indexMatch
+
+  return null
+}
+
+// ---------------------------------------------------------------------------
+// executeAnalyzeImports
+// ---------------------------------------------------------------------------
+
 function executeAnalyzeImports(
   input: { path: string },
   codeIndex: CodeIndex,
@@ -287,18 +399,78 @@ function executeAnalyzeImports(
   if (!file) return { error: `File not found: ${input.path}` }
 
   const resolvedPath = file.path
-  const importRegex = /import\s+.*from\s+['"](.*)['"]/g
+
+  // --- Outgoing imports from the target file ---
+  // Non-greedy .*? matches IMPORT_REGEX in structural-index.ts
+  const importRegex = /import\s+.*?from\s+['"]([^'"]+)['"]/g
   const imports: string[] = []
-  let m
+  let m: RegExpExecArray | null
   while ((m = importRegex.exec(file.content)) !== null) imports.push(m[1])
 
-  const baseName = resolvedPath.replace(/\.(ts|tsx|js|jsx)$/, '')
-  const fileName = resolvedPath.split('/').pop()?.replace(/\.\w+$/, '')
+  // --- Reverse lookup: which files import the target ---
+  const paths = allPaths(codeIndex)
+  const lookup = buildPathLookup(paths)
+
+  // JS/TS import & re-export patterns
+  const JS_IMPORT_RE = /import\s+.*?from\s+['"]([^'"]+)['"]/g
+  const RE_EXPORT_RE = /export\s+(?:\{[^}]*\}|\*(?:\s+as\s+\w+)?)\s+from\s+['"]([^'"]+)['"]/g
+  const REQUIRE_RE = /require\s*\(\s*['"]([^'"]+)['"]\s*\)/g
+  // Python import patterns
+  const PY_IMPORT_RE = /(?:from\s+(\S+)\s+import|import\s+(\S+))/g
+
   const importedBy: string[] = []
 
   for (const [filePath, otherFile] of codeIndex.files) {
     if (filePath === resolvedPath) continue
-    if (otherFile.content.includes(baseName) || (fileName && otherFile.content.includes('./' + fileName))) {
+
+    let isImporter = false
+    const ext = filePath.split('.').pop()?.toLowerCase() || ''
+
+    if (['ts', 'tsx', 'js', 'jsx', 'mts', 'mjs'].includes(ext)) {
+      // JS/TS: check import statements, re-exports, and require() calls
+      const regexes = [JS_IMPORT_RE, RE_EXPORT_RE, REQUIRE_RE]
+      for (const baseRe of regexes) {
+        if (isImporter) break
+        // Create fresh instance to avoid shared lastIndex state
+        const re = new RegExp(baseRe.source, baseRe.flags)
+        let match: RegExpExecArray | null
+        while ((match = re.exec(otherFile.content)) !== null) {
+          if (resolveImportToFilePath(match[1], filePath, lookup) === resolvedPath) {
+            isImporter = true
+            break
+          }
+        }
+      }
+    } else if (ext === 'py') {
+      // Python: convert dot-separated module path to file path
+      const re = new RegExp(PY_IMPORT_RE.source, PY_IMPORT_RE.flags)
+      let match: RegExpExecArray | null
+      while ((match = re.exec(otherFile.content)) !== null) {
+        const rawSource = match[1] || match[2]
+        let importPath: string
+
+        // Handle Python relative imports (.foo, ..foo)
+        const relativeMatch = rawSource.match(/^(\.+)(.*)$/)
+        if (relativeMatch) {
+          const level = relativeMatch[1].length
+          const rest = relativeMatch[2] ? relativeMatch[2].replace(/\./g, '/') : ''
+          const prefix = level === 1 ? './' : '../'.repeat(level - 1)
+          importPath = prefix + rest
+        } else {
+          // Absolute Python import: foo.bar.baz -> foo/bar/baz
+          importPath = rawSource.replace(/\./g, '/')
+        }
+
+        if (resolveImportToFilePath(importPath, filePath, lookup) === resolvedPath) {
+          isImporter = true
+          break
+        }
+      }
+    }
+    // Rust/Go/Java: import paths are package-level and don't map cleanly
+    // to file paths without language-specific resolution. Skipped for now.
+
+    if (isImporter) {
       importedBy.push(filePath)
     }
   }

@@ -19,7 +19,7 @@ const SYMBOL_PATTERNS = [
   { regex: /(?:export\s+)?enum\s+(\w+)/g, kind: 'enum' },
 ] as const
 
-const IMPORT_REGEX = /import\s+.*?from\s+['"]([^'"]+)['"]/g
+export const IMPORT_REGEX = /import\s+.*?from\s+['"]([^'"]+)['"]/g
 const EXPORT_REGEX = /^export\s+(?:default\s+)?(?:async\s+)?(?:function|class|const|let|type|interface|enum)\s+(\w+)/
 
 const MAX_INDEX_BYTES = 300_000
@@ -138,7 +138,7 @@ export function extractSignature(line: string, name: string, kind: string): stri
 }
 
 /** Get language-specific symbol patterns for structural extraction. */
-function getLanguagePatterns(language: string): ReadonlyArray<{ regex: RegExp; kind: string }> {
+export function getLanguagePatterns(language: string): ReadonlyArray<{ regex: RegExp; kind: string }> {
   switch (language) {
     case 'python':
       return [
@@ -168,13 +168,16 @@ function getLanguagePatterns(language: string): ReadonlyArray<{ regex: RegExp; k
         { regex: /(?:public|private|protected)\s+(?:static\s+)?(?:abstract\s+)?(?:\w+(?:<[^>]*>)?)\s+(\w+)\s*\(/g, kind: 'fn' },
       ]
     default:
-      // TypeScript / JavaScript
-      return SYMBOL_PATTERNS
+      // TypeScript / JavaScript — return fresh instances to avoid shared /g state
+      return SYMBOL_PATTERNS.map(pat => ({
+        regex: new RegExp(pat.regex.source, pat.regex.flags),
+        kind: pat.kind,
+      }))
   }
 }
 
 /** Get the import regex for a specific language. */
-function getImportRegex(language: string): RegExp | null {
+export function getImportRegex(language: string): RegExp | null {
   switch (language) {
     case 'python':
       return /(?:from\s+(\S+)\s+import|import\s+(\S+))/g
@@ -185,12 +188,12 @@ function getImportRegex(language: string): RegExp | null {
     case 'java':
       return /import\s+([^;]+)/g
     default:
-      return IMPORT_REGEX // TS/JS default
+      return new RegExp(IMPORT_REGEX.source, IMPORT_REGEX.flags) // fresh instance to avoid shared /g state
   }
 }
 
 /** Get the export regex for a specific language. Returns null for languages without explicit exports. */
-function getExportRegex(language: string): RegExp | null {
+export function getExportRegex(language: string): RegExp | null {
   switch (language) {
     case 'python':
     case 'go':
@@ -200,7 +203,7 @@ function getExportRegex(language: string): RegExp | null {
     case 'java':
       return /^public\s+(?:static\s+)?(?:abstract\s+)?(?:class|interface|enum|(?:\w+(?:<[^>]*>)?)\s+)(\w+)/
     default:
-      return EXPORT_REGEX
+      return new RegExp(EXPORT_REGEX.source, EXPORT_REGEX.flags)
   }
 }
 
@@ -281,13 +284,13 @@ function extractStructure(file: IndexedFile): {
 }
 
 /** Check if a file is a code file worth extracting structure from. */
-function isCodeFile(path: string): boolean {
+export function isCodeFile(path: string): boolean {
   const ext = path.split('.').pop()?.toLowerCase() || ''
   return ['ts', 'tsx', 'js', 'jsx', 'mts', 'mjs', 'py', 'rs', 'go', 'java'].includes(ext)
 }
 
 /** Infer language from file extension when metadata is missing. */
-function inferLanguage(filePath: string): string {
+export function inferLanguage(filePath: string): string {
   const ext = filePath.split('.').pop()?.toLowerCase() || ''
   const map: Record<string, string> = {
     ts: 'typescript',

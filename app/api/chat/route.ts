@@ -46,6 +46,7 @@ export async function POST(req: Request) {
     }
     const { messages: rawMessages, provider, model, apiKey, repoContext, structuralIndex, maxSteps } = parsed.data
     const messages = rawMessages as unknown as UIMessage[]
+    const stepBudget = maxSteps ?? 50
 
     // Build system prompt
     let systemPrompt = `You are CodeDoc, a senior software engineer with full access to the codebase. You help developers understand code, answer architecture questions, write documentation, and create diagrams.
@@ -77,7 +78,7 @@ After generating documentation or making claims about code:
 3. If you find a discrepancy, correct your output and note the correction
 
 ## Step Budget
-You have up to 50 tool-call rounds. Plan your approach:
+You have up to ${stepBudget} tool-call rounds. Plan your approach:
 - Use readFiles (batch) to read up to 10 files in a single round — this is far more efficient than individual readFile calls
 - Use readFile with startLine/endLine to read only the section you need from large files
 - For broad exploration: listDirectory + searchFiles first, then targeted reads
@@ -153,8 +154,8 @@ No repository is currently connected. You can still answer general programming q
       system: systemPrompt,
       messages: await convertToModelMessages(messages),
       tools: codeTools,
-      prepareStep: createContextCompactor(),
-      stopWhen: stepCountIs(maxSteps ?? 50),
+      prepareStep: createContextCompactor({ maxSteps: stepBudget }),
+      stopWhen: stepCountIs(stepBudget),
       abortSignal: req.signal,
     })
 

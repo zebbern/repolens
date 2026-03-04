@@ -97,6 +97,7 @@ export function ChatSidebar({ className }: { className?: string }) {
           apiKey: apiKeys[selectedModel.provider].key,
           repoContext,
           structuralIndex,
+          maxSteps: 50,
         },
       },
     )

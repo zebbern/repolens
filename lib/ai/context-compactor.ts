@@ -9,20 +9,30 @@ import {
   isCodeFile,
 } from './structural-index'
 
-/**
- * Maximum number of recent steps whose tool results are kept in full.
- * Older tool results are compressed to just their tool name + a summary marker.
- */
-const FULL_RESULT_STEPS = 4
+/** Minimum number of recent steps whose tool results are kept in full. */
+const MIN_FULL_RESULT_STEPS = 4
 
-/**
- * Maximum character length for a single tool-result output value before
- * it gets truncated in older steps.
- */
-const MAX_TOOL_RESULT_LENGTH = 500
+/** Default max length for compacted tool results. */
+const DEFAULT_TOOL_RESULT_LENGTH = 1500
+
+/** Tool-specific limits for non-file-read tools during compaction. */
+const TOOL_RESULT_LIMITS: Record<string, number> = {
+  searchFiles: 2000,
+  analyzeImports: 2000,
+  listDirectory: 1000,
+  findSymbol: 1500,
+  getFileStats: 500,
+  scanIssues: 2000,
+  getProjectOverview: 1500,
+  generateDiagram: 500,
+}
 
 /** Maximum items per structural section in a compaction summary. */
-const MAX_SUMMARY_ITEMS = 15
+const MAX_SUMMARY_ITEMS = 20
+
+interface CompactorOptions {
+  maxSteps?: number
+}
 
 /**
  * Create a `prepareStep` callback for `streamText()` that trims older
@@ -30,16 +40,20 @@ const MAX_SUMMARY_ITEMS = 15
  * multi-step tool-calling sessions.
  *
  * Strategy:
- * - Keep the last `FULL_RESULT_STEPS` worth of assistant+tool message pairs intact
+ * - Keep the last `fullResultSteps` worth of assistant+tool message pairs intact
+ *   (scales with maxSteps: 15% of budget, minimum MIN_FULL_RESULT_STEPS)
  * - For older tool messages, truncate large tool-result content to a short summary
  * - Never modify user or system messages
  */
-export function createContextCompactor() {
+export function createContextCompactor(options?: CompactorOptions) {
+  const maxSteps = options?.maxSteps ?? 50
+  const fullResultSteps = Math.max(MIN_FULL_RESULT_STEPS, Math.floor(maxSteps * 0.15))
+
   return ({ stepNumber, messages }: { stepNumber: number; messages: ModelMessage[] }) => {
     // No compaction needed for early steps
-    if (stepNumber < FULL_RESULT_STEPS) return undefined
+    if (stepNumber < fullResultSteps) return undefined
 
-    const compacted = compactMessages(messages, FULL_RESULT_STEPS)
+    const compacted = compactMessages(messages, fullResultSteps)
     return { messages: compacted }
   }
 }
@@ -83,7 +97,7 @@ function compactMessages(
  */
 export function summarizeCodeForCompaction(content: string, path: string): string {
   if (!isCodeFile(path)) {
-    return content.slice(0, MAX_TOOL_RESULT_LENGTH) + (content.length > MAX_TOOL_RESULT_LENGTH ? '… [truncated]' : '')
+    return content.slice(0, DEFAULT_TOOL_RESULT_LENGTH) + (content.length > DEFAULT_TOOL_RESULT_LENGTH ? '… [truncated]' : '')
   }
 
   const lines = content.split('\n')
@@ -179,7 +193,7 @@ function compactToolMessage(msg: ToolModelMessage): ToolModelMessage {
       }
 
       // Default truncation for all other tools
-      return truncateToolOutput(part, output)
+      return truncateToolOutput(part, output, toolName)
     }),
   }
 }
@@ -228,14 +242,14 @@ function compactFileReadResult(
 
   if (output.type === 'text') {
     const text = output.value as string
-    if (text.length <= MAX_TOOL_RESULT_LENGTH) return part
+    if (text.length <= DEFAULT_TOOL_RESULT_LENGTH) return part
     // Text readFile results may be raw content — try structural summary
     // but we lack a path, so fall back to truncation
     return {
       ...(part as Record<string, unknown>),
       output: {
         ...output,
-        value: text.slice(0, MAX_TOOL_RESULT_LENGTH) + '… [truncated]',
+        value: text.slice(0, DEFAULT_TOOL_RESULT_LENGTH) + '… [truncated]',
       },
     }
   }
@@ -245,32 +259,35 @@ function compactFileReadResult(
 
 /**
  * Default truncation for non-file-read tool results.
- * Preserves output up to MAX_TOOL_RESULT_LENGTH characters.
+ * Uses tool-specific limits when available, otherwise DEFAULT_TOOL_RESULT_LENGTH.
  */
 function truncateToolOutput(
   part: unknown,
   output: { type: string; value: unknown },
+  toolName?: string,
 ): unknown {
+  const maxLength = (toolName && TOOL_RESULT_LIMITS[toolName]) || DEFAULT_TOOL_RESULT_LENGTH
+
   if (output.type === 'text') {
     const text = output.value as string
-    if (text.length <= MAX_TOOL_RESULT_LENGTH) return part
+    if (text.length <= maxLength) return part
     return {
       ...(part as Record<string, unknown>),
       output: {
         ...output,
-        value: text.slice(0, MAX_TOOL_RESULT_LENGTH) + '… [truncated]',
+        value: text.slice(0, maxLength) + '… [truncated]',
       },
     }
   }
 
   if (output.type === 'json') {
     const serialized = JSON.stringify(output.value)
-    if (serialized.length <= MAX_TOOL_RESULT_LENGTH) return part
+    if (serialized.length <= maxLength) return part
     return {
       ...(part as Record<string, unknown>),
       output: {
         type: 'text' as const,
-        value: serialized.slice(0, MAX_TOOL_RESULT_LENGTH) + '… [truncated]',
+        value: serialized.slice(0, maxLength) + '… [truncated]',
       },
     }
   }

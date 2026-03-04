@@ -202,6 +202,12 @@ You have up to ${stepBudget} tool-call rounds. Plan efficiently:
 - Prioritize the most important files first -- not every file needs to be read
 - If approaching the step limit, prioritize completing your output over reading more files`
 
+    systemPrompt += `\n\n## Self-Verification Protocol
+After generating documentation or making claims about code:
+1. Re-read the key files you referenced to verify accuracy
+2. Cross-check function signatures, type definitions, and import chains
+3. If you find a discrepancy, correct your output and note the correction`
+
     systemPrompt += `\n\n## Important
 - You have access to readFile, readFiles, searchFiles, listDirectory, findSymbol, getFileStats, analyzeImports, scanIssues, generateDiagram, and getProjectOverview tools
 - ALWAYS read files before documenting them -- never guess or hallucinate
@@ -216,8 +222,8 @@ Your context window is approximately ${getModelContextWindow(model).toLocaleStri
       system: systemPrompt,
       messages: await convertToModelMessages(messages),
       tools: codeTools,
-      prepareStep: createContextCompactor(),
-      stopWhen: stepCountIs(maxSteps ?? 40),
+      prepareStep: createContextCompactor({ maxSteps: stepBudget }),
+      stopWhen: stepCountIs(stepBudget),
       abortSignal: req.signal,
     })
 

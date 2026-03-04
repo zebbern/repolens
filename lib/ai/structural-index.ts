@@ -24,6 +24,11 @@ const EXPORT_REGEX = /^export\s+(?:default\s+)?(?:async\s+)?(?:function|class|co
 
 const MAX_INDEX_BYTES = 300_000
 
+/** Per-file structural extraction limits. */
+const MAX_EXPORTS_PER_FILE = 30
+const MAX_IMPORTS_PER_FILE = 15
+const MAX_SYMBOLS_PER_FILE = 20
+
 /**
  * Build a compact structural index string from CodeIndex for inclusion in
  * the AI system prompt.  This replaces the old approach of sending raw file
@@ -277,9 +282,9 @@ function extractStructure(file: IndexedFile): {
   }
 
   return {
-    exports: [...new Set(exports)].slice(0, 15),
-    imports: imports.slice(0, 15),
-    symbols: [...symbols].slice(0, 15),
+    exports: [...new Set(exports)].slice(0, MAX_EXPORTS_PER_FILE),
+    imports: imports.slice(0, MAX_IMPORTS_PER_FILE),
+    symbols: [...symbols].slice(0, MAX_SYMBOLS_PER_FILE),
   }
 }
 

@@ -66,7 +66,7 @@ export function getModelContextWindow(model: string): number {
 
 /**
  * Calculate optimal structural index size based on model context window.
- * Allocates ~10% of context for the index, capped at 1MB.
+ * Allocates 15% of context for models ≤200K tokens and 10% for larger models, capped at 1MB.
  *
  * Intended for client-side callers that build the structural index before
  * sending it to the server. The server receives the already-built index
@@ -74,7 +74,8 @@ export function getModelContextWindow(model: string): number {
  */
 export function getMaxIndexBytesForModel(model: string): number {
   const contextTokens = getModelContextWindow(model)
-  // ~4 chars per token, allocate 10% of context for index
-  const targetBytes = Math.floor(contextTokens * 4 * 0.1)
+  // Use 15% of context for models ≤200K, 10% for larger models
+  const percentage = contextTokens <= 200_000 ? 0.15 : 0.10
+  const targetBytes = Math.floor(contextTokens * 4 * percentage)
   return Math.min(targetBytes, 1_000_000) // cap at 1MB
 }

@@ -28,13 +28,11 @@ describe('POST /api/models/anthropic', () => {
 
     expect(response.status).toBe(200)
     expect(data.models).toBeDefined()
-    expect(data.models.length).toBe(5)
+    expect(data.models.length).toBe(3)
 
     const ids = data.models.map((m: { id: string }) => m.id)
-    expect(ids).toContain('claude-3-5-sonnet-20241022')
-    expect(ids).toContain('claude-3-5-haiku-20241022')
-    expect(ids).toContain('claude-3-opus-20240229')
-    expect(ids).toContain('claude-3-sonnet-20240229')
+    expect(ids).toContain('claude-sonnet-4-20250514')
+    expect(ids).toContain('claude-opus-4-20250514')
     expect(ids).toContain('claude-3-haiku-20240307')
   })
 
@@ -49,7 +47,7 @@ describe('POST /api/models/anthropic', () => {
 
     expect(response.status).toBe(200)
     expect(data.models).toBeDefined()
-    expect(data.models.length).toBe(5)
+    expect(data.models.length).toBe(3)
   })
 
   it('returns 400 when API key is missing', async () => {
@@ -57,7 +55,7 @@ describe('POST /api/models/anthropic', () => {
     const data = await response.json()
 
     expect(response.status).toBe(400)
-    expect(data.error).toBe('API key required')
+    expect(data.error.message).toBe('API key required')
     expect(mockFetch).not.toHaveBeenCalled()
   })
 
@@ -66,7 +64,7 @@ describe('POST /api/models/anthropic', () => {
     const data = await response.json()
 
     expect(response.status).toBe(400)
-    expect(data.error).toBe('API key required')
+    expect(data.error.message).toBe('API key required')
     expect(mockFetch).not.toHaveBeenCalled()
   })
 
@@ -80,7 +78,7 @@ describe('POST /api/models/anthropic', () => {
     const data = await response.json()
 
     expect(response.status).toBe(401)
-    expect(data.error).toBe('Invalid API key')
+    expect(data.error.message).toBe('Invalid API key')
   })
 
   it('returns 500 when fetch throws a network error', async () => {
@@ -90,7 +88,7 @@ describe('POST /api/models/anthropic', () => {
     const data = await response.json()
 
     expect(response.status).toBe(500)
-    expect(data.error).toBe('Failed to validate key')
+    expect(data.error.message).toBe('Failed to validate key')
   })
 
   it('returns models for other non-401 error statuses', async () => {
@@ -104,7 +102,7 @@ describe('POST /api/models/anthropic', () => {
 
     expect(response.status).toBe(200)
     expect(data.models).toBeDefined()
-    expect(data.models.length).toBe(5)
+    expect(data.models.length).toBe(3)
   })
 
   it('sends correct headers and body to Anthropic API', async () => {

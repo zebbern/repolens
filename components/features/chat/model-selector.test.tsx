@@ -21,6 +21,7 @@ vi.mock('@/providers', () => ({
     selectedModel: null as ProviderModel | null,
     setSelectedModel: mockSetSelectedModel,
     getValidProviders: mockGetValidProviders,
+    modelFetchErrors: {} as Record<string, string>,
   }),
 }))
 

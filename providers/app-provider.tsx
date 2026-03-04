@@ -1,4 +1,4 @@
-'use client'
+"use client"
 
 import { createContext, useContext, useState, type ReactNode } from 'react'
 
@@ -23,7 +23,7 @@ const initialState: AppState = {
 }
 
 // Context
-const AppContext = createContext<AppContextType | undefined>(undefined)
+const AppContext = createContext<AppContextType | null>(null)
 
 // Provider
 interface AppProviderProps {
@@ -55,7 +55,7 @@ export function AppProvider({ children }: AppProviderProps) {
 // Hook to use the app context
 export function useApp() {
   const context = useContext(AppContext)
-  if (context === undefined) {
+  if (context === null) {
     throw new Error('useApp must be used within an AppProvider')
   }
   return context

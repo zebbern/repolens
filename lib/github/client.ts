@@ -10,7 +10,11 @@ async function proxyFetch<T>(url: string): Promise<T> {
 
   if (!response.ok) {
     const body = await response.json().catch(() => ({}))
-    const message = (body as { error?: string }).error ?? `Request failed: ${response.statusText}`
+    const parsed = body as { error?: string | { message?: string } }
+    const message =
+      typeof parsed.error === 'string'
+        ? parsed.error
+        : parsed.error?.message ?? `Request failed: ${response.statusText}`
     throw new Error(message)
   }
 

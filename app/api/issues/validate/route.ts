@@ -1,4 +1,5 @@
 import { generateText } from 'ai'
+import { NextResponse } from 'next/server'
 import * as z from 'zod'
 import { createAIModel } from '@/lib/ai/providers'
 import {
@@ -8,6 +9,7 @@ import {
   scrubSecrets,
 } from '@/lib/code/scanner/ai-validator'
 import type { CodeIssue } from '@/lib/code/scanner/types'
+import { apiError } from '@/lib/api/error'
 
 export const maxDuration = 60
 
@@ -40,14 +42,16 @@ export async function POST(req: Request) {
   try {
     raw = await req.json()
   } catch {
-    return Response.json({ error: 'Invalid JSON body' }, { status: 400 })
+    return apiError('INVALID_JSON', 'Invalid JSON body', 400)
   }
 
   const parsed = validateRequestSchema.safeParse(raw)
   if (!parsed.success) {
-    return Response.json(
-      { error: 'Invalid request', details: parsed.error.flatten().fieldErrors },
-      { status: 400 },
+    return apiError(
+      'VALIDATION_ERROR',
+      'Invalid request',
+      400,
+      JSON.stringify(parsed.error.flatten().fieldErrors),
     )
   }
 
@@ -71,10 +75,10 @@ export async function POST(req: Request) {
 
     const result = parseValidationResponse(text, issue.id)
 
-    return Response.json(result)
+    return NextResponse.json(result)
   } catch (error) {
     console.error('[validate] AI validation failed for issue', issue.id, error)
-    return Response.json(
+    return NextResponse.json(
       {
         issueId: issue.id,
         verdict: 'uncertain',

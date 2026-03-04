@@ -1,6 +1,7 @@
 "use client"
 
 import { createContext, useContext, useState, useEffect, useCallback, useRef, type ReactNode } from "react"
+import { toast } from "sonner"
 import type { AIProvider, APIKeysState, APIKeyConfig, ProviderModel, ProviderInfo, ModelResponseItem } from "@/types/types"
 
 // Provider information
@@ -74,6 +75,7 @@ interface APIKeysContextType {
   isHydrated: boolean
   selectedProvider: AIProvider | null
   selectedModel: ProviderModel | null
+  modelFetchErrors: Partial<Record<AIProvider, string>>
   setAPIKey: (provider: AIProvider, key: string) => void
   validateAPIKey: (provider: AIProvider) => Promise<boolean>
   removeAPIKey: (provider: AIProvider) => void
@@ -104,6 +106,7 @@ export function APIKeysProvider({ children }: { children: ReactNode }) {
   const [isLoadingModels, setIsLoadingModels] = useState(false)
   const [selectedModel, setSelectedModel] = useState<ProviderModel | null>(null)
   const [isHydrated, setIsHydrated] = useState(false)
+  const [modelFetchErrors, setModelFetchErrors] = useState<Partial<Record<AIProvider, string>>>({})
   const selectedModelRef = useRef<ProviderModel | null>(null)
 
   // Ref to always have current apiKeys for internal use
@@ -237,6 +240,7 @@ export function APIKeysProvider({ children }: { children: ReactNode }) {
           lastValidated: new Date(),
         },
       }))
+      toast.error(`Failed to validate ${PROVIDERS[provider].name} API key — check your key and try again`)
       return false
     }
   }, [])
@@ -253,6 +257,7 @@ export function APIKeysProvider({ children }: { children: ReactNode }) {
       })
 
       if (!response.ok) {
+        const errorMsg = `Failed to load ${PROVIDERS[provider].name} models — check your API key`
         // Mark invalid on failure
         setAPIKeys(prev => ({
           ...prev,
@@ -262,6 +267,8 @@ export function APIKeysProvider({ children }: { children: ReactNode }) {
             lastValidated: new Date(),
           },
         }))
+        setModelFetchErrors(prev => ({ ...prev, [provider]: errorMsg }))
+        toast.error(errorMsg)
         return []
       }
 
@@ -278,7 +285,7 @@ export function APIKeysProvider({ children }: { children: ReactNode }) {
         return [...filtered, ...providerModels]
       })
 
-      // Mark valid
+      // Mark valid and clear any previous fetch error
       setAPIKeys(prev => ({
         ...prev,
         [provider]: {
@@ -287,6 +294,11 @@ export function APIKeysProvider({ children }: { children: ReactNode }) {
           lastValidated: new Date(),
         },
       }))
+      setModelFetchErrors(prev => {
+        const next = { ...prev }
+        delete next[provider]
+        return next
+      })
 
       // Auto-select a default model if none is currently selected
       if (!selectedModelRef.current) {
@@ -299,6 +311,7 @@ export function APIKeysProvider({ children }: { children: ReactNode }) {
 
       return providerModels
     } catch {
+      const errorMsg = `Failed to load ${PROVIDERS[provider].name} models — check your API key`
       // Mark invalid on failure
       setAPIKeys(prev => ({
         ...prev,
@@ -308,6 +321,8 @@ export function APIKeysProvider({ children }: { children: ReactNode }) {
           lastValidated: new Date(),
         },
       }))
+      setModelFetchErrors(prev => ({ ...prev, [provider]: errorMsg }))
+      toast.error(errorMsg)
       return []
     }
   }, []) // No dependencies — reads from refs
@@ -366,6 +381,7 @@ export function APIKeysProvider({ children }: { children: ReactNode }) {
         isHydrated,
         selectedProvider,
         selectedModel,
+        modelFetchErrors,
         setAPIKey,
         validateAPIKey,
         removeAPIKey,
@@ -381,7 +397,7 @@ export function APIKeysProvider({ children }: { children: ReactNode }) {
 
 export function useAPIKeys() {
   const context = useContext(APIKeysContext)
-  if (!context) {
+  if (context === null) {
     throw new Error('useAPIKeys must be used within an APIKeysProvider')
   }
   return context

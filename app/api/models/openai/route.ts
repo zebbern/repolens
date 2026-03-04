@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { z } from 'zod'
 import { apiKeyRequestSchema } from '@/types/types'
+import { apiError } from '@/lib/api/error'
 
 const openAIModelsResponseSchema = z.object({
   data: z.array(z.object({
@@ -14,7 +15,7 @@ export async function POST(request: Request): Promise<NextResponse> {
     const parsed = apiKeyRequestSchema.safeParse(body)
 
     if (!parsed.success) {
-      return NextResponse.json({ error: 'API key required' }, { status: 400 })
+      return apiError('API_KEY_REQUIRED', 'API key required', 400)
     }
 
     const response = await fetch('https://api.openai.com/v1/models', {
@@ -24,14 +25,14 @@ export async function POST(request: Request): Promise<NextResponse> {
     })
 
     if (!response.ok) {
-      return NextResponse.json({ error: 'Invalid API key' }, { status: 401 })
+      return apiError('INVALID_API_KEY', 'Invalid API key', 401)
     }
 
     const data: unknown = await response.json()
     const modelsResult = openAIModelsResponseSchema.safeParse(data)
 
     if (!modelsResult.success) {
-      return NextResponse.json({ error: 'Failed to fetch models' }, { status: 500 })
+      return apiError('MODELS_PARSE_ERROR', 'Failed to fetch models', 500)
     }
 
     // Filter to only include chat models
@@ -57,7 +58,8 @@ export async function POST(request: Request): Promise<NextResponse> {
 
     return NextResponse.json({ models: chatModels })
   } catch (error) {
-    return NextResponse.json({ error: 'Failed to fetch models' }, { status: 500 })
+    console.error('[models/openai] Failed to fetch models:', error)
+    return apiError('MODELS_FETCH_ERROR', 'Failed to fetch models', 500)
   }
 }
 

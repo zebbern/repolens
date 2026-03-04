@@ -1,19 +1,26 @@
 import { NextResponse } from "next/server"
 import type { NextRequest } from "next/server"
+import { z } from "zod"
 import { getAccessToken } from "@/lib/auth/token"
 import { fetchRepoMetadata } from "@/lib/github/fetcher"
+import { apiError } from "@/lib/api/error"
+
+const repoQuerySchema = z.object({
+  owner: z.string().min(1),
+  name: z.string().min(1),
+})
 
 export async function GET(request: NextRequest) {
-  const { searchParams } = request.nextUrl
-  const owner = searchParams.get("owner")
-  const name = searchParams.get("name")
+  const params = repoQuerySchema.safeParse({
+    owner: request.nextUrl.searchParams.get("owner") ?? undefined,
+    name: request.nextUrl.searchParams.get("name") ?? undefined,
+  })
 
-  if (!owner || !name) {
-    return NextResponse.json(
-      { error: "Missing required parameters: owner, name" },
-      { status: 400 }
-    )
+  if (!params.success) {
+    return apiError('VALIDATION_ERROR', 'Missing required parameters: owner, name', 400)
   }
+
+  const { owner, name } = params.data
 
   try {
     const token = await getAccessToken(request)
@@ -27,12 +34,12 @@ export async function GET(request: NextRequest) {
     const message = error instanceof Error ? error.message : "Failed to fetch repository"
 
     if (message.includes("not found")) {
-      return NextResponse.json({ error: message }, { status: 404 })
+      return apiError('REPO_NOT_FOUND', message, 404)
     }
     if (message.includes("Rate limit")) {
-      return NextResponse.json({ error: message }, { status: 403 })
+      return apiError('RATE_LIMIT', message, 403)
     }
 
-    return NextResponse.json({ error: message }, { status: 500 })
+    return apiError('GITHUB_ERROR', message, 500)
   }
 }

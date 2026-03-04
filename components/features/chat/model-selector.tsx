@@ -7,7 +7,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger 
 } from '@/components/ui/dropdown-menu'
-import { BrainCircuit, ChevronDown, Check, Settings } from 'lucide-react'
+import { BrainCircuit, ChevronDown, Check, Settings, AlertTriangle } from 'lucide-react'
 import { useAPIKeys } from '@/providers'
 import { PROVIDERS } from '@/providers/api-keys-provider'
 import { cn } from '@/lib/utils'
@@ -19,10 +19,11 @@ interface ModelSelectorProps {
 }
 
 export function ModelSelector({ className, onOpenSettings }: ModelSelectorProps) {
-  const { models, selectedModel, setSelectedModel, getValidProviders } = useAPIKeys()
+  const { models, selectedModel, setSelectedModel, getValidProviders, modelFetchErrors } = useAPIKeys()
   
   const validProviders = getValidProviders()
   const hasModels = models.length > 0
+  const hasErrors = Object.keys(modelFetchErrors).length > 0
 
   // Group models by provider
   const modelsByProvider = models.reduce((acc, model) => {
@@ -46,7 +47,7 @@ export function ModelSelector({ className, onOpenSettings }: ModelSelectorProps)
         >
           <BrainCircuit className={cn(
             "h-3.5 w-3.5 shrink-0",
-            hasModels ? "text-status-success" : "text-text-muted"
+            hasErrors ? "text-status-warning" : hasModels ? "text-status-success" : "text-text-muted"
           )} />
           {selectedModel ? selectedModel.name : "Select model"}
           <ChevronDown className="h-3 w-3" />
@@ -76,7 +77,19 @@ export function ModelSelector({ className, onOpenSettings }: ModelSelectorProps)
             </Button>
           </div>
         ) : (
-          validProviders.map((provider, index) => {
+          <>
+            {hasErrors && (
+              <>
+                {Object.entries(modelFetchErrors).map(([provider, error]) => (
+                  <div key={provider} className="flex items-start gap-2 px-2 py-1.5 text-xs text-status-warning">
+                    <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+                    <span>{error}</span>
+                  </div>
+                ))}
+                {validProviders.length > 0 && <DropdownMenuSeparator />}
+              </>
+            )}
+            {validProviders.map((provider, index) => {
             const providerModels = modelsByProvider[provider] || []
             if (providerModels.length === 0) return null
             
@@ -99,7 +112,8 @@ export function ModelSelector({ className, onOpenSettings }: ModelSelectorProps)
                 ))}
               </div>
             )
-          })
+          })}
+          </>
         )}
       </DropdownMenuContent>
     </DropdownMenu>

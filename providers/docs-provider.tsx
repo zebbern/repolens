@@ -1,4 +1,4 @@
-'use client'
+"use client"
 
 import {
   createContext,
@@ -141,7 +141,7 @@ interface DocsStateContextType {
   clearDocs: () => void
 }
 
-const DocsStateContext = createContext<DocsStateContextType | undefined>(undefined)
+const DocsStateContext = createContext<DocsStateContextType | null>(null)
 
 // ---------------------------------------------------------------------------
 // Docs Chat Context  (changes frequently during generation)
@@ -159,7 +159,7 @@ interface DocsChatContextType {
   setGenContext: (ctx: GenContext) => void
 }
 
-const DocsChatContext = createContext<DocsChatContextType | undefined>(undefined)
+const DocsChatContext = createContext<DocsChatContextType | null>(null)
 
 // ---------------------------------------------------------------------------
 // Provider
@@ -330,7 +330,7 @@ export function DocsProvider({ children }: { children: ReactNode }) {
 
 export function useDocs() {
   const context = useContext(DocsStateContext)
-  if (context === undefined) {
+  if (context === null) {
     throw new Error('useDocs must be used within a DocsProvider')
   }
   return context
@@ -338,7 +338,7 @@ export function useDocs() {
 
 export function useDocsChat() {
   const context = useContext(DocsChatContext)
-  if (context === undefined) {
+  if (context === null) {
     throw new Error('useDocsChat must be used within a DocsProvider')
   }
   return context

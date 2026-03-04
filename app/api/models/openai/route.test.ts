@@ -56,7 +56,7 @@ describe('POST /api/models/openai', () => {
     const data = await response.json()
 
     expect(response.status).toBe(400)
-    expect(data.error).toBe('API key required')
+    expect(data.error.message).toBe('API key required')
     expect(mockFetch).not.toHaveBeenCalled()
   })
 
@@ -70,7 +70,7 @@ describe('POST /api/models/openai', () => {
     const data = await response.json()
 
     expect(response.status).toBe(401)
-    expect(data.error).toBe('Invalid API key')
+    expect(data.error.message).toBe('Invalid API key')
   })
 
   it('returns 500 when fetch throws an error', async () => {
@@ -80,7 +80,7 @@ describe('POST /api/models/openai', () => {
     const data = await response.json()
 
     expect(response.status).toBe(500)
-    expect(data.error).toBe('Failed to fetch models')
+    expect(data.error.message).toBe('Failed to fetch models')
   })
 
   it('returns 500 when upstream response fails Zod validation', async () => {
@@ -93,7 +93,7 @@ describe('POST /api/models/openai', () => {
     const data = await response.json()
 
     expect(response.status).toBe(500)
-    expect(data.error).toBe('Failed to fetch models')
+    expect(data.error.message).toBe('Failed to fetch models')
   })
 
   it('returns 400 when API key is an empty string', async () => {
@@ -101,7 +101,7 @@ describe('POST /api/models/openai', () => {
     const data = await response.json()
 
     expect(response.status).toBe(400)
-    expect(data.error).toBe('API key required')
+    expect(data.error.message).toBe('API key required')
   })
 
   it('sorts models with gpt-4o first, then gpt-4-turbo, then gpt-4, then gpt-3.5', async () => {

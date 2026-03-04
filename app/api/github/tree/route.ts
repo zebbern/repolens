@@ -1,20 +1,28 @@
 import { NextResponse } from "next/server"
 import type { NextRequest } from "next/server"
+import { z } from "zod"
 import { getAccessToken } from "@/lib/auth/token"
 import { fetchRepoTree } from "@/lib/github/fetcher"
+import { apiError } from "@/lib/api/error"
+
+const treeQuerySchema = z.object({
+  owner: z.string().min(1),
+  name: z.string().min(1),
+  sha: z.string().min(1).default("HEAD"),
+})
 
 export async function GET(request: NextRequest) {
-  const { searchParams } = request.nextUrl
-  const owner = searchParams.get("owner")
-  const name = searchParams.get("name")
-  const sha = searchParams.get("sha") ?? "HEAD"
+  const params = treeQuerySchema.safeParse({
+    owner: request.nextUrl.searchParams.get("owner") ?? undefined,
+    name: request.nextUrl.searchParams.get("name") ?? undefined,
+    sha: request.nextUrl.searchParams.get("sha") ?? undefined,
+  })
 
-  if (!owner || !name) {
-    return NextResponse.json(
-      { error: "Missing required parameters: owner, name" },
-      { status: 400 }
-    )
+  if (!params.success) {
+    return apiError('VALIDATION_ERROR', 'Missing required parameters: owner, name', 400)
   }
+
+  const { owner, name, sha } = params.data
 
   try {
     const token = await getAccessToken(request)
@@ -26,6 +34,6 @@ export async function GET(request: NextRequest) {
     return NextResponse.json(tree)
   } catch (error) {
     const message = error instanceof Error ? error.message : "Failed to fetch tree"
-    return NextResponse.json({ error: message }, { status: 500 })
+    return apiError('GITHUB_ERROR', message, 500)
   }
 }

@@ -3,6 +3,7 @@ import * as z from 'zod'
 import { createAIModel, getModelContextWindow } from '@/lib/ai/providers'
 import { createContextCompactor } from '@/lib/ai/context-compactor'
 import { codeTools } from '@/lib/ai/tool-definitions'
+import { apiError } from '@/lib/api/error'
 
 export const maxDuration = 120
 
@@ -31,18 +32,17 @@ export async function POST(req: Request) {
   try {
     raw = await req.json()
   } catch {
-    return new Response(
-      JSON.stringify({ error: 'Invalid JSON in request body' }),
-      { status: 400, headers: { 'Content-Type': 'application/json' } }
-    )
+    return apiError('INVALID_JSON', 'Invalid JSON in request body', 400)
   }
 
   try {
     const parsed = chatRequestSchema.safeParse(raw)
     if (!parsed.success) {
-      return new Response(
-        JSON.stringify({ error: 'Invalid request', details: parsed.error.flatten().fieldErrors }),
-        { status: 422, headers: { 'Content-Type': 'application/json' } },
+      return apiError(
+        'VALIDATION_ERROR',
+        'Invalid request',
+        422,
+        JSON.stringify(parsed.error.flatten().fieldErrors),
       )
     }
     const { messages: rawMessages, provider, model, apiKey, repoContext, structuralIndex, maxSteps, compactionEnabled } = parsed.data
@@ -195,14 +195,10 @@ No repository is currently connected. You can still answer general programming q
     })
   } catch (error) {
     console.error('Chat API error:', error)
-    return new Response(
-      JSON.stringify({
-        error: error instanceof Error ? error.message : 'An error occurred',
-      }),
-      {
-        status: 500,
-        headers: { 'Content-Type': 'application/json' },
-      }
+    return apiError(
+      'CHAT_ERROR',
+      error instanceof Error ? error.message : 'An error occurred',
+      500,
     )
   }
 }

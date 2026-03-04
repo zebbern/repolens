@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { apiKeyRequestSchema } from '@/types/types'
+import { apiError } from '@/lib/api/error'
 
 // Anthropic doesn't have a models endpoint, so we validate the key
 // and return known available models
@@ -15,7 +16,7 @@ export async function POST(request: Request) {
     const parsed = apiKeyRequestSchema.safeParse(body)
 
     if (!parsed.success) {
-      return NextResponse.json({ error: 'API key required' }, { status: 400 })
+      return apiError('API_KEY_REQUIRED', 'API key required', 400)
     }
 
     const apiKey = parsed.data.apiKey
@@ -42,12 +43,13 @@ export async function POST(request: Request) {
 
     // Check for authentication error
     if (response.status === 401) {
-      return NextResponse.json({ error: 'Invalid API key' }, { status: 401 })
+      return apiError('INVALID_API_KEY', 'Invalid API key', 401)
     }
 
     // For other errors, still return models if we got a response
     return NextResponse.json({ models: ANTHROPIC_MODELS })
   } catch (error) {
-    return NextResponse.json({ error: 'Failed to validate key' }, { status: 500 })
+    console.error('[models/anthropic] Failed to validate key:', error)
+    return apiError('KEY_VALIDATION_ERROR', 'Failed to validate key', 500)
   }
 }

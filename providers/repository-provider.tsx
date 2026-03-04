@@ -3,13 +3,12 @@
 import { createContext, useContext, useState, useCallback, useRef, useEffect, type ReactNode, type Dispatch, type SetStateAction } from "react"
 import type { GitHubRepo, FileNode, ParsedFile, RepositoryContext } from "@/types/repository"
 import { parseGitHubUrl } from "@/lib/github/parser"
-import { fetchRepoMetadata, fetchRepoTree, buildFileTree, fetchFileContent, detectLanguage } from "@/lib/github/fetcher"
+import { fetchRepoMetadata, fetchRepoTree, buildFileTree, fetchFileContent } from "@/lib/github/fetcher"
 import type { CodeIndex } from "@/lib/code/code-index"
-import { createEmptyIndex, batchIndexFiles, flattenFiles } from '@/lib/code/code-index'
-import { fetchRepoZipball, isFileIndexable } from "@/lib/github/zipball"
-import { getCachedRepo, setCachedRepo } from "@/lib/cache/repo-cache"
+import { createEmptyIndex, batchIndexFiles } from '@/lib/code/code-index'
+import { getCachedRepo } from "@/lib/cache/repo-cache"
 import { analyzeCodebase, type FullAnalysis } from "@/lib/code/import-parser"
-import { toast } from "sonner"
+import { startIndexing as runIndexingPipeline } from "@/lib/github/indexing-pipeline"
 
 interface IndexingProgress {
   current: number
@@ -88,32 +87,6 @@ const RepositoryContextDefault: RepositoryContext = {
 
 const RepositoryContext = createContext<RepositoryContextType | null>(null)
 
-// Concurrency control for parallel fetching
-const CONCURRENCY_LIMIT = 10
-
-async function fetchWithConcurrency<T>(
-  items: T[],
-  fn: (item: T) => Promise<void>,
-  limit: number
-): Promise<void> {
-  const queue = [...items]
-  const executing: Promise<void>[] = []
-  
-  while (queue.length > 0 || executing.length > 0) {
-    while (executing.length < limit && queue.length > 0) {
-      const item = queue.shift()!
-      const promise = fn(item).then(() => {
-        executing.splice(executing.indexOf(promise), 1)
-      })
-      executing.push(promise)
-    }
-    
-    if (executing.length > 0) {
-      await Promise.race(executing)
-    }
-  }
-}
-
 export function RepositoryProvider({ children }: { children: ReactNode }) {
   const [repo, setRepo] = useState<GitHubRepo | null>(null)
   const [files, setFiles] = useState<FileNode[]>([])
@@ -141,123 +114,19 @@ export function RepositoryProvider({ children }: { children: ReactNode }) {
     return indexed ? indexed.content : null
   }, [modifiedContents, codeIndex])
 
-  // Start indexing files in background (B1 zipball, B3 batch, B6 error tracking)
-  const startIndexing = useCallback(async (
+  // Start indexing files in background (delegated to indexing-pipeline)
+  const startIndexing = useCallback((
     repoData: GitHubRepo,
     fileTree: FileNode[],
     treeSha: string,
-    signal: AbortSignal
+    signal: AbortSignal,
   ) => {
-    // Get all indexable files from tree metadata
-    const indexableFiles = flattenFiles(fileTree).filter(f =>
-      isFileIndexable(f.name, f.size || 0)
-    )
-    
-    setIndexingProgress({ current: 0, total: indexableFiles.length, isComplete: false })
-    
-    if (indexableFiles.length === 0) {
-      setIndexingProgress({ current: 0, total: 0, isComplete: true })
-      setLoadingStage('ready')
-      return
-    }
-    
-    const accumulated: Array<{ path: string; content: string; language?: string }> = []
-    const errors: Array<{ path: string; error: string }> = []
-    let zipballUsed = false
-
-    // B1: Try zipball for repos under 50 MB (GitHub API reports size in KB)
-    if (repoData.size != null && repoData.size < 50_000) {
-      try {
-        setLoadingStage('downloading')
-        const zipFiles = await fetchRepoZipball(
-          repoData.owner,
-          repoData.name,
-          repoData.defaultBranch,
-          { signal },
-        )
-
-        if (signal.aborted) return
-
-        setLoadingStage('extracting')
-        for (const [path, content] of zipFiles) {
-          const filename = path.split('/').pop() || path
-          accumulated.push({ path, content, language: detectLanguage(filename) })
-        }
-
-        zipballUsed = true
-        setIndexingProgress({
-          current: accumulated.length,
-          total: accumulated.length,
-          isComplete: false,
-        })
-      } catch (err) {
-        // Zipball failed — fall back to per-file fetch
-        if (signal.aborted) return
-        console.warn('Zipball download failed, falling back to per-file fetch:', err)
-      }
-    }
-
-    // Per-file fetch fallback
-    if (!zipballUsed) {
-      setLoadingStage('indexing')
-      let processed = 0
-
-      await fetchWithConcurrency(
-        indexableFiles,
-        async (file) => {
-          if (signal.aborted) return
-
-          try {
-            const content = await fetchFileContent(
-              repoData.owner,
-              repoData.name,
-              repoData.defaultBranch,
-              file.path,
-            )
-
-            if (signal.aborted) return
-
-            accumulated.push({ path: file.path, content, language: file.language })
-          } catch (err) {
-            const message = err instanceof Error ? err.message : 'Unknown error'
-            errors.push({ path: file.path, error: message })
-          }
-
-          processed++
-          if (processed % 5 === 0 || processed === indexableFiles.length) {
-            setIndexingProgress(prev => ({ ...prev, current: processed }))
-          }
-        },
-        CONCURRENCY_LIMIT,
-      )
-    }
-
-    if (signal.aborted) return
-
-    setLoadingStage('indexing')
-
-    // B3: Batch-index all accumulated files at once (avoids O(N²) Map copies)
-    const finalIndex = batchIndexFiles(createEmptyIndex(), accumulated)
-
-    setCodeIndex(finalIndex)
-    setFailedFiles(errors)
-    setIndexingProgress({
-      current: accumulated.length,
-      total: zipballUsed ? accumulated.length : indexableFiles.length,
-      isComplete: true,
+    return runIndexingPipeline(repoData, fileTree, treeSha, signal, {
+      setIndexingProgress,
+      setLoadingStage,
+      setCodeIndex,
+      setFailedFiles,
     })
-    setLoadingStage('ready')
-
-    // B2: Persist to IndexedDB cache
-    setCachedRepo(repoData.owner, repoData.name, treeSha, accumulated, fileTree)
-      .catch(() => { /* cache write failure is non-critical */ })
-
-    // B6: Notify user of failed files
-    if (errors.length > 0) {
-      toast.error(
-        `Indexed ${accumulated.length} files (${errors.length} failed)`,
-      )
-    }
   }, [])
 
   const connectRepository = useCallback(async (url: string): Promise<boolean> => {
@@ -427,7 +296,7 @@ export function RepositoryProvider({ children }: { children: ReactNode }) {
 
 export function useRepository() {
   const context = useContext(RepositoryContext)
-  if (!context) {
+  if (context === null) {
     throw new Error('useRepository must be used within a RepositoryProvider')
   }
   return context

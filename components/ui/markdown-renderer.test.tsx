@@ -8,6 +8,7 @@ import { render, screen, waitFor, fireEvent } from '@testing-library/react'
 vi.mock('mermaid', () => ({
   default: {
     initialize: vi.fn(),
+    parse: vi.fn().mockResolvedValue({ diagramType: 'flowchart', config: {} }),
     render: vi.fn().mockResolvedValue({
       svg: '<svg data-testid="mermaid-svg">mock diagram</svg>',
       diagramType: 'flowchart',
@@ -42,6 +43,7 @@ describe('MarkdownRenderer', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     // Re-establish mock implementation after vi.restoreAllMocks() in setup.ts
+    vi.mocked(mermaid.parse).mockResolvedValue({ diagramType: 'flowchart', config: {} } as never)
     vi.mocked(mermaid.render).mockResolvedValue({
       svg: '<svg data-testid="mermaid-svg">mock diagram</svg>',
       diagramType: 'flowchart',

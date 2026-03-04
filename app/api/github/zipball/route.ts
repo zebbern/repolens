@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
 import { z } from 'zod'
 import { getAccessToken } from '@/lib/auth/token'
+import { apiError } from '@/lib/api/error'
 
 const GITHUB_NAME_RE = /^[\w][\w.-]*$/
 
@@ -16,17 +17,15 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   try {
     body = await request.json()
   } catch {
-    return NextResponse.json(
-      { error: 'Invalid JSON body' },
-      { status: 400 },
-    )
+    return apiError('INVALID_JSON', 'Invalid JSON body', 400)
   }
 
   const result = zipballSchema.safeParse(body)
   if (!result.success) {
-    return NextResponse.json(
-      { error: result.error.issues[0]?.message ?? 'Validation error' },
-      { status: 422 },
+    return apiError(
+      'VALIDATION_ERROR',
+      result.error.issues[0]?.message ?? 'Validation error',
+      422,
     )
   }
 
@@ -58,7 +57,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
             ? 'Rate limit exceeded or repository is private'
             : `GitHub API error: ${status}`
 
-      return NextResponse.json({ error: message }, { status })
+      return apiError('GITHUB_ERROR', message, status)
     }
 
     const arrayBuffer = await ghResponse.arrayBuffer()
@@ -72,6 +71,6 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   } catch (error) {
     const message =
       error instanceof Error ? error.message : 'Zipball proxy failed'
-    return NextResponse.json({ error: message }, { status: 500 })
+    return apiError('ZIPBALL_ERROR', message, 500)
   }
 }

@@ -280,7 +280,7 @@ export function ComparisonProvider({ children }: { children: ReactNode }) {
 
 export function useComparison() {
   const context = useContext(ComparisonContext)
-  if (!context) {
+  if (context === null) {
     throw new Error("useComparison must be used within a ComparisonProvider")
   }
   return context

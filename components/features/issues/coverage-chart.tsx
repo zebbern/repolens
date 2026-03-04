@@ -1,4 +1,4 @@
-'use client'
+"use client"
 
 import type { ComplianceReport } from '@/lib/code/issue-scanner'
 import { cn } from '@/lib/utils'

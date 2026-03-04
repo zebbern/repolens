@@ -8,56 +8,19 @@
 </p>
 
 <p align="center">
-  <a href="https://mgithub.com">Website</a> · <a href="#quick-start">Quick Start</a> · <a href="#features">Features</a> · <a href="#screenshots">Screenshots</a> · <a href="#supported-ai-providers">AI Providers</a>
+  <a href="https://mgithub.com">Website</a> · <a href="#quick-start">Quick Start</a> · <a href="#features">Features</a> ·  <a href="#supported-ai-providers">AI Providers</a>
 </p>
 
+https://github.com/user-attachments/assets/b8e775c1-0b64-4c0d-a58f-0a66b784496c
+
+
 > **Pro tip:** Turn any GitHub URL into a RepoLens analysis by adding **`m`** before `github.com`.
-> For example: `github.com/facebook/react` → [`mgithub.com/facebook/react`](https://mgithub.com/facebook/react)
+> For example: `github.com/facebook/react` → [`mgithub.com/VrianCao/Uptimer`](https://mgithub.com/VrianCao/Uptimer)
 
 ---
 
-## Screenshots
+<video src="repolens-show.mp4" controls width="100%"></video>
 
-<div align="center">
-
-<table>
-  <tr>
-    <td align="center"><strong>Repository Overview</strong></td>
-    <td align="center"><strong>Code Browser</strong></td>
-    <td align="center"><strong>Issues Scanner</strong></td>
-  </tr>
-  <tr>
-    <td><img src="docs/screenshots/repo-overview.png" alt="Repository Overview tab — project summary, detected tech stack, and file tree" width="100%" /></td>
-    <td><img src="docs/screenshots/code-browser.png" alt="Code Browser tab — syntax-highlighted source code with file outline and breadcrumbs" width="100%" /></td>
-    <td><img src="docs/screenshots/issues-scanner.png" alt="Issues Scanner tab — automated code quality results showing security, performance, and best practice findings" width="100%" /></td>
-  </tr>
-  <tr>
-    <td align="center"><strong>Diagrams</strong></td>
-    <td align="center"><strong>Documentation Generator</strong></td>
-    <td align="center"><strong>AI Chat</strong></td>
-  </tr>
-  <tr>
-    <td><img src="docs/screenshots/diagrams.png" alt="Diagrams tab — auto-generated Mermaid architecture diagram showing component relationships" width="100%" /></td>
-    <td><img src="docs/screenshots/docs-generator.png" alt="Documentation Generator tab — AI-generated project documentation with multiple doc types" width="100%" /></td>
-    <td><img src="docs/screenshots/ai-chat.png" alt="AI Chat tab — conversational interface asking questions about the codebase" width="100%" /></td>
-  </tr>
-  <tr>
-    <td align="center"><strong>Compare</strong></td>
-    <td></td>
-    <td></td>
-  </tr>
-  <tr>
-    <td><img src="docs/screenshots/compare.png" alt="Compare tab — side-by-side repository comparison view" width="100%" /></td>
-    <td></td>
-    <td></td>
-  </tr>
-</table>
-
-</div>
-
-<p align="center">Analyze any public GitHub repository with AI. Browse code, scan for issues, generate documentation, create architecture diagrams, and chat with your codebase — all from a single URL.</p>
-
----
 
 ## Features
 
@@ -86,10 +49,10 @@ RepoLens works with multiple AI providers. You configure API keys directly in th
 
 | Provider | Example Models |
 |---|---|
-| **OpenAI** | GPT-4o, GPT-4 Turbo |
-| **Google** | Gemini 2.5 Pro, Gemini 2.0 Flash |
-| **Anthropic** | Claude 4 Opus, Claude 4 Sonnet |
-| **OpenRouter** | Access to hundreds of models |
+| **OpenAI** | Latest Models |
+| **Google** | Latest Models |
+| **Anthropic** | Latest Models |
+| **OpenRouter** | Latest Models |
 
 ---
 

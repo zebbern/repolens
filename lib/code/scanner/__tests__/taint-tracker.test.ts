@@ -153,6 +153,96 @@ function handler(req, res) {
     expect(unsanitized.length).toBeGreaterThanOrEqual(1)
     expect(unsanitized[0].sink.type).toBe('command-injection')
   })
+
+  // -------------------------------------------------------------------------
+  // Expression handler tests (ConditionalExpression, LogicalExpression, Await)
+  // -------------------------------------------------------------------------
+
+  it('detects taint through ConditionalExpression (consequent branch)', () => {
+    const code = `
+function handler(req, res) {
+  const input = req.query.search;
+  const value = true ? input : "safe";
+  db.query("SELECT * FROM items WHERE name = " + value);
+}
+`
+    const flows = getFlows(code)
+    const unsanitized = flows.filter(f => !f.sanitized)
+    expect(unsanitized.length).toBeGreaterThanOrEqual(1)
+    expect(unsanitized[0].sink.type).toBe('sql-injection')
+    expect(unsanitized[0].source.name).toBe('req.query')
+  })
+
+  it('detects taint through ConditionalExpression (alternate branch)', () => {
+    const code = `
+function handler(req, res) {
+  const input = req.query.search;
+  const value = false ? "safe" : input;
+  db.query("SELECT * FROM items WHERE name = " + value);
+}
+`
+    const flows = getFlows(code)
+    const unsanitized = flows.filter(f => !f.sanitized)
+    expect(unsanitized.length).toBeGreaterThanOrEqual(1)
+    expect(unsanitized[0].sink.type).toBe('sql-injection')
+  })
+
+  it('detects taint through LogicalExpression (left side)', () => {
+    const code = `
+function handler(req, res) {
+  const input = req.query.id;
+  const value = input || "default";
+  db.query("SELECT * FROM users WHERE id = " + value);
+}
+`
+    const flows = getFlows(code)
+    const unsanitized = flows.filter(f => !f.sanitized)
+    expect(unsanitized.length).toBeGreaterThanOrEqual(1)
+    expect(unsanitized[0].sink.type).toBe('sql-injection')
+    expect(unsanitized[0].source.name).toBe('req.query')
+  })
+
+  it('detects taint through LogicalExpression (right side)', () => {
+    const code = `
+function handler(req, res) {
+  const input = req.body.name;
+  const value = null && input;
+  eval(value);
+}
+`
+    const flows = getFlows(code)
+    const unsanitized = flows.filter(f => !f.sanitized)
+    expect(unsanitized.length).toBeGreaterThanOrEqual(1)
+    expect(unsanitized[0].source.name).toBe('req.body')
+  })
+
+  it('detects taint through AwaitExpression', () => {
+    const code = `
+async function handler(req, res) {
+  const input = req.query.url;
+  const data = await fetchData(input);
+  eval(data);
+}
+`
+    const flows = getFlows(code)
+    const unsanitized = flows.filter(f => !f.sanitized)
+    expect(unsanitized.length).toBeGreaterThanOrEqual(1)
+    expect(unsanitized[0].source.name).toBe('req.query')
+  })
+
+  it('does NOT propagate taint through ConditionalExpression when both branches are safe', () => {
+    const code = `
+function handler(req, res) {
+  const input = req.query.id;
+  const value = true ? "safe1" : "safe2";
+  db.query("SELECT * FROM users WHERE id = " + value);
+}
+`
+    const flows = getFlows(code)
+    // input is tainted but value is not derived from it
+    const sqlFlows = flows.filter(f => !f.sanitized && f.sink.type === 'sql-injection')
+    expect(sqlFlows.length).toBe(0)
+  })
 })
 
 describe('taintFlowsToIssues', () => {

@@ -279,9 +279,9 @@ describe('Phase 2: Composite Rules', () => {
 
   describe('Sensitive Data in URL', () => {
     it('A18: detects password in query parameter', () => {
-      const code = 'const url = "https://api.example.com/login?password=secret123&user=admin"'
+      const code = 'const url = "https://api.myapp.com/login?password=secret123&user=admin"'
       const result = scanCode('src/auth.ts', code, 'typescript')
-      const hits = issuesForRule(result.issues, 'composite-sensitive-data-in-url')
+      const hits = issuesForRule(result.issues, 'sensitive-data-in-url')
       expect(hits.length).toBeGreaterThanOrEqual(1)
       expect(hits[0].cwe).toBe('CWE-598')
     })
@@ -289,7 +289,7 @@ describe('Phase 2: Composite Rules', () => {
     it('A19: detects api_key in query parameter', () => {
       const code = 'const endpoint = "https://api.service.com/data?api_key=abc123&format=json"'
       const result = scanCode('src/api.ts', code, 'typescript')
-      const hits = issuesForRule(result.issues, 'composite-sensitive-data-in-url')
+      const hits = issuesForRule(result.issues, 'sensitive-data-in-url')
       expect(hits.length).toBeGreaterThanOrEqual(1)
     })
   })

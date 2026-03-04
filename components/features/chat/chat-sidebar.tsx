@@ -8,6 +8,8 @@ import { ChatMessage } from "./chat-message"
 import { ChatInput } from "./chat-input"
 import { Bot, AlertCircle, Download } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { Switch } from "@/components/ui/switch"
+import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "@/components/ui/tooltip"
 import { useAPIKeys, useRepository } from "@/providers"
 import { buildFileTreeString } from "@/lib/github/fetcher"
 import { downloadFile } from "@/lib/export"
@@ -20,6 +22,7 @@ export function ChatSidebar({ className }: { className?: string }) {
   const { selectedModel, apiKeys, getValidProviders } = useAPIKeys()
   const { repo, files, codeIndex } = useRepository()
   const [input, setInput] = useState("")
+  const [compactionEnabled, setCompactionEnabled] = useState(false)
 
   const validProviders = getValidProviders()
   const hasValidKey = validProviders.length > 0 && selectedModel
@@ -98,6 +101,7 @@ export function ChatSidebar({ className }: { className?: string }) {
           repoContext,
           structuralIndex,
           maxSteps: 50,
+          compactionEnabled,
         },
       },
     )
@@ -109,6 +113,26 @@ export function ChatSidebar({ className }: { className?: string }) {
       <div className="flex h-11 items-center justify-between border-b border-foreground/[0.06] px-4">
         <span className="text-sm font-medium text-text-primary">Chat</span>
         <div className="flex items-center gap-1">
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <div className="flex items-center gap-1.5">
+                  <Switch
+                    id="compaction-toggle"
+                    checked={compactionEnabled}
+                    onCheckedChange={setCompactionEnabled}
+                    className="h-4 w-7 data-[state=checked]:bg-accent-primary data-[state=unchecked]:bg-foreground/10 [&_span]:h-3 [&_span]:w-3"
+                  />
+                  <label htmlFor="compaction-toggle" className="text-xs text-text-muted cursor-pointer select-none">
+                    Compact
+                  </label>
+                </div>
+              </TooltipTrigger>
+              <TooltipContent side="bottom" className="max-w-[200px]">
+                <p className="text-xs">Compacts old tool results to save context window space. Off by default — most models have enough context.</p>
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
           {messages.length > 0 && (
             <Button
               variant="ghost"

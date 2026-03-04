@@ -16,6 +16,8 @@ import {
 } from '@/components/ui/alert-dialog'
 import { Sheet, SheetContent, SheetTrigger, SheetHeader, SheetTitle } from '@/components/ui/sheet'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Switch } from '@/components/ui/switch'
+import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip'
 import { useIsMobile } from '@/hooks/use-mobile'
 import { useAPIKeys, useRepository, useDocs } from '@/providers'
 import type { UIMessage } from 'ai'
@@ -82,6 +84,7 @@ export function DocViewer({ className }: DocViewerProps) {
   const [copied, setCopied] = useState(false)
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [qualityLevel, setQualityLevel] = useState<QualityLevel>('balanced')
+  const [compactionEnabled, setCompactionEnabled] = useState(false)
 
   const isMobile = useIsMobile()
 
@@ -125,7 +128,7 @@ export function DocViewer({ className }: DocViewerProps) {
     }
 
     setSelectedPreset(preset.id)
-    handleGenerate(preset, targetFile, customPrompt, QUALITY_STEPS[qualityLevel])
+    handleGenerate(preset, targetFile, customPrompt, QUALITY_STEPS[qualityLevel], compactionEnabled)
   }
 
   const onRegenerate = (doc: GeneratedDoc) => {
@@ -336,9 +339,10 @@ export function DocViewer({ className }: DocViewerProps) {
                   </p>
 
                   {/* Quality selector */}
-                  <div className="flex items-center justify-center gap-2 text-sm mb-4">
-                    <span className="text-xs text-muted-foreground">Quality:</span>
-                    <Select value={qualityLevel} onValueChange={(v) => setQualityLevel(v as QualityLevel)}>
+                  <div className="flex items-center justify-center gap-4 text-sm mb-4">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-muted-foreground">Quality:</span>
+                      <Select value={qualityLevel} onValueChange={(v) => setQualityLevel(v as QualityLevel)}>
                       <SelectTrigger className="h-7 w-[140px] text-xs">
                         <SelectValue />
                       </SelectTrigger>
@@ -348,6 +352,27 @@ export function DocViewer({ className }: DocViewerProps) {
                         <SelectItem value="thorough">🔬 Thorough (60)</SelectItem>
                       </SelectContent>
                     </Select>
+                    </div>
+                    <TooltipProvider>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <div className="flex items-center gap-1.5">
+                            <Switch
+                              id="docs-compaction-toggle"
+                              checked={compactionEnabled}
+                              onCheckedChange={setCompactionEnabled}
+                              className="h-4 w-7 data-[state=checked]:bg-accent-primary data-[state=unchecked]:bg-foreground/10 [&_span]:h-3 [&_span]:w-3"
+                            />
+                            <label htmlFor="docs-compaction-toggle" className="text-xs text-text-muted cursor-pointer select-none">
+                              Compact
+                            </label>
+                          </div>
+                        </TooltipTrigger>
+                        <TooltipContent side="bottom" className="max-w-[200px]">
+                          <p className="text-xs">Compacts old tool results to save context window space. Off by default — most models have enough context.</p>
+                        </TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
                   </div>
 
                   {error && !isGenerating && (

@@ -96,6 +96,7 @@ export function useDocsEngine() {
     targetFile: string | null,
     customPrompt: string,
     maxSteps?: number,
+    compactionEnabled?: boolean,
   ) => {
     if (isGenerating || isSubmittingRef.current) return
 
@@ -105,6 +106,7 @@ export function useDocsEngine() {
       targetFile,
       customPrompt,
       maxSteps,
+      compactionEnabled: compactionEnabled ?? false,
     }
     genContextRef.current = ctx
     setGenContext(ctx) // also push to provider ref for transport

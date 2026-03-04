@@ -27,6 +27,7 @@ const docsRequestSchema = z.object({
   structuralIndex: z.string().max(500_000).optional(),
   targetFile: z.string().nullish(),
   maxSteps: z.number().int().min(10).max(80).optional(),
+  compactionEnabled: z.boolean().optional(),
 })
 
 /**
@@ -159,7 +160,7 @@ export async function POST(req: Request) {
         { status: 422, headers: { 'Content-Type': 'application/json' } },
       )
     }
-    const { messages: rawMessages, provider, model, apiKey, docType, repoContext, structuralIndex, targetFile, maxSteps } = parsed.data
+    const { messages: rawMessages, provider, model, apiKey, docType, repoContext, structuralIndex, targetFile, maxSteps, compactionEnabled } = parsed.data
     const messages = rawMessages as unknown as UIMessage[]
 
     // Build system prompt
@@ -222,14 +223,16 @@ Your context window is approximately ${getModelContextWindow(model).toLocaleStri
       system: systemPrompt,
       messages: await convertToModelMessages(messages),
       tools: codeTools,
-      prepareStep: createContextCompactor({
-        maxSteps: stepBudget,
-        contextWindow: getModelContextWindow(model),
-        provider,
+      ...(compactionEnabled && {
+        prepareStep: createContextCompactor({
+          maxSteps: stepBudget,
+          contextWindow: getModelContextWindow(model),
+          provider,
+        }),
       }),
       stopWhen: stepCountIs(stepBudget),
       abortSignal: req.signal,
-      ...(provider === 'anthropic' && {
+      ...(compactionEnabled && provider === 'anthropic' && {
         providerOptions: {
           anthropic: {
             contextManagement: {

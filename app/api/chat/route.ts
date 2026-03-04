@@ -23,6 +23,7 @@ const chatRequestSchema = z.object({
   }).optional(),
   structuralIndex: z.string().max(500_000).optional(),
   maxSteps: z.number().int().min(10).max(100).optional(),
+  compactionEnabled: z.boolean().optional(),
 })
 
 export async function POST(req: Request) {
@@ -44,7 +45,7 @@ export async function POST(req: Request) {
         { status: 422, headers: { 'Content-Type': 'application/json' } },
       )
     }
-    const { messages: rawMessages, provider, model, apiKey, repoContext, structuralIndex, maxSteps } = parsed.data
+    const { messages: rawMessages, provider, model, apiKey, repoContext, structuralIndex, maxSteps, compactionEnabled } = parsed.data
     const messages = rawMessages as unknown as UIMessage[]
     const stepBudget = maxSteps ?? 50
 
@@ -154,14 +155,16 @@ No repository is currently connected. You can still answer general programming q
       system: systemPrompt,
       messages: await convertToModelMessages(messages),
       tools: codeTools,
-      prepareStep: createContextCompactor({
-        maxSteps: stepBudget,
-        contextWindow: getModelContextWindow(model),
-        provider,
+      ...(compactionEnabled && {
+        prepareStep: createContextCompactor({
+          maxSteps: stepBudget,
+          contextWindow: getModelContextWindow(model),
+          provider,
+        }),
       }),
       stopWhen: stepCountIs(stepBudget),
       abortSignal: req.signal,
-      ...(provider === 'anthropic' && {
+      ...(compactionEnabled && provider === 'anthropic' && {
         providerOptions: {
           anthropic: {
             contextManagement: {

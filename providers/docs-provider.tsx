@@ -124,6 +124,7 @@ export interface GenContext {
   targetFile: string | null
   customPrompt: string
   maxSteps?: number
+  compactionEnabled?: boolean
 }
 
 // ---------------------------------------------------------------------------
@@ -244,6 +245,7 @@ export function DocsProvider({ children }: { children: ReactNode }) {
               structuralIndex,
               targetFile: ctx.targetFile,
               maxSteps: ctx.maxSteps,
+              compactionEnabled: ctx.compactionEnabled ?? false,
             },
           }
         },

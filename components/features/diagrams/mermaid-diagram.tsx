@@ -129,53 +129,106 @@ interface MermaidDiagramProps {
 }
 
 /**
- * Sanitize mermaid source to fix common AI-generated syntax issues.
- * Handles markdown fencing, special-char labels, invalid arrows, HTML tags,
- * and other patterns that frequently appear in LLM output.
+ * Sanitize LLM-generated Mermaid syntax to fix common parsing issues.
+ * Applied automatically before any render attempt.
  */
-function sanitizeMermaidSource(source: string): string {
-  let sanitized = source.trim()
+export function sanitizeMermaidSource(source: string): string {
+  let s = source.trim()
 
-  // 1. Remove markdown fencing that AI might include
-  sanitized = sanitized.replace(/^```(?:mermaid)?\s*\n?/i, '').replace(/\n?```\s*$/i, '')
+  // 1. Strip markdown fencing
+  s = s.replace(/^```(?:mermaid)?\s*\n?/i, '').replace(/\n?```\s*$/i, '')
 
-  // 2. Fix labels containing special characters that break Mermaid
-  //    NodeId[Label with (parens) or <brackets>] → NodeId["Label..."]
-  sanitized = sanitized.replace(
-    /(\w+)\[([^\]"]*[<>(){}][^\]"]*)\]/g,
-    (_, id: string, label: string) => `${id}["${label.replace(/"/g, '#quot;')}"]`,
+  // 2. Normalize line endings & replace tabs with spaces
+  s = s.replace(/\r\n/g, '\n').replace(/\t/g, '  ')
+
+  // 3. Replace smart quotes and em-dashes with ASCII equivalents
+  s = s.replace(/[\u2018\u2019]/g, "'")   // smart single quotes
+  s = s.replace(/[\u201C\u201D]/g, '"')   // smart double quotes
+  s = s.replace(/[\u2013\u2014]/g, '-')   // en-dash, em-dash
+
+  // 4. Replace <br> tags with Mermaid line breaks
+  s = s.replace(/<br\s*\/?>/gi, '<br/>')
+
+  // 5. Strip other HTML tags (but preserve <br/>)
+  s = s.replace(/<(?!\/?br\s*\/?>)[a-z][a-z0-9]*(?:\s[^>]*)?>/gi, '')
+  s = s.replace(/<\/(?!br)[a-z][a-z0-9]*>/gi, '')
+
+  // 6. Fix broken arrow syntax
+  s = s.replace(/- ->/g, '-->')
+  s = s.replace(/<- -/g, '<--')
+
+  // 7. Remove orphan arrows (line ending with arrow and no target)
+  s = s.replace(/-->\s*$/gm, '')
+  s = s.replace(/<--\s*$/gm, '')
+
+  // 8. Collapse 3+ consecutive blank lines to 2
+  s = s.replace(/\n{3,}/g, '\n\n')
+
+  // 9. Quote labels containing special characters
+  // Match node definitions: ID[label] — only quote if label has problematic chars
+  s = s.replace(
+    /(\b\w+)\[([^\]"]+)\]/g,
+    (match, id, label) => {
+      if (/[<>(){}|;&#\/]/.test(label)) {
+        return `${id}["${label.replace(/"/g, '#quot;')}"]`
+      }
+      return match
+    }
   )
 
-  // 3. Fix labels with slashes (original pattern, improved)
-  sanitized = sanitized.replace(
-    /(\w+)\[([^\]"]*\/[^\]"]*)\](?!\()/g,
-    (_match, id: string, content: string) => {
-      if (content.startsWith('/') && content.endsWith('\\')) return _match
-      return `${id}["${content}"]`
-    },
+  // Handle round brackets: ID(label with (parens))
+  s = s.replace(
+    /(\b\w+)\(([^)]*\([^)]*\)[^)]*)\)/g,
+    (_, id, label) => `${id}["${label.replace(/"/g, '#quot;')}"]`
   )
 
-  // 4. Fix double-quoted labels that contain unescaped inner quotes
-  sanitized = sanitized.replace(
+  // 10. Fix escaped inner quotes in already-quoted labels
+  s = s.replace(
     /\["([^"]*)"([^"]+)"([^"]*)"\]/g,
-    (_, before: string, middle: string, after: string) => `["${before}${middle}${after}"]`,
+    (_, before, middle, after) => `["${before}${middle}${after}"]`
   )
 
-  // 5. Replace HTML-like tags that AI sometimes generates in node labels
-  sanitized = sanitized.replace(/<br\s*\/?>/gi, '\\n')
-  sanitized = sanitized.replace(/<\/?[a-z][a-z0-9]*(?:\s[^>]*)?>/gi, '')
+  // 11. Replace colons in node IDs with underscores (colons break Mermaid)
+  s = s.replace(/^(\s*)(\w+):(\w+)/gm, '$1$2_$3')
 
-  // 6. Fix invalid arrow syntax: "- ->" → "-->" and "<- -" → "<--"
-  sanitized = sanitized.replace(/- ->/g, '-->')
-  sanitized = sanitized.replace(/<- -/g, '<--')
+  return s
+}
 
-  // 7. Normalize line endings
-  sanitized = sanitized.replace(/\r\n/g, '\n')
+/**
+ * Force-quote ALL node labels, regardless of content.
+ * This is the aggressive fallback used when normal sanitization fails.
+ */
+function forceQuoteAllLabels(source: string): string {
+  let s = source
 
-  // 8. Collapse runs of 3+ blank lines to avoid parse errors
-  sanitized = sanitized.replace(/\n{3,}/g, '\n\n')
+  // Quote all square bracket labels: ID[text] → ID["text"]
+  s = s.replace(
+    /(\b\w+)\[(?!")([^\]]+)\]/g,
+    (_, id, label) => `${id}["${label.replace(/"/g, '#quot;')}"]`
+  )
 
-  return sanitized
+  // Quote all round bracket labels with problematic chars: ID(text) → ID["text"]
+  s = s.replace(
+    /(\b\w+)\((?!")([^)]*[<>(){}|;&#][^)]*)\)/g,
+    (_, id, label) => `${id}["${label.replace(/"/g, '#quot;')}"]`
+  )
+
+  // Quote all curly bracket labels: ID{text} → ID{"text"}
+  s = s.replace(
+    /(\b\w+)\{(?!")([^}]+)\}/g,
+    (_, id, label) => `${id}{"${label.replace(/"/g, '#quot;')}"}`
+  )
+
+  return s
+}
+
+/**
+ * Clean up orphaned Mermaid DOM elements to prevent firstChild null errors.
+ * Call before each render.
+ */
+function cleanupMermaidDOM(renderId: string): void {
+  document.getElementById(renderId)?.remove()
+  document.getElementById(`d${renderId}`)?.remove()
 }
 
 export function MermaidDiagram({ chart, className, onNodeClick, onShowRawCode, ref }: MermaidDiagramProps & { ref?: Ref<MermaidDiagramHandle> }) {
@@ -216,11 +269,39 @@ export function MermaidDiagram({ chart, className, onNodeClick, onShowRawCode, r
         try {
           setError(null)
           const id = `mermaid_${currentRender}_${Date.now()}`
-          const sanitizedChart = sanitizeMermaidSource(chart)
-          const { svg } = await mermaid.render(id, sanitizedChart)
+
+          // Clean up DOM before rendering
+          cleanupMermaidDOM(id)
+
+          // Sanitize
+          const sanitized = sanitizeMermaidSource(chart)
+
+          // Pre-validate with mermaid.parse before attempting render
+          let sourceToRender = sanitized
+          const isValid = await mermaid.parse(sanitized, { suppressErrors: true })
+
+          if (!isValid) {
+            // Try aggressive sanitization: force-quote all labels
+            const aggressive = forceQuoteAllLabels(sanitized)
+            const retryValid = await mermaid.parse(aggressive, { suppressErrors: true })
+
+            if (!retryValid) {
+              // All sanitization failed — show error with raw code fallback
+              if (currentRender !== renderIdRef.current) return
+              setError('Diagram syntax could not be parsed')
+              return
+            }
+
+            sourceToRender = aggressive
+          }
+
+          const { svg, bindFunctions } = await mermaid.render(id, sourceToRender)
           // Guard against stale renders
           if (currentRender !== renderIdRef.current) return
           setSvgContent(svg)
+          if (containerRef.current) {
+            bindFunctions?.(containerRef.current)
+          }
         } catch (err) {
           if (currentRender !== renderIdRef.current) return
           console.error('Mermaid render error:', err)
@@ -283,11 +364,26 @@ export function MermaidDiagram({ chart, className, onNodeClick, onShowRawCode, r
           themeRenderLock = true
           mermaid.initialize(LIGHT_THEME_CONFIG)
           const id = `mermaid_light_${Date.now()}`
+          cleanupMermaidDOM(id)
           const sanitizedChart = sanitizeMermaidSource(chart)
-          const { svg } = await mermaid.render(id, sanitizedChart)
+
+          // Pre-validate, then try aggressive sanitization
+          let sourceToRender = sanitizedChart
+          const isValid = await mermaid.parse(sanitizedChart, { suppressErrors: true })
+          if (!isValid) {
+            const aggressive = forceQuoteAllLabels(sanitizedChart)
+            const retryValid = await mermaid.parse(aggressive, { suppressErrors: true })
+            if (!retryValid) {
+              toast.error('Failed to render light theme preview')
+              return
+            }
+            sourceToRender = aggressive
+          }
+
+          const { svg } = await mermaid.render(id, sourceToRender)
           setLightSvg(svg)
           // Clean up orphaned render element
-          document.getElementById(id)?.remove()
+          cleanupMermaidDOM(id)
         } catch (err) {
           console.error('Failed to render light theme:', err)
           toast.error('Failed to render light theme preview')

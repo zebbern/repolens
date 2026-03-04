@@ -194,6 +194,18 @@ The user is asking specifically about: \`${targetFile}\`
 Start by reading this file with readFile.`
     }
 
+    systemPrompt += `\n\n## Mermaid Diagram Syntax Rules
+When generating Mermaid diagrams in documentation:
+1. ALWAYS use double-quoted labels for text with special characters: A["Label (with parens)"] not A(Label (with parens))
+2. Use entity codes for special chars inside labels: #quot; for quotes, #amp; for &, #35; for #
+3. Output raw Mermaid syntax WITHOUT markdown fencing (no \`\`\`mermaid wrappers)
+4. Always start with the diagram type: flowchart TD, sequenceDiagram, classDiagram, etc.
+5. Use simple alphanumeric node IDs (nodeA, auth_flow) — no special chars in IDs
+6. Close all subgraph blocks with 'end'
+7. Use 'flowchart' not 'graph' keyword
+8. Keep labels under 60 characters
+9. For line breaks in labels use <br/>`
+
     const stepBudget = maxSteps ?? 40
     systemPrompt += `\n\n## Step Budget
 You have up to ${stepBudget} tool-call rounds. Plan efficiently:

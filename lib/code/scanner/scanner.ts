@@ -1,5 +1,9 @@
 // Main scanner — orchestrates all rule scanning, computes health score,
 // and produces the final ScanResults.
+//
+// NOTE: scanIssues() is memoized by codeIndex reference to avoid redundant
+// O(n) scans when multiple components (code-browser, issues-panel) call it
+// with the same index.
 
 import type { CodeIndex, SearchResult } from '../code-index'
 import { searchIndex } from '../code-index'
@@ -16,6 +20,7 @@ import { scanSupplyChain } from './supply-chain-scanner'
 import { classifyLine, computeBlockCommentLines, hasInlineSuppression, hasSanitizerNearby, computeDynamicConfidence } from './context-classifier'
 import { isLikelyRealSecret } from './entropy'
 import { getAST, analyzeAST, AST_LANGUAGES } from './ast-analyzer'
+import { trackTaint, taintFlowsToIssues } from './taint-tracker'
 import { scoreIssue, scoreProject, getRiskDistribution, buildCvssVector } from './risk-scorer'
 
 // Combined rule set (all regex-based rules)
@@ -26,6 +31,11 @@ const RULES: ScanRule[] = [
   ...RELIABILITY_RULES,
   ...FRAMEWORK_RULES,
 ]
+
+/** Returns the full set of regex-based scan rules. */
+export function getAllRules(): ScanRule[] {
+  return RULES
+}
 
 // Rule IDs related to secrets/passwords (used for entropy & type-annotation suppression).
 // Only assignment-pattern rules — high-confidence pattern-specific rules (aws-key,
@@ -39,6 +49,22 @@ const STRING_LITERAL_SUPPRESSED_IDS = new Set(['eval-usage', 'sql-injection'])
 const EXTRACT_SECRET_VALUE = /[:=]\s*["'`]([^"'`]{4,})["'`]/
 
 // ---------------------------------------------------------------------------
+// Scan memoization — avoids redundant O(n) scans when multiple components
+// (code-browser + issues-panel) call scanIssues with the same codeIndex.
+// ---------------------------------------------------------------------------
+
+let lastScanRef: WeakRef<CodeIndex> | null = null
+let lastScanAnalysis: FullAnalysis | null = null
+let lastScanResult: ScanResults | null = null
+
+/** Clear the scan cache, e.g. for testing. */
+export function clearScanCache(): void {
+  lastScanRef = null
+  lastScanAnalysis = null
+  lastScanResult = null
+}
+
+// ---------------------------------------------------------------------------
 // Main scanner
 // ---------------------------------------------------------------------------
 
@@ -47,6 +73,15 @@ export function scanIssues(
   analysis: FullAnalysis | null,
   changedFiles?: string[],
 ): ScanResults {
+  // Return cached result if the same codeIndex instance + analysis is requested.
+  // Only applies to full scans (no changedFiles) since partial scans are cheap.
+  if (!changedFiles && lastScanRef && lastScanResult) {
+    const cachedRef = lastScanRef.deref()
+    if (cachedRef === codeIndex && lastScanAnalysis === analysis) {
+      return lastScanResult
+    }
+  }
+
   const issues: CodeIssue[] = []
   const seenIds = new Set<string>()
 
@@ -74,6 +109,9 @@ export function scanIssues(
   // searches globally), but we filter results to only the changed files.
   const scanCodeIndex = codeIndex
 
+  // Cache block-comment lines per file across all rules to avoid redundant recomputation
+  const blockCommentCache = new Map<string, Set<number> | undefined>()
+
   // 1. Run regex-based rules via searchIndex
   let rulesEvaluated = 0
   for (const rule of RULES) {
@@ -90,7 +128,21 @@ export function scanIssues(
 
     rulesEvaluated++
     let ruleCount = 0
-    const results: SearchResult[] = searchIndex(scanCodeIndex, rule.pattern, {
+
+    // Filter code index to only include files matching the rule's fileFilter
+    // to avoid unnecessary regex work on irrelevant file types
+    const ruleCodeIndex = rule.fileFilter && rule.fileFilter.length > 0
+      ? {
+          ...scanCodeIndex,
+          files: new Map(
+            [...filesToScan].filter(([path]) =>
+              rule.fileFilter!.some(ext => path.endsWith(ext))
+            )
+          ),
+        }
+      : scanCodeIndex
+
+    const results: SearchResult[] = searchIndex(ruleCodeIndex, rule.pattern, {
       caseSensitive: rule.patternOptions?.caseSensitive ?? false,
       regex: rule.patternOptions?.regex ?? false,
       wholeWord: rule.patternOptions?.wholeWord ?? false,
@@ -113,8 +165,11 @@ export function scanIssues(
       // Get all lines for context classification
       const indexedFile = scanCodeIndex.files.get(result.file)
       const allLines = indexedFile?.lines
-      // Pre-compute block comment line indices once per file (avoids O(n*m) re-scan)
-      const blockCommentLines = allLines ? computeBlockCommentLines(allLines) : undefined
+      // Use cached block comment lines (computed once per file across all rules)
+      if (!blockCommentCache.has(result.file)) {
+        blockCommentCache.set(result.file, allLines ? computeBlockCommentLines(allLines) : undefined)
+      }
+      const blockCommentLines = blockCommentCache.get(result.file)
 
       for (const match of result.matches) {
         if (rule.excludePattern && rule.excludePattern.test(match.content)) continue
@@ -223,8 +278,29 @@ export function scanIssues(
           issues.push(issue)
         }
       }
-    } catch {
-      // Parse failure for one file should not abort the scan
+    } catch (err) {
+      console.warn(`[scanner] AST analysis failed for ${path}:`, err)
+    }
+  }
+
+  // 2b. Taint tracking (source→sink analysis on AST)
+  for (const [path, file] of filesToScan) {
+    if (SKIP_VENDORED.test(path)) continue
+    const lang = file.language ?? ''
+    if (!AST_LANGUAGES.has(lang)) continue
+    try {
+      const ast = getAST(file)
+      if (!ast) continue
+      const taintFlows = trackTaint(ast, file)
+      const taintIssues = taintFlowsToIssues(taintFlows)
+      for (const issue of taintIssues) {
+        if (!seenIds.has(issue.id)) {
+          seenIds.add(issue.id)
+          issues.push(issue)
+        }
+      }
+    } catch (err) {
+      console.warn(`[scanner] Taint analysis failed for ${path}:`, err)
     }
   }
 
@@ -357,7 +433,7 @@ export function scanIssues(
     qualityDensity < 30 ? 'C' :
     qualityDensity < 50 ? 'D' : 'F'
 
-  return {
+  const result: ScanResults = {
     issues,
     summary: {
       total: issues.length,
@@ -383,4 +459,13 @@ export function scanIssues(
     projectRiskScore,
     riskDistribution,
   }
+
+  // Cache full scan results for memoization
+  if (!changedFiles) {
+    lastScanRef = new WeakRef(codeIndex)
+    lastScanAnalysis = analysis
+    lastScanResult = result
+  }
+
+  return result
 }

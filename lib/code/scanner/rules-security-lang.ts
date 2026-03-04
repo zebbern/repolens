@@ -2,7 +2,7 @@
 // Java/Kotlin, C/C++, Ruby, PHP, and Shell vulnerabilities.
 
 import type { ScanRule } from './types'
-import { PY, GO, RUST, JAVA, KOTLIN, C_CPP, RUBY, PHP, SHELL } from './constants'
+import { PY, GO, RUST, JAVA, KOTLIN, C_CPP, RUBY, PHP, SHELL, CSHARP } from './constants'
 
 export const SECURITY_LANG_RULES: ScanRule[] = [
 
@@ -344,5 +344,132 @@ export const SECURITY_LANG_RULES: ScanRule[] = [
     fileFilter: SHELL,
     excludePattern: /"\$/,
     confidence: 'low',
+  },
+
+  // ---------------------------------------------------------------------------
+  // Python — Additional Rules
+  // ---------------------------------------------------------------------------
+
+  {
+    id: 'python-tempfile-mktemp',
+    category: 'security',
+    severity: 'warning',
+    title: 'Insecure Temporary File (mktemp)',
+    description: 'tempfile.mktemp() creates a temporary filename but does not create the file atomically, enabling race condition attacks (TOCTOU). An attacker can create a symlink at the returned path before your code opens it.',
+    suggestion: 'Use tempfile.mkstemp() or tempfile.NamedTemporaryFile() which create the file atomically.',
+    cwe: 'CWE-377',
+    owasp: 'A04:2021 Insecure Design',
+    learnMoreUrl: 'https://cwe.mitre.org/data/definitions/377.html',
+    pattern: '\\btempfile\\.mktemp\\s*\\(',
+    patternOptions: { regex: true },
+    fileFilter: PY,
+    confidence: 'high',
+  },
+  {
+    id: 'python-ssl-no-verify',
+    category: 'security',
+    severity: 'warning',
+    title: 'SSL/TLS Verification Disabled (Python)',
+    description: 'Setting verify=False or using CERT_NONE disables TLS certificate verification, allowing man-in-the-middle attacks on HTTPS connections.',
+    suggestion: 'Remove verify=False. Use properly signed certificates. For self-signed certs in development, configure a custom CA bundle.',
+    cwe: 'CWE-295',
+    owasp: 'A07:2021 Identification and Authentication Failures',
+    learnMoreUrl: 'https://cwe.mitre.org/data/definitions/295.html',
+    pattern: '(?:\\bverify\\s*=\\s*False\\b|\\bCERT_NONE\\b)',
+    patternOptions: { regex: true },
+    fileFilter: PY,
+    excludePattern: /test|spec|mock|fixture|#.*verify/i,
+    confidence: 'medium',
+  },
+  {
+    id: 'python-marshal-load',
+    category: 'security',
+    severity: 'warning',
+    title: 'Insecure Deserialization (marshal)',
+    description: 'marshal.load()/loads() can execute arbitrary code during deserialization. The marshal module is not intended for untrusted data and provides no security guarantees.',
+    suggestion: 'Use JSON or MessagePack for data interchange. marshal is only intended for .pyc files.',
+    cwe: 'CWE-502',
+    owasp: 'A08:2021 Software and Data Integrity Failures',
+    learnMoreUrl: 'https://cwe.mitre.org/data/definitions/502.html',
+    pattern: '\\bmarshal\\.loads?\\s*\\(',
+    patternOptions: { regex: true },
+    fileFilter: PY,
+    confidence: 'medium',
+  },
+  {
+    id: 'python-shelve-open',
+    category: 'security',
+    severity: 'info',
+    title: 'shelve.open() Uses pickle Internally',
+    description: 'shelve uses pickle internally for serialization. If a shelve database file can be modified by an attacker, it enables arbitrary code execution during deserialization.',
+    suggestion: 'Use JSON-based storage for untrusted data. Only use shelve for trusted, locally-controlled data.',
+    cwe: 'CWE-502',
+    owasp: 'A08:2021 Software and Data Integrity Failures',
+    learnMoreUrl: 'https://cwe.mitre.org/data/definitions/502.html',
+    pattern: '\\bshelve\\.open\\s*\\(',
+    patternOptions: { regex: true },
+    fileFilter: PY,
+    confidence: 'low',
+  },
+
+  // ---------------------------------------------------------------------------
+  // PHP — Additional Rules
+  // ---------------------------------------------------------------------------
+
+  {
+    id: 'php-unserialize',
+    category: 'security',
+    severity: 'warning',
+    title: 'Unsafe Deserialization (PHP unserialize)',
+    description: 'PHP unserialize() on untrusted data can trigger __wakeup() and __destruct() magic methods, leading to object injection and potentially remote code execution.',
+    suggestion: 'Use json_decode() for data interchange. If unserialize is required, pass allowed_classes: false to restrict instantiation.',
+    cwe: 'CWE-502',
+    owasp: 'A08:2021 Software and Data Integrity Failures',
+    learnMoreUrl: 'https://cwe.mitre.org/data/definitions/502.html',
+    pattern: '\\bunserialize\\s*\\(',
+    patternOptions: { regex: true },
+    fileFilter: PHP,
+    excludePattern: /allowed_classes\s*.*false|test|spec|mock/i,
+    confidence: 'medium',
+  },
+
+  // ---------------------------------------------------------------------------
+  // Ruby — Additional Rules
+  // ---------------------------------------------------------------------------
+
+  {
+    id: 'ruby-marshal-load',
+    category: 'security',
+    severity: 'warning',
+    title: 'Insecure Deserialization (Marshal)',
+    description: 'Marshal.load()/restore() can instantiate arbitrary Ruby objects and execute code during deserialization. Never use Marshal with untrusted data.',
+    suggestion: 'Use JSON or MessagePack for data interchange. If Marshal is required, verify data integrity with HMAC first.',
+    cwe: 'CWE-502',
+    owasp: 'A08:2021 Software and Data Integrity Failures',
+    learnMoreUrl: 'https://cwe.mitre.org/data/definitions/502.html',
+    pattern: '\\bMarshal\\.(?:load|restore)\\s*\\(',
+    patternOptions: { regex: true },
+    fileFilter: RUBY,
+    confidence: 'medium',
+  },
+
+  // ---------------------------------------------------------------------------
+  // .NET / C#
+  // ---------------------------------------------------------------------------
+
+  {
+    id: 'dotnet-binary-formatter',
+    category: 'security',
+    severity: 'warning',
+    title: 'BinaryFormatter Deserialization (.NET)',
+    description: 'BinaryFormatter is inherently insecure and can execute arbitrary code during deserialization. Microsoft has deprecated it and recommends migration to safer alternatives.',
+    suggestion: 'Use System.Text.Json or JsonSerializer for data interchange. For binary formats, use MessagePack or Protobuf.',
+    cwe: 'CWE-502',
+    owasp: 'A08:2021 Software and Data Integrity Failures',
+    learnMoreUrl: 'https://learn.microsoft.com/en-us/dotnet/standard/serialization/binaryformatter-security-guide',
+    pattern: '\\bBinaryFormatter\\b.*\\b(?:Deserialize|Serialize)\\b',
+    patternOptions: { regex: true },
+    fileFilter: CSHARP,
+    confidence: 'medium',
   },
 ]

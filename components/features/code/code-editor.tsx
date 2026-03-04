@@ -1,10 +1,17 @@
 import React, { useState, useEffect, useMemo, useRef } from "react"
 import { Copy, Check } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 import { buildSearchRegex } from "@/lib/code/code-index"
 import { useSyntaxHighlighting, type SyntaxToken } from "./hooks/use-syntax-highlighting"
 import type { SearchOptions } from "./types"
+import type { CodeIssue, IssueSeverity } from "@/lib/code/issue-scanner"
 
 interface CodeEditorProps {
   content: string
@@ -13,6 +20,32 @@ interface CodeEditorProps {
   searchQuery?: string
   searchOptions?: SearchOptions
   onHighlightComplete?: () => void
+  /** Scan issues to display as gutter markers */
+  issues?: CodeIssue[]
+}
+
+/** Map severity to dot colour classes (highest wins when multiple on same line). */
+const SEVERITY_DOT_CLASSES: Record<IssueSeverity, string> = {
+  critical: 'bg-red-500',
+  warning: 'bg-amber-400',
+  info: 'bg-blue-400',
+}
+
+const SEVERITY_PRIORITY: Record<IssueSeverity, number> = {
+  critical: 3,
+  warning: 2,
+  info: 1,
+}
+
+/** Return the highest-priority severity from a list of issues. */
+function getTopSeverity(issues: CodeIssue[]): IssueSeverity {
+  let top: IssueSeverity = 'info'
+  for (const issue of issues) {
+    if (SEVERITY_PRIORITY[issue.severity] > SEVERITY_PRIORITY[top]) {
+      top = issue.severity
+    }
+  }
+  return top
 }
 
 // ---------------------------------------------------------------------------
@@ -103,12 +136,24 @@ function mergeTokensWithMatches(
 
 /** Code viewer with syntax highlighting, line numbers, search highlighting, and copy support. */
 const CodeEditor = React.forwardRef<HTMLDivElement, CodeEditorProps>(
-  ({ content, language, highlightedLine, searchQuery, searchOptions, onHighlightComplete }, ref) => {
+  ({ content, language, highlightedLine, searchQuery, searchOptions, onHighlightComplete, issues }, ref) => {
     const [copied, setCopied] = useState(false)
     const containerRef = useRef<HTMLDivElement>(null)
     const highlightedRowRef = useRef<HTMLTableRowElement>(null)
     const lines = content.split('\n')
     const syntaxLines = useSyntaxHighlighting(content, language)
+
+    // Build per-line issue map for gutter markers
+    const issuesByLine = useMemo(() => {
+      const map = new Map<number, CodeIssue[]>()
+      if (!issues) return map
+      for (const issue of issues) {
+        const existing = map.get(issue.line) || []
+        existing.push(issue)
+        map.set(issue.line, existing)
+      }
+      return map
+    }, [issues])
 
     // Build match-count-per-line map for gutter indicators
     const lineMatchCounts = useMemo(() => {
@@ -215,6 +260,7 @@ const CodeEditor = React.forwardRef<HTMLDivElement, CodeEditorProps>(
                 const lineNum = i + 1
                 const isHighlighted = lineNum === highlightedLine
                 const matchCount = lineMatchCounts.get(lineNum)
+                const lineIssues = issuesByLine.get(lineNum)
 
                 return (
                   <tr
@@ -225,17 +271,50 @@ const CodeEditor = React.forwardRef<HTMLDivElement, CodeEditorProps>(
                       isHighlighted && "bg-code-selection animate-pulse"
                     )}
                   >
-                    {/* Line Number + Gutter match indicator */}
+                    {/* Line Number + Gutter indicators */}
                     <td className={cn(
                       "sticky left-0 text-text-muted text-right px-3 select-none border-r border-foreground/[0.06] align-top w-[1%]",
                       isHighlighted ? "bg-code-selection" : "bg-background"
                     )}>
                       <span className="relative inline-flex items-center">
-                        {matchCount && (
+                        {/* Search match dot */}
+                        {matchCount && !lineIssues && (
                           <span
                             className="absolute -left-2.5 top-1/2 -translate-y-1/2 w-1.5 h-1.5 rounded-full bg-amber-400/80"
                             title={`${matchCount} match${matchCount > 1 ? 'es' : ''} on this line`}
                           />
+                        )}
+                        {/* Issue severity dot */}
+                        {lineIssues && (
+                          <TooltipProvider delayDuration={200}>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <span
+                                  className={cn(
+                                    "absolute -left-2.5 top-1/2 -translate-y-1/2 w-2 h-2 rounded-full cursor-pointer",
+                                    SEVERITY_DOT_CLASSES[getTopSeverity(lineIssues)],
+                                  )}
+                                />
+                              </TooltipTrigger>
+                              <TooltipContent side="right" className="max-w-xs">
+                                <ul className="space-y-1">
+                                  {lineIssues.map((issue) => (
+                                    <li key={issue.id} className="text-xs">
+                                      <span className={cn(
+                                        "font-medium",
+                                        issue.severity === 'critical' && "text-red-400",
+                                        issue.severity === 'warning' && "text-amber-400",
+                                        issue.severity === 'info' && "text-blue-400",
+                                      )}>
+                                        [{issue.severity}]
+                                      </span>{' '}
+                                      {issue.title}
+                                    </li>
+                                  ))}
+                                </ul>
+                              </TooltipContent>
+                            </Tooltip>
+                          </TooltipProvider>
                         )}
                         {lineNum}
                       </span>

@@ -10,7 +10,7 @@ export type {
   CompositeRule,
 } from './types'
 
-export { scanIssues } from './scanner'
+export { scanIssues, getAllRules, clearScanCache } from './scanner'
 
 export {
   calculateCoverage,
@@ -48,3 +48,12 @@ export { scoreIssue, scoreProject, getRiskBand, getRiskDistribution, buildCvssVe
 
 export { lookupCves, lookupCvesForPackage, parseDependencies, clearCveCache, queryOSV, mapSeverity } from './cve-lookup'
 export type { CveResult, CveLookupResult, PackageDependency } from './cve-lookup'
+
+export { trackTaint, taintFlowsToIssues, DEFAULT_SOURCES, DEFAULT_SINKS, DEFAULT_SANITIZERS } from './taint-tracker'
+export type { TaintSource, TaintSink, TaintSanitizer, TaintFlow } from './taint-tracker'
+
+export { validateFinding, validateBatch, buildValidationPrompt, parseValidationResponse, getCodeContext, clearValidationCache, getCachedResult, scrubSecrets } from './ai-validator'
+export type { ValidationResult, ValidationOptions, BatchValidationResult, ValidationVerdict, ValidationConfidence } from './ai-validator'
+
+export { generateFix, generateDiff, getAllFixSuggestions } from './fix-generator'
+export type { FixSuggestion, DiffLine } from './fix-generator'

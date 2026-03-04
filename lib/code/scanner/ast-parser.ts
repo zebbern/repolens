@@ -34,7 +34,7 @@ const PARSER_PLUGINS: ParserPlugin[] = [
 // AST Cache
 // ---------------------------------------------------------------------------
 
-const astCache = new Map<string, ParseResult<File> | null>()
+const astCache = new Map<string, { contentLen: number; ast: ParseResult<File> | null }>()
 
 /** Clear the AST cache. Exported for testing purposes. */
 export function clearASTCache(): void {
@@ -82,12 +82,11 @@ export function getAST(file: IndexedFile): ParseResult<File> | null {
   if (!AST_LANGUAGES.has(lang)) return null
   if (file.lineCount > MAX_LINE_COUNT) return null
 
-  if (astCache.has(file.content)) {
-    return astCache.get(file.content) ?? null
-  }
+  const cached = astCache.get(file.path)
+  if (cached && cached.contentLen === file.content.length) return cached.ast
 
   const ast = parseFileAST(file.content, lang)
-  astCache.set(file.content, ast)
+  astCache.set(file.path, { contentLen: file.content.length, ast })
   return ast
 }
 

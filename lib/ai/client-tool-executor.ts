@@ -4,6 +4,24 @@ import { scanIssues } from '@/lib/code/scanner/scanner'
 import { LANG_EXTENSIONS } from '@/lib/code/scanner/constants'
 
 // ---------------------------------------------------------------------------
+// Input validation
+// ---------------------------------------------------------------------------
+
+/**
+ * Validate that required fields exist on the AI-provided tool input.
+ * Returns an error message string if validation fails, or null if valid.
+ */
+function validateInput(input: unknown, required: Record<string, string>): string | null {
+  if (!input || typeof input !== 'object') return 'Input must be an object'
+  for (const [key, type] of Object.entries(required)) {
+    if (typeof (input as Record<string, unknown>)[key] !== type) {
+      return `Missing or invalid required field: ${key} (expected ${type})`
+    }
+  }
+  return null
+}
+
+// ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
 
@@ -20,24 +38,52 @@ export function executeToolLocally(
   }
 
   switch (toolName) {
-    case 'readFile':
+    case 'readFile': {
+      const err = validateInput(input, { path: 'string' })
+      if (err) return JSON.stringify({ error: err })
       return JSON.stringify(executeReadFile(input as { path: string; startLine?: number; endLine?: number }, codeIndex))
-    case 'readFiles':
+    }
+    case 'readFiles': {
+      const err = validateInput(input, {})
+      if (err) return JSON.stringify({ error: err })
+      if (!Array.isArray((input as Record<string, unknown>).paths)) return JSON.stringify({ error: 'Missing or invalid required field: paths (expected array)' })
       return JSON.stringify(executeReadFiles(input as { paths: string[] }, codeIndex))
-    case 'searchFiles':
+    }
+    case 'searchFiles': {
+      const err = validateInput(input, { query: 'string' })
+      if (err) return JSON.stringify({ error: err })
       return JSON.stringify(executeSearchFiles(input as { query: string; maxResults?: number | null; isRegex?: boolean }, codeIndex))
-    case 'listDirectory':
+    }
+    case 'listDirectory': {
+      const err = validateInput(input, { path: 'string' })
+      if (err) return JSON.stringify({ error: err })
       return JSON.stringify(executeListDirectory(input as { path: string }, codeIndex))
-    case 'findSymbol':
+    }
+    case 'findSymbol': {
+      const err = validateInput(input, { name: 'string' })
+      if (err) return JSON.stringify({ error: err })
       return JSON.stringify(executeFindSymbol(input as { name: string; kind?: string }, codeIndex))
-    case 'getFileStats':
+    }
+    case 'getFileStats': {
+      const err = validateInput(input, { path: 'string' })
+      if (err) return JSON.stringify({ error: err })
       return JSON.stringify(executeGetFileStats(input as { path: string }, codeIndex))
-    case 'analyzeImports':
+    }
+    case 'analyzeImports': {
+      const err = validateInput(input, { path: 'string' })
+      if (err) return JSON.stringify({ error: err })
       return JSON.stringify(executeAnalyzeImports(input as { path: string }, codeIndex))
-    case 'scanIssues':
+    }
+    case 'scanIssues': {
+      const err = validateInput(input, { path: 'string' })
+      if (err) return JSON.stringify({ error: err })
       return JSON.stringify(executeScanIssues(input as { path: string }, codeIndex))
-    case 'generateDiagram':
+    }
+    case 'generateDiagram': {
+      const err = validateInput(input, { type: 'string' })
+      if (err) return JSON.stringify({ error: err })
       return JSON.stringify(executeGenerateDiagram(input as { type: string; focusFile?: string }, codeIndex))
+    }
     case 'getProjectOverview':
       return JSON.stringify(executeGetProjectOverview(codeIndex))
     default:

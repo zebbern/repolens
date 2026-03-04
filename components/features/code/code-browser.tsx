@@ -24,6 +24,7 @@ import { useReplace } from "./hooks/use-replace"
 import { useDownloads } from "./hooks/use-downloads"
 import { FileTreeNode, type FileIssueCounts } from "./file-tree-node"
 import { scanIssues } from "@/lib/code/issue-scanner"
+import type { CodeIssue } from "@/lib/code/issue-scanner"
 import { CodeEditor } from "./code-editor"
 import { SearchResultItem } from "./search-result-item"
 import { SearchSidebar } from "./search-sidebar"
@@ -148,10 +149,10 @@ export function CodeBrowser({ navigateToFile, onNavigateComplete }: CodeBrowserP
   // Symbol extraction for outline sidebar
   const outlineSymbols = useSymbolExtraction(activeTab?.content, activeTab?.language)
 
-  // Compute lightweight issue-count-by-file map for tree badges
-  const issueCountByFile = useMemo<Map<string, FileIssueCounts>>(() => {
+  // Compute scan results: issue-count-by-file map for tree badges + full issue list for editor
+  const { issueCountByFile, allIssues } = useMemo<{ issueCountByFile: Map<string, FileIssueCounts>; allIssues: CodeIssue[] }>(() => {
     const map = new Map<string, FileIssueCounts>()
-    if (codeIndex.totalFiles === 0 || !codebaseAnalysis) return map
+    if (codeIndex.totalFiles === 0 || !codebaseAnalysis) return { issueCountByFile: map, allIssues: [] }
     try {
       const results = scanIssues(codeIndex, codebaseAnalysis)
       for (const issue of results.issues) {
@@ -159,11 +160,19 @@ export function CodeBrowser({ navigateToFile, onNavigateComplete }: CodeBrowserP
         existing[issue.severity] += 1
         map.set(issue.file, existing)
       }
-    } catch {
+      return { issueCountByFile: map, allIssues: results.issues }
+    } catch (err) {
       // Scanner failure should not break the tree
+      console.warn('[code-browser] Scanner failed during issue analysis', err)
     }
-    return map
+    return { issueCountByFile: map, allIssues: [] }
   }, [codeIndex, codebaseAnalysis])
+
+  // Filter issues for the currently active file (for editor gutter markers)
+  const activeFileIssues = useMemo<CodeIssue[]>(() => {
+    if (!activeTab?.path || allIssues.length === 0) return []
+    return allIssues.filter(issue => issue.file === activeTab.path)
+  }, [allIssues, activeTab?.path])
 
   // Debounce search query
   useEffect(() => {
@@ -289,6 +298,7 @@ export function CodeBrowser({ navigateToFile, onNavigateComplete }: CodeBrowserP
             searchQuery={sidebarMode === 'search' ? debouncedSearchQuery : ''}
             searchOptions={searchOptions}
             onHighlightComplete={() => setHighlightedLine(null)}
+            issues={activeFileIssues}
           />
         )
       }

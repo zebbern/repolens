@@ -392,6 +392,158 @@ function scanGitHubActions(
 // Python dependency checks
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// .npmrc auth token check
+// ---------------------------------------------------------------------------
+
+function scanNpmrc(
+  path: string,
+  content: string,
+  lines: string[],
+  issues: CodeIssue[],
+): void {
+  const AUTH_PATTERNS = [
+    /_authToken\s*=/i,
+    /_password\s*=/i,
+    /\/\/registry\.npmjs\.org\/:_authToken=/i,
+  ]
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim()
+    if (line.startsWith('#') || !line) continue
+
+    for (const pattern of AUTH_PATTERNS) {
+      if (pattern.test(line)) {
+        // Check that there's an actual value (not just the key)
+        const eqIdx = line.indexOf('=')
+        const value = eqIdx !== -1 ? line.substring(eqIdx + 1).trim() : ''
+        if (value && !value.startsWith('${') && value !== '""' && value !== "''") {
+          issues.push({
+            id: `supply-chain-npmrc-auth-${path}-${i + 1}`,
+            ruleId: 'supply-chain-npmrc-auth',
+            category: 'security',
+            severity: 'critical',
+            title: 'Auth Token in .npmrc',
+            description: 'This .npmrc file contains a hardcoded authentication token. Committing credentials to version control exposes them to anyone with repository access.',
+            file: path,
+            line: i + 1,
+            column: 0,
+            snippet: line.replace(/=.*/, '=<REDACTED>'),
+            suggestion: 'Use environment variable interpolation (e.g., `${NPM_TOKEN}`) or configure auth tokens outside of version control.',
+            cwe: 'CWE-798',
+            confidence: 'high',
+          })
+          return // one issue per .npmrc is sufficient
+        }
+      }
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Package.json extended checks (overrides, private registry, deprecated)
+// ---------------------------------------------------------------------------
+
+const DEPRECATED_PACKAGES: Record<string, { replacement: string; severity: 'warning' | 'info'; reason: string }> = {
+  'request': { replacement: 'node-fetch or axios', severity: 'info', reason: 'deprecated and unmaintained' },
+  'moment': { replacement: 'dayjs or date-fns', severity: 'info', reason: 'functionally deprecated; large bundle size' },
+  'node-uuid': { replacement: 'uuid', severity: 'info', reason: 'deprecated; renamed to uuid' },
+  'vm2': { replacement: 'isolated-vm', severity: 'warning', reason: 'deprecated due to unfixable security vulnerabilities' },
+  'node-serialize': { replacement: 'safe serialization (JSON.stringify)', severity: 'warning', reason: 'known remote code execution vulnerability' },
+}
+
+function scanPackageJsonExtended(
+  path: string,
+  content: string,
+  lines: string[],
+  issues: CodeIssue[],
+): void {
+  let pkg: Record<string, unknown>
+  try {
+    pkg = JSON.parse(content) as Record<string, unknown>
+  } catch {
+    return
+  }
+
+  // supply-chain-overrides: check for overrides / resolutions keys
+  if (pkg.overrides || pkg.resolutions) {
+    const key = pkg.overrides ? 'overrides' : 'resolutions'
+    const line = findLine(lines, `"${key}"`)
+    issues.push({
+      id: `supply-chain-overrides-${path}`,
+      ruleId: 'supply-chain-overrides',
+      category: 'security',
+      severity: 'info',
+      title: 'Package Overrides/Resolutions Detected',
+      description: `package.json uses "${key}" to override transitive dependency versions. This can mask dependency issues or be used for dependency confusion attacks.`,
+      file: path,
+      line,
+      column: 0,
+      snippet: `"${key}": { ... }`,
+      suggestion: 'Review overrides carefully. Document why each override exists and remove them when no longer needed.',
+      confidence: 'low',
+    })
+  }
+
+  // supply-chain-private-registry: publishConfig.registry without scope
+  const publishConfig = pkg.publishConfig as Record<string, unknown> | undefined
+  if (publishConfig && typeof publishConfig === 'object' && publishConfig.registry) {
+    const registry = String(publishConfig.registry)
+    // Flag if it's a private registry (not npmjs.org) without scope restriction
+    if (!registry.includes('registry.npmjs.org')) {
+      const name = typeof pkg.name === 'string' ? pkg.name : ''
+      const hasScope = name.startsWith('@')
+      if (!hasScope) {
+        const line = findLine(lines, '"publishConfig"')
+        issues.push({
+          id: `supply-chain-private-registry-${path}`,
+          ruleId: 'supply-chain-private-registry',
+          category: 'security',
+          severity: 'info',
+          title: 'Private Registry Without Scope',
+          description: `publishConfig.registry points to a private registry (${registry}) but the package name is not scoped. Unscoped packages published to private registries can be squatted on the public npm registry.`,
+          file: path,
+          line,
+          column: 0,
+          snippet: `"registry": "${registry}"`,
+          suggestion: 'Use a scoped package name (e.g., @org/package-name) to prevent public registry squatting.',
+          confidence: 'low',
+        })
+      }
+    }
+  }
+
+  // supply-chain-deprecated-packages: check for known deprecated packages
+  const depSections = ['dependencies', 'devDependencies'] as const
+  for (const section of depSections) {
+    const deps = pkg[section] as Record<string, string> | undefined
+    if (!deps || typeof deps !== 'object') continue
+    for (const name of Object.keys(deps)) {
+      const deprecated = DEPRECATED_PACKAGES[name]
+      if (!deprecated) continue
+      const line = findLine(lines, `"${name}"`)
+      issues.push({
+        id: `supply-chain-deprecated-package-${path}-${name}`,
+        ruleId: 'supply-chain-deprecated-package',
+        category: 'security',
+        severity: deprecated.severity,
+        title: 'Deprecated Package',
+        description: `"${name}" is ${deprecated.reason}. Deprecated packages may contain known vulnerabilities and no longer receive security patches.`,
+        file: path,
+        line,
+        column: 0,
+        snippet: `"${name}": "${deps[name]}"`,
+        suggestion: `Replace with ${deprecated.replacement}.`,
+        confidence: 'high',
+      })
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Python dependency checks
+// ---------------------------------------------------------------------------
+
 function scanPythonRequirements(
   path: string,
   lines: string[],
@@ -435,6 +587,7 @@ export function scanSupplyChain(codeIndex: CodeIndex): CodeIssue[] {
 
     if (filename === 'package.json') {
       scanPackageJson(path, content, lines, codeIndex, issues)
+      scanPackageJsonExtended(path, content, lines, issues)
     }
 
     if (filename === 'package-lock.json' || filename === 'yarn.lock' || filename === 'pnpm-lock.yaml') {
@@ -447,6 +600,10 @@ export function scanSupplyChain(codeIndex: CodeIndex): CodeIssue[] {
 
     if (filename === 'requirements.txt') {
       scanPythonRequirements(path, lines, issues)
+    }
+
+    if (filename === '.npmrc') {
+      scanNpmrc(path, content, lines, issues)
     }
   }
 

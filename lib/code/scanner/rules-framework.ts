@@ -80,6 +80,70 @@ export const FRAMEWORK_RULES: ScanRule[] = [
     confidence: 'medium',
   },
 
+  {
+    id: 'react-href-javascript',
+    category: 'security',
+    severity: 'warning',
+    title: 'JavaScript URI in href Attribute',
+    description:
+      'Using javascript: URIs in href attributes enables Cross-Site Scripting (XSS). React does not sanitize href values, so any user-controlled content in a javascript: URI executes arbitrary code.',
+    suggestion:
+      'Remove the javascript: URI. Use onClick handlers for actions, or use a valid URL',
+    cwe: 'CWE-79',
+    owasp: 'A03:2021 Injection',
+    pattern: 'href\\s*=\\s*[{\'"]\\s*javascript:',
+    patternOptions: { regex: true },
+    fileFilter: JS_TS,
+    confidence: 'high',
+  },
+  {
+    id: 'react-target-blank-noopener',
+    category: 'security',
+    severity: 'warning',
+    title: 'target="_blank" Without rel="noopener"',
+    description:
+      'Links with target="_blank" without rel="noopener noreferrer" allow the opened page to access window.opener, enabling reverse tabnapping attacks where the opener page can be navigated to a phishing URL.',
+    suggestion:
+      'Add rel="noopener noreferrer" to all links with target="_blank"',
+    cwe: 'CWE-1022',
+    pattern: 'target\\s*=\\s*[\'"]_blank[\'"]',
+    patternOptions: { regex: true },
+    fileFilter: JS_TS,
+    excludePattern: /rel\s*=.*noopener/i,
+    confidence: 'medium',
+  },
+  {
+    id: 'nextjs-api-no-auth',
+    category: 'security',
+    severity: 'info',
+    title: 'API Route Without Visible Auth Check',
+    description:
+      'Next.js API route handler exports a named HTTP method function without a visible authentication or authorization check. Any unauthenticated client can call this endpoint.',
+    suggestion:
+      'Add an auth check (e.g. getSession(), auth(), verifyToken()) at the top of the handler',
+    cwe: 'CWE-862',
+    owasp: 'A01:2021 Broken Access Control',
+    pattern: 'export\\s+(async\\s+)?function\\s+(GET|POST|PUT|DELETE|PATCH)\\s*\\(',
+    patternOptions: { regex: true },
+    fileFilter: JS_TS,
+    excludePattern: /auth|session|verifyToken|getServerSession|requireAuth|isAuthenticated/i,
+    confidence: 'low',
+  },
+  {
+    id: 'react-unsafe-lifecycle',
+    category: 'security',
+    severity: 'warning',
+    title: 'Deprecated Unsafe Lifecycle Method',
+    description:
+      'UNSAFE_componentWillMount, UNSAFE_componentWillUpdate, and UNSAFE_componentWillReceiveProps are deprecated. They can cause bugs in React concurrent mode and will be removed in a future React version.',
+    suggestion:
+      'Migrate to componentDidMount, componentDidUpdate, getDerivedStateFromProps, or hooks',
+    pattern: '\\bUNSAFE_componentWill(Mount|Update|ReceiveProps)\\b',
+    patternOptions: { regex: true },
+    fileFilter: JS_TS,
+    confidence: 'high',
+  },
+
   // ---------------------------------------------------------------------------
   // Express.js
   // ---------------------------------------------------------------------------
@@ -172,6 +236,72 @@ export const FRAMEWORK_RULES: ScanRule[] = [
     pattern: 'trust\\s*proxy[\'"]\\s*,\\s*true\\b',
     patternOptions: { regex: true },
     fileFilter: JS_TS,
+    confidence: 'low',
+  },
+
+  {
+    id: 'express-body-parser-no-limit',
+    category: 'security',
+    severity: 'warning',
+    title: 'Body Parser Without Size Limit',
+    description:
+      'express.json() or bodyParser.json() called without a limit option. Without a body size limit, your API is vulnerable to denial of service via large request bodies.',
+    suggestion:
+      'Set a body size limit: express.json({ limit: "1mb" }) or bodyParser.json({ limit: "1mb" })',
+    cwe: 'CWE-400',
+    owasp: 'A05:2021 Security Misconfiguration',
+    pattern: '(?:express|bodyParser)\\.json\\s*\\(\\s*\\)',
+    patternOptions: { regex: true },
+    fileFilter: JS_TS,
+    confidence: 'medium',
+  },
+  {
+    id: 'express-cors-credentials-wildcard',
+    category: 'security',
+    severity: 'warning',
+    title: 'CORS Wildcard Origin With Credentials',
+    description:
+      'CORS configured with origin: "*" and credentials: true. Browsers reject this combination, but misconfigured proxies may allow it — leaking cookies and auth tokens to any origin.',
+    suggestion:
+      'Set a specific origin or use a dynamic origin function instead of wildcard when credentials are enabled',
+    cwe: 'CWE-942',
+    owasp: 'A05:2021 Security Misconfiguration',
+    pattern: 'cors\\s*\\(\\s*\\{[^}]*origin\\s*:\\s*[\'"]?\\*[\'"]?[^}]*credentials\\s*:\\s*true',
+    patternOptions: { regex: true },
+    fileFilter: JS_TS,
+    confidence: 'medium',
+  },
+  {
+    id: 'express-static-dotfiles',
+    category: 'security',
+    severity: 'info',
+    title: 'express.static() Without dotfiles Option',
+    description:
+      'express.static() called without the dotfiles option. By default, dotfiles are not served, but explicit dotfiles:"deny" is recommended to prevent accidental exposure of .env, .git, and other hidden files.',
+    suggestion:
+      'Set dotfiles option: express.static("public", { dotfiles: "deny" })',
+    cwe: 'CWE-538',
+    pattern: 'express\\.static\\s*\\(',
+    patternOptions: { regex: true },
+    fileFilter: JS_TS,
+    excludePattern: /dotfiles/i,
+    confidence: 'low',
+  },
+  {
+    id: 'express-method-override-before-csrf',
+    category: 'security',
+    severity: 'info',
+    title: 'method-override May Bypass CSRF',
+    description:
+      'method-override middleware rewrites HTTP methods based on client input. If registered before CSRF middleware, attackers can change a GET request to a POST, bypassing CSRF protections.',
+    suggestion:
+      'Register CSRF middleware before method-override, or remove method-override if unneeded',
+    cwe: 'CWE-352',
+    owasp: 'A01:2021 Broken Access Control',
+    pattern: 'methodOverride\\s*\\(',
+    patternOptions: { regex: true },
+    fileFilter: JS_TS,
+    excludePattern: /csrf.*methodOverride/i,
     confidence: 'low',
   },
 

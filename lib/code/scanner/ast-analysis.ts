@@ -18,6 +18,52 @@ import type { CodeIssue, IssueCategory, IssueSeverity } from './types'
 // Helpers
 // ---------------------------------------------------------------------------
 
+/** Check whether a condition is a constant (boolean literal or self-comparison like x === x). */
+function checkConstantCondition(
+  test: t.Expression,
+  stmtLoc: t.SourceLocation | null | undefined,
+  file: IndexedFile,
+  issues: CodeIssue[],
+): void {
+  if (!stmtLoc) return
+
+  if (t.isBooleanLiteral(test)) {
+    const cwe = test.value ? 'CWE-571' : 'CWE-570'
+    issues.push(createASTIssue(file, {
+      ruleId: 'ast-constant-condition',
+      category: 'reliability',
+      severity: 'warning',
+      title: 'Constant condition',
+      description: `Condition is always \`${test.value}\`. This makes the branch unconditional.`,
+      line: stmtLoc.start.line,
+      column: stmtLoc.start.column,
+      suggestion: 'Remove the constant condition or replace with actual logic.',
+      cwe,
+    }))
+    return
+  }
+
+  if (
+    t.isBinaryExpression(test) &&
+    ['===', '!==', '==', '!='].includes(test.operator) &&
+    t.isIdentifier(test.left) &&
+    t.isIdentifier(test.right) &&
+    test.left.name === test.right.name
+  ) {
+    issues.push(createASTIssue(file, {
+      ruleId: 'ast-constant-condition',
+      category: 'reliability',
+      severity: 'warning',
+      title: 'Self-comparison',
+      description: `Comparing "${test.left.name}" to itself is always constant.`,
+      line: stmtLoc.start.line,
+      column: stmtLoc.start.column,
+      suggestion: 'Fix the comparison — did you mean to compare to a different variable?',
+      cwe: 'CWE-571',
+    }))
+  }
+}
+
 function createASTIssue(
   file: IndexedFile,
   opts: {
@@ -29,6 +75,7 @@ function createASTIssue(
     line: number
     column: number
     suggestion?: string
+    cwe?: string
   },
 ): CodeIssue {
   const lineIdx = opts.line - 1
@@ -48,6 +95,7 @@ function createASTIssue(
     column: opts.column,
     snippet,
     suggestion: opts.suggestion,
+    cwe: opts.cwe,
     confidence: 'high',
   }
 }
@@ -172,6 +220,150 @@ export function analyzeAST(ast: ParseResult<File>, file: IndexedFile): CodeIssue
               }))
             }
             break
+          }
+        }
+      },
+
+      // Rule: ast-constant-condition — detect if(true), while(false), x === x
+      IfStatement(path: NodePath<t.IfStatement>) {
+        checkConstantCondition(path.node.test, path.node.loc, file, issues)
+      },
+      WhileStatement(path: NodePath<t.WhileStatement>) {
+        checkConstantCondition(path.node.test, path.node.loc, file, issues)
+      },
+      DoWhileStatement(path: NodePath<t.DoWhileStatement>) {
+        checkConstantCondition(path.node.test, path.node.loc, file, issues)
+      },
+
+      // Rule: ast-shadow-variable — detect variable shadowing outer scope
+      VariableDeclarator(path: NodePath<t.VariableDeclarator>) {
+        if (!t.isIdentifier(path.node.id)) return
+        const name = path.node.id.name
+        if (path.scope.parent && path.scope.parent.hasBinding(name)) {
+          const loc = path.node.loc
+          if (loc) {
+            issues.push(createASTIssue(file, {
+              ruleId: 'ast-shadow-variable',
+              category: 'bad-practice',
+              severity: 'info',
+              title: 'Shadowed variable',
+              description: `Variable "${name}" shadows a variable declared in an outer scope.`,
+              line: loc.start.line,
+              column: loc.start.column,
+              suggestion: 'Rename the variable to avoid confusion with the outer declaration.',
+            }))
+          }
+        }
+      },
+
+      // Rule: ast-no-return-await — detect unnecessary return await
+      ReturnStatement(path: NodePath<t.ReturnStatement>) {
+        if (!path.node.argument || !t.isAwaitExpression(path.node.argument)) return
+        const fn = path.getFunctionParent()
+        if (fn && fn.node.async) {
+          const loc = path.node.loc
+          if (loc) {
+            issues.push(createASTIssue(file, {
+              ruleId: 'ast-no-return-await',
+              category: 'bad-practice',
+              severity: 'info',
+              title: 'Unnecessary return await',
+              description: '`return await` is redundant in an async function — the return value is already wrapped in a Promise.',
+              line: loc.start.line,
+              column: loc.start.column,
+              suggestion: 'Remove the `await` keyword: `return expr` instead of `return await expr`.',
+            }))
+          }
+        }
+      },
+
+      // Rule: ast-switch-no-default — detect switch without default case
+      SwitchStatement(path: NodePath<t.SwitchStatement>) {
+        const hasDefault = path.node.cases.some(c => c.test === null)
+        if (!hasDefault) {
+          const loc = path.node.loc
+          if (loc) {
+            issues.push(createASTIssue(file, {
+              ruleId: 'ast-switch-no-default',
+              category: 'reliability',
+              severity: 'info',
+              title: 'Switch statement without default case',
+              description: 'This switch statement has no `default` case, which may leave unhandled scenarios.',
+              line: loc.start.line,
+              column: loc.start.column,
+              suggestion: 'Add a `default` case to handle unexpected values.',
+            }))
+          }
+        }
+      },
+
+      // Rule: ast-dangerous-default-param — detect mutable default parameters
+      'Function'(path: NodePath<t.Function>) {
+        for (const param of path.node.params) {
+          if (!t.isAssignmentPattern(param)) continue
+          if (t.isArrayExpression(param.right) || t.isObjectExpression(param.right)) {
+            const loc = param.loc
+            if (loc) {
+              const kind = t.isArrayExpression(param.right) ? 'array' : 'object'
+              issues.push(createASTIssue(file, {
+                ruleId: 'ast-dangerous-default-param',
+                category: 'bad-practice',
+                severity: 'info',
+                title: 'Mutable default parameter',
+                description: `Default parameter uses a mutable ${kind} literal. Mutable default parameters are shared across calls in some contexts and can lead to unexpected behavior.`,
+                line: loc.start.line,
+                column: loc.start.column,
+                suggestion: 'Create the default value inside the function body instead.',
+              }))
+            }
+          }
+        }
+      },
+
+      // Rule: ast-nested-ternary — detect deeply nested ternaries
+      ConditionalExpression(path: NodePath<t.ConditionalExpression>) {
+        // Only flag if a child (consequent/alternate) is also a ternary
+        const hasNestedTernary =
+          t.isConditionalExpression(path.node.consequent) ||
+          t.isConditionalExpression(path.node.alternate)
+        if (!hasNestedTernary) return
+        // Avoid duplicate: only flag on the outermost ternary
+        if (t.isConditionalExpression(path.parent)) return
+        const loc = path.node.loc
+        if (loc) {
+          issues.push(createASTIssue(file, {
+            ruleId: 'ast-nested-ternary',
+            category: 'bad-practice',
+            severity: 'info',
+            title: 'Nested ternary expression',
+            description: 'Ternary expressions nested more than one level deep are hard to read and maintain.',
+            line: loc.start.line,
+            column: loc.start.column,
+            suggestion: 'Refactor into if/else statements or extract into a helper function.',
+          }))
+        }
+      },
+
+      // Rule: ast-throw-literal — detect throw 'string' or throw 123
+      ThrowStatement(path: NodePath<t.ThrowStatement>) {
+        const arg = path.node.argument
+        if (
+          arg &&
+          (t.isStringLiteral(arg) || t.isNumericLiteral(arg) || t.isTemplateLiteral(arg))
+        ) {
+          const loc = path.node.loc
+          if (loc) {
+            issues.push(createASTIssue(file, {
+              ruleId: 'ast-throw-literal',
+              category: 'bad-practice',
+              severity: 'warning',
+              title: 'Throwing a literal value',
+              description: 'Throwing a literal instead of an Error object loses stack trace information and makes debugging harder.',
+              line: loc.start.line,
+              column: loc.start.column,
+              suggestion: 'Throw an Error object instead: `throw new Error("message")`.',
+              cwe: 'CWE-397',
+            }))
           }
         }
       },

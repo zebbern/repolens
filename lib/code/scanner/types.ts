@@ -31,6 +31,14 @@ export interface CodeIssue {
   riskScore?: number
   /** Human-readable scoring breakdown, e.g. "S:critical/C:high/CAT:security/CWE:79" */
   cvssVector?: string
+  /** Taint flow data for data-flow tracked issues */
+  taintFlow?: {
+    source: string
+    sink: string
+    path: string[]
+    startLine: number
+    endLine: number
+  }
 }
 
 export interface ScanRule {

@@ -612,6 +612,13 @@ export function taintFlowsToIssues(flows: TaintFlow[]): CodeIssue[] {
       suggestion: SINK_SUGGESTION_MAP[flow.sink.type],
       cwe: flow.sink.cwe,
       confidence: 'high',
+      taintFlow: {
+        source: flow.source.name,
+        sink: flow.sink.name,
+        path: flow.path,
+        startLine: flow.startLine,
+        endLine: flow.endLine,
+      },
     })
   }
 

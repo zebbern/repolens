@@ -53,7 +53,7 @@ export function CoverageSummaryChart({ report }: CoverageSummaryChartProps) {
       <h3 className="text-sm font-semibold text-text-primary mb-3">Coverage Overview</h3>
       <div className="flex items-center gap-6">
         {/* Bar chart */}
-        <div className="flex-1 h-[80px]" role="img" aria-label="Code coverage chart showing OWASP Top 10 at ${report.overallOwaspPercent}% and CWE Top 25 at ${report.overallCwePercent}%">
+        <div className="flex-1 h-[80px]" role="img" aria-label={`Code coverage chart showing OWASP Top 10 at ${report.overallOwaspPercent}% and CWE Top 25 at ${report.overallCwePercent}%`}>
           <ResponsiveContainer width="100%" height="100%">
             <BarChart data={data} layout="vertical" margin={{ top: 0, right: 0, bottom: 0, left: 0 }}>
               <XAxis type="number" domain={[0, 100]} hide />

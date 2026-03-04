@@ -44,6 +44,7 @@ export function useDocsEngine() {
   })
   const isSubmittingRef = useRef(false)
   const hasSavedRef = useRef(false)
+  const currentDocIdRef = useRef<string | null>(null)
   const sendTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // Cleanup timer on unmount
@@ -61,7 +62,7 @@ export function useDocsEngine() {
       status === 'ready' &&
       messages.length > 0
     ) {
-      // Guard: skip intermediate ready transitions during multi-step tool calling
+      // Skip intermediate ready transitions where tool calls are still pending
       const lastMsg = messages[messages.length - 1]
       const hasPendingToolCalls =
         lastMsg?.role === 'assistant' &&
@@ -69,18 +70,31 @@ export function useDocsEngine() {
         lastMsg.parts.some(
           (p: any) => p.type === 'tool-invocation' && p.state !== 'result',
         )
-      if (hasPendingToolCalls) return
-
-      // Only save once per generation cycle
-      if (hasSavedRef.current) {
+      if (hasPendingToolCalls) {
         prevStatus.current = status
         return
       }
+
+      // If we already saved this cycle, UPDATE the existing doc with latest messages
+      if (hasSavedRef.current && currentDocIdRef.current) {
+        setGeneratedDocs(prev =>
+          prev.map(d =>
+            d.id === currentDocIdRef.current
+              ? { ...d, messages: [...messages] }
+              : d,
+          ),
+        )
+        prevStatus.current = status
+        return
+      }
+
+      // First save in this cycle — create the doc
       hasSavedRef.current = true
       isSubmittingRef.current = false
       const ctx = genContextRef.current
       const preset = DOC_PRESETS.find(p => p.id === ctx.docType)
       const docId = `doc-${Date.now()}`
+      currentDocIdRef.current = docId
       const title =
         ctx.docType === 'file-explanation' && ctx.targetFile
           ? `${ctx.targetFile.split('/').pop()} Explained`
@@ -136,6 +150,7 @@ export function useDocsEngine() {
     if (sendTimerRef.current) clearTimeout(sendTimerRef.current)
     isSubmittingRef.current = true
     hasSavedRef.current = false
+    currentDocIdRef.current = null
     sendTimerRef.current = setTimeout(() => {
       sendMessage({ text: prompt })
       isSubmittingRef.current = false
@@ -167,6 +182,7 @@ export function useDocsEngine() {
     if (sendTimerRef.current) clearTimeout(sendTimerRef.current)
     isSubmittingRef.current = true
     hasSavedRef.current = false
+    currentDocIdRef.current = null
     sendTimerRef.current = setTimeout(() => {
       sendMessage({ text: prompt })
       isSubmittingRef.current = false

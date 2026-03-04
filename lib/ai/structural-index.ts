@@ -9,7 +9,7 @@ interface FileMetadata {
   symbols?: string[]
 }
 
-// Regex patterns for extracting symbol definitions (shared with executeFindSymbol)
+// Regex patterns for extracting symbol definitions (mirrored in client-tool-executor.ts executeFindSymbol with different kind labels)
 const SYMBOL_PATTERNS = [
   { regex: /(?:export\s+)?(?:async\s+)?function\s+(\w+)/g, kind: 'fn' },
   { regex: /(?:export\s+)?(?:const|let)\s+(\w+)\s*=\s*(?:async\s+)?\(/g, kind: 'fn' },
@@ -83,6 +83,56 @@ export function buildStructuralIndex(codeIndex: CodeIndex | null): string {
   return result
 }
 
+/**
+ * Extract a clean signature from a source line for a detected symbol.
+ * For functions: captures name, params, and return type.
+ * For classes/interfaces: captures name plus extends/implements.
+ * For types: captures name plus generic parameters.
+ * Signatures are capped at 100 characters.
+ */
+export function extractSignature(line: string, name: string, kind: string): string {
+  const nameIdx = line.indexOf(name)
+  if (nameIdx === -1) return name
+  const fromName = line.substring(nameIdx)
+
+  if (kind === 'fn' || kind === 'function') {
+    // Arrow / const function: name = [async] (params)[: ReturnType] [=>]
+    const arrowMatch = fromName.match(
+      /^(\w+)\s*=\s*(?:async\s+)?\(([^()]*(?:\([^()]*\)[^()]*)*)\)(?:\s*:\s*(.+?))?(?:\s*=>|\s*$)/,
+    )
+    if (arrowMatch) {
+      const sig = arrowMatch[3]
+        ? `${arrowMatch[1]}(${arrowMatch[2]}): ${arrowMatch[3].trim()}`
+        : `${arrowMatch[1]}(${arrowMatch[2]})`
+      return sig.slice(0, 100)
+    }
+    // Function declaration: name[<generics>](params)[: ReturnType] [{]
+    const funcMatch = fromName.match(
+      /^(\w+(?:<[^>]*>)?)\s*\(([^()]*(?:\([^()]*\)[^()]*)*)\)(?:\s*:\s*(.+?))?(?:\s*\{|\s*$)/,
+    )
+    if (funcMatch) {
+      const sig = funcMatch[3]
+        ? `${funcMatch[1]}(${funcMatch[2]}): ${funcMatch[3].trim()}`
+        : `${funcMatch[1]}(${funcMatch[2]})`
+      return sig.slice(0, 100)
+    }
+  }
+
+  if (kind === 'class' || kind === 'iface' || kind === 'interface') {
+    const sigMatch = fromName.match(
+      /^(\w+(?:<[^>]*>)?(?:\s+extends\s+\S+)?(?:\s+implements\s+[^{]+)?)/,
+    )
+    if (sigMatch) return sigMatch[1].trim().slice(0, 100)
+  }
+
+  if (kind === 'type') {
+    const sigMatch = fromName.match(/^(\w+(?:<[^>]+>)?)/)
+    if (sigMatch) return sigMatch[1].trim().slice(0, 100)
+  }
+
+  return name
+}
+
 /** Extract exports, imports, and symbol definitions from a file. */
 function extractStructure(file: IndexedFile): {
   exports: string[]
@@ -113,7 +163,8 @@ function extractStructure(file: IndexedFile): {
       pat.regex.lastIndex = 0
       let sm: RegExpExecArray | null
       while ((sm = pat.regex.exec(line)) !== null) {
-        symbols.add(`${pat.kind}:${sm[1]}`)
+        const sig = extractSignature(line, sm[1], pat.kind)
+        symbols.add(`${pat.kind}:${sig}`)
       }
     }
   }
@@ -131,7 +182,7 @@ function extractStructure(file: IndexedFile): {
   return {
     exports: [...new Set(exports)].slice(0, 15),
     imports: imports.slice(0, 15),
-    symbols: [...symbols].slice(0, 20),
+    symbols: [...symbols].slice(0, 15),
   }
 }
 

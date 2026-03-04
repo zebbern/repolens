@@ -5,9 +5,7 @@ import type { CodeIndex, IndexedFile } from '@/lib/code/code-index'
 // ---------------------------------------------------------------------------
 
 /**
- * Execute a tool locally using the client-side CodeIndex.
- * Replicates the logic previously in `lib/ai/tools.ts` server-side execute
- * functions but reads from the in-memory CodeIndex instead of a `Map<string, string>`.
+ * Executes tool calls locally using the client-side CodeIndex.
  */
 export function executeToolLocally(
   toolName: string,

@@ -13,18 +13,23 @@ export const maxDuration = 120
 
 type DocType = 'architecture' | 'setup' | 'api-reference' | 'file-explanation' | 'custom'
 
+const messageSchema = z.object({
+  role: z.enum(['user', 'assistant', 'tool', 'data']),
+  content: z.string().max(100_000),
+}).passthrough() // Allow AI SDK's additional fields (parts, toolInvocations, etc.)
+
 const docsRequestSchema = z.object({
-  messages: z.array(z.any()),
+  messages: z.array(messageSchema).min(1).max(200),
   provider: z.enum(['openai', 'google', 'anthropic', 'openrouter']),
   model: z.string().min(1),
-  apiKey: z.string().min(1),
+  apiKey: z.string().min(1).max(500),
   docType: z.enum(['architecture', 'setup', 'api-reference', 'file-explanation', 'custom']),
   repoContext: z.object({
     name: z.string(),
     description: z.string(),
-    structure: z.string(),
+    structure: z.string().max(200_000),
   }),
-  structuralIndex: z.string().optional(),
+  structuralIndex: z.string().max(500_000).optional(),
   targetFile: z.string().nullish(),
 })
 
@@ -167,6 +172,16 @@ export async function POST(req: Request) {
 **Description:** ${repoContext.description || 'No description'}
 
 ## Structural Index
+Below is a JSON index of every file in the codebase with metadata including exports, imports, and symbol signatures.
+
+**Use this index BEFORE making tool calls:**
+- Scan \`exports\` to find where functions, classes, and types are defined
+- Trace \`imports\` to understand dependency chains between files
+- Read \`symbols\` to see function signatures — parameters and return types tell you what code does without reading the file
+- Only call readFile when you need the full implementation, not just the API surface
+
+This index saves you tool calls and makes your answers more accurate. Start here, then drill into specific files.
+
 ${structuralIndex || 'Not available'}
 
 ## File Tree

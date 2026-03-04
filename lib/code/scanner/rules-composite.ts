@@ -28,6 +28,7 @@ export const COMPOSITE_RULES: CompositeRule[] = [
     ],
     sinkPattern: /\bexec(?:Sync)?\s*\(\s*[a-zA-Z_$]/,
     mitigations: [/execFile|shell-quote|shell-escape|shellescape/],
+    confidence: 'medium',
   },
   // child_process + util.format (the exact node-pdf-image pattern)
   {
@@ -47,6 +48,7 @@ export const COMPOSITE_RULES: CompositeRule[] = [
     ],
     sinkPattern: /util\.format\s*\(/,
     mitigations: [/execFile|shell-quote|shell-escape|shellescape/],
+    confidence: 'medium',
   },
   // child_process + string concatenation for command building
   {
@@ -66,6 +68,7 @@ export const COMPOSITE_RULES: CompositeRule[] = [
     ],
     sinkPattern: /(?:command|cmd)\s*(?:=|\+=)\s*.*\+/,
     mitigations: [/execFile|shell-quote|shell-escape|shellescape/],
+    confidence: 'medium',
   },
   // Python: os.system/os.popen with string formatting
   {
@@ -84,6 +87,7 @@ export const COMPOSITE_RULES: CompositeRule[] = [
     ],
     sinkPattern: /\bos\.(?:system|popen)\s*\(/,
     mitigations: [/shlex\.quote|pipes\.quote/],
+    confidence: 'medium',
   },
   // Node.js: request parameter passed directly to file system operation
   {
@@ -103,6 +107,7 @@ export const COMPOSITE_RULES: CompositeRule[] = [
     ],
     sinkPattern: /(?:readFile|writeFile|createReadStream|readdir|unlink|stat|access)(?:Sync)?\s*\(/,
     mitigations: [/path\.resolve.*startsWith|sanitize.*path|whitelist|allowedPaths/],
+    confidence: 'medium',
   },
   // SSRF: user input flows into HTTP request
   {
@@ -122,6 +127,7 @@ export const COMPOSITE_RULES: CompositeRule[] = [
     ],
     sinkPattern: /(?:fetch\s*\(|axios\.|got\(|http\.request|https\.request)/,
     mitigations: [/allowlist|whitelist|allowedHosts|validUrl|isValidUrl|URL_ALLOWLIST/i],
+    confidence: 'medium',
   },
 ]
 
@@ -148,7 +154,13 @@ export function scanCompositeRules(codeIndex: CodeIndex): CodeIssue[] {
       if (!allPresent) continue
 
       // Check mitigations — if ANY mitigation is present, skip
-      if (rule.mitigations && rule.mitigations.some(m => m.test(content))) continue
+      // Track partial mitigation for credit
+      let hasPartialMitigation = false
+      if (rule.mitigations && rule.mitigations.length > 0) {
+        const mitigationMatches = rule.mitigations.filter(m => m.test(content))
+        if (mitigationMatches.length === rule.mitigations.length) continue // all mitigations present → skip
+        if (mitigationMatches.length > 0) hasPartialMitigation = true
+      }
 
       // Find the sink line (where the dangerous operation happens)
       let sinkLine = 1
@@ -161,13 +173,17 @@ export function scanCompositeRules(codeIndex: CodeIndex): CodeIssue[] {
         }
       }
 
+      const description = hasPartialMitigation
+        ? rule.description + ' (partial mitigation detected — some safeguards present but incomplete)'
+        : rule.description
+
       issues.push({
         id: `${rule.id}-${path}`,
         ruleId: rule.id,
         category: rule.category,
         severity: rule.severity,
         title: rule.title,
-        description: rule.description,
+        description,
         file: path,
         line: sinkLine,
         column: 0,
@@ -176,6 +192,9 @@ export function scanCompositeRules(codeIndex: CodeIndex): CodeIssue[] {
         cwe: rule.cwe,
         owasp: rule.owasp,
         learnMoreUrl: rule.learnMoreUrl,
+        confidence: rule.confidence,
+        fix: rule.fix,
+        fixDescription: rule.fixDescription,
       })
     }
   }

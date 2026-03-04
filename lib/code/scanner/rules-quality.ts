@@ -21,6 +21,9 @@ export const BAD_PRACTICE_RULES: ScanRule[] = [
     fileFilter: JS_TS,
     excludePattern: /\/\/.*console|\/\*.*console|logger/,
     excludeFiles: /\.test\.|\.spec\.|__tests__|__mocks__|\.stories\./,
+    confidence: 'low',
+    fix: 'logger.info(message)',
+    fixDescription: 'Use a structured logging library (pino, winston) with log levels',
   },
   {
     id: 'any-type',
@@ -34,6 +37,9 @@ export const BAD_PRACTICE_RULES: ScanRule[] = [
     patternOptions: { regex: true },
     fileFilter: TS_ONLY,
     excludePattern: /eslint-disable|@ts-ignore|@ts-expect-error|\/\/.*any/i,
+    confidence: 'medium',
+    fix: ': unknown',
+    fixDescription: "Use 'unknown' for truly unknown types (requires narrowing), or define a specific type/interface",
   },
   {
     id: 'eslint-disable',
@@ -44,6 +50,7 @@ export const BAD_PRACTICE_RULES: ScanRule[] = [
     suggestion: 'Fix the underlying issue. If suppression is necessary, add a comment explaining why.',
     pattern: '(?:eslint-disable|@ts-ignore|@ts-expect-error|@ts-nocheck|noinspection|# noqa|# type: ignore|#nosec)',
     patternOptions: { regex: true },
+    confidence: 'low',
   },
   {
     id: 'empty-catch',
@@ -56,6 +63,9 @@ export const BAD_PRACTICE_RULES: ScanRule[] = [
     pattern: 'catch\\s*\\([^)]*\\)\\s*\\{\\s*\\}',
     patternOptions: { regex: true },
     fileFilter: [...JS_TS, ...JAVA, ...KOTLIN, ...CSHARP],
+    confidence: 'medium',
+    fix: "catch (error) { logger.error('Operation failed', { error }) }",
+    fixDescription: 'Log the error, rethrow it, or handle explicitly',
   },
   {
     id: 'var-usage',
@@ -68,6 +78,9 @@ export const BAD_PRACTICE_RULES: ScanRule[] = [
     patternOptions: { regex: true },
     fileFilter: JS_TS,
     excludePattern: /\/\/.*var|\.var|--var|CSS|custom property/,
+    confidence: 'low',
+    fix: 'const x = ...',
+    fixDescription: "Use 'const' (preferred) or 'let' for reassigned variables",
   },
   {
     id: 'python-bare-except',
@@ -79,6 +92,7 @@ export const BAD_PRACTICE_RULES: ScanRule[] = [
     pattern: '\\bexcept\\s*:',
     patternOptions: { regex: true },
     fileFilter: PY,
+    confidence: 'medium',
   },
   {
     id: 'python-star-import',
@@ -91,6 +105,7 @@ export const BAD_PRACTICE_RULES: ScanRule[] = [
     patternOptions: { regex: true },
     fileFilter: PY,
     excludePattern: /#.*import|__init__/,
+    confidence: 'low',
   },
   {
     id: 'go-error-discard',
@@ -104,6 +119,7 @@ export const BAD_PRACTICE_RULES: ScanRule[] = [
     patternOptions: { regex: true },
     fileFilter: GO,
     excludePattern: /range|type assertion|ok.*:?=|defer/,
+    confidence: 'medium',
   },
   {
     id: 'rust-unwrap',
@@ -116,6 +132,7 @@ export const BAD_PRACTICE_RULES: ScanRule[] = [
     patternOptions: { regex: true },
     fileFilter: RUST,
     excludeFiles: /test|example|bench/i,
+    confidence: 'low',
   },
   {
     id: 'go-unused-import-comment',
@@ -128,6 +145,7 @@ export const BAD_PRACTICE_RULES: ScanRule[] = [
     patternOptions: { regex: true },
     fileFilter: GO,
     excludePattern: /\/\//,
+    confidence: 'low',
   },
   {
     id: 'hardcoded-ip',
@@ -139,6 +157,7 @@ export const BAD_PRACTICE_RULES: ScanRule[] = [
     pattern: '["\']\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}(?::\\d+)?["\']',
     patternOptions: { regex: true },
     excludePattern: /127\.0\.0\.1|0\.0\.0\.0|localhost|example|test|mock|placeholder|192\.168\.|10\.|172\.\d{2}\./i,
+    confidence: 'low',
   },
 ]
 
@@ -156,5 +175,6 @@ export const RELIABILITY_RULES: ScanRule[] = [
     suggestion: 'Create a tracking issue and address it, or remove if no longer relevant',
     pattern: '(?://|#|/\\*|--|%%)\\s*(?:TODO|FIXME|HACK|XXX|BUG|TEMP|WORKAROUND)\\b',
     patternOptions: { regex: true, caseSensitive: false },
+    confidence: 'low',
   },
 ]

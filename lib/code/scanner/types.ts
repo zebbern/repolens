@@ -21,6 +21,12 @@ export interface CodeIssue {
   owasp?: string
   /** Link to further reading */
   learnMoreUrl?: string
+  /** Confidence level of this detection */
+  confidence?: 'high' | 'medium' | 'low'
+  /** Auto-fix code suggestion */
+  fix?: string
+  /** Description of the fix approach */
+  fixDescription?: string
 }
 
 export interface ScanRule {
@@ -44,6 +50,12 @@ export interface ScanRule {
   excludeFiles?: RegExp
   // Structural rules use a custom scan function
   structural?: boolean
+  /** Confidence level of this rule */
+  confidence?: 'high' | 'medium' | 'low'
+  /** Auto-fix code suggestion */
+  fix?: string
+  /** Description of the fix approach */
+  fixDescription?: string
 }
 
 export type HealthGrade = 'A' | 'B' | 'C' | 'D' | 'F'
@@ -68,6 +80,14 @@ export interface ScanResults {
   rulesEvaluated: number
   scannedFiles: number
   scannedAt: Date
+  /** Grade based only on security issues */
+  securityGrade: HealthGrade
+  /** Grade based only on quality/reliability issues */
+  qualityGrade: HealthGrade
+  /** Total issues per 1000 lines of code */
+  issuesPerKloc: number
+  /** True when only a subset of files were scanned (differential scan) */
+  isPartialScan: boolean
 }
 
 export interface CompositeRule {
@@ -88,4 +108,10 @@ export interface CompositeRule {
   sinkPattern: RegExp
   /** Skip if ANY of these patterns are present (mitigations) */
   mitigations?: RegExp[]
+  /** Confidence level of this rule */
+  confidence?: 'high' | 'medium' | 'low'
+  /** Auto-fix code suggestion */
+  fix?: string
+  /** Description of the fix approach */
+  fixDescription?: string
 }

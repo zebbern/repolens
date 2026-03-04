@@ -24,6 +24,7 @@ export function scanStructuralIssues(codeIndex: CodeIndex, analysis: FullAnalysi
       snippet: `${a} <-> ${b}`,
       suggestion: 'Extract shared logic into a third module to break the cycle',
       cwe: 'CWE-1047',
+      confidence: 'high',
     })
   }
 
@@ -43,6 +44,7 @@ export function scanStructuralIssues(codeIndex: CodeIndex, analysis: FullAnalysi
         snippet: `${file.lineCount} lines of code`,
         suggestion: 'Split into smaller, focused modules with clear responsibilities (aim for < 300 lines)',
         cwe: 'CWE-1080',
+        confidence: 'medium',
       })
     }
   }
@@ -63,6 +65,7 @@ export function scanStructuralIssues(codeIndex: CodeIndex, analysis: FullAnalysi
         snippet: `Imported by ${importers.size} other files`,
         suggestion: 'Split into smaller modules with focused exports. Consider the Interface Segregation Principle.',
         cwe: 'CWE-1047',
+        confidence: 'high',
       })
     }
   }
@@ -89,6 +92,7 @@ export function scanStructuralIssues(codeIndex: CodeIndex, analysis: FullAnalysi
         snippet: `Exports: ${fileAnalysis.exports.map(e => e.name).slice(0, 6).join(', ')}${fileAnalysis.exports.length > 6 ? '...' : ''}`,
         suggestion: 'Remove if unused. Verify it\'s not consumed externally (CLI entry, dynamic import, tests).',
         cwe: 'CWE-561',
+        confidence: 'low',
       })
     }
   }
@@ -111,6 +115,7 @@ export function scanStructuralIssues(codeIndex: CodeIndex, analysis: FullAnalysi
         snippet: `Chain depth: ${deepestFile[1]} levels`,
         suggestion: 'Flatten the dependency graph. Use dependency injection or lazy imports to reduce depth.',
         cwe: 'CWE-1047',
+        confidence: 'medium',
       })
     }
   }

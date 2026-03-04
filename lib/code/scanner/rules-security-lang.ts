@@ -23,6 +23,7 @@ export const SECURITY_LANG_RULES: ScanRule[] = [
     patternOptions: { regex: true },
     fileFilter: PY,
     excludePattern: /literal_eval|#.*exec|#.*eval/,
+    confidence: 'high',
   },
   {
     id: 'python-pickle',
@@ -37,6 +38,7 @@ export const SECURITY_LANG_RULES: ScanRule[] = [
     pattern: '\\bpickle\\.(?:loads?|Unpickler)\\s*\\(',
     patternOptions: { regex: true },
     fileFilter: PY,
+    confidence: 'high',
   },
   {
     id: 'python-subprocess-shell',
@@ -50,6 +52,7 @@ export const SECURITY_LANG_RULES: ScanRule[] = [
     pattern: 'subprocess\\.(?:run|call|Popen|check_output|check_call)\\s*\\([^)]*shell\\s*=\\s*True',
     patternOptions: { regex: true },
     fileFilter: PY,
+    confidence: 'high',
   },
   {
     id: 'python-assert-security',
@@ -62,6 +65,7 @@ export const SECURITY_LANG_RULES: ScanRule[] = [
     pattern: '\\bassert\\b.*(?:password|token|auth|permission|admin|role|user)',
     patternOptions: { regex: true, caseSensitive: false },
     fileFilter: PY,
+    confidence: 'low',
   },
   {
     id: 'python-yaml-load',
@@ -76,6 +80,7 @@ export const SECURITY_LANG_RULES: ScanRule[] = [
     patternOptions: { regex: true },
     fileFilter: PY,
     excludePattern: /SafeLoader|safe_load/,
+    confidence: 'medium',
   },
   {
     id: 'python-django-debug',
@@ -91,6 +96,7 @@ export const SECURITY_LANG_RULES: ScanRule[] = [
     fileFilter: PY,
     excludePattern: /test|local|dev|#.*DEBUG/i,
     excludeFiles: /test|local_settings|dev_settings/i,
+    confidence: 'medium',
   },
 
   // ---------------------------------------------------------------------------
@@ -108,6 +114,7 @@ export const SECURITY_LANG_RULES: ScanRule[] = [
     pattern: '\\bhttp\\.(?:Get|Post|Head|PostForm)\\s*\\(',
     patternOptions: { regex: true },
     fileFilter: GO,
+    confidence: 'low',
   },
   {
     id: 'go-sql-concat',
@@ -121,6 +128,7 @@ export const SECURITY_LANG_RULES: ScanRule[] = [
     pattern: '(?:Query|Exec|Prepare)(?:Context)?\\s*\\(\\s*(?:ctx\\s*,\\s*)?(?:fmt\\.Sprintf|.*\\+)',
     patternOptions: { regex: true },
     fileFilter: GO,
+    confidence: 'medium',
   },
 
   // ---------------------------------------------------------------------------
@@ -140,6 +148,7 @@ export const SECURITY_LANG_RULES: ScanRule[] = [
     patternOptions: { regex: true },
     fileFilter: RUST,
     excludePattern: /\/\/.*unsafe|#\[allow\(unsafe/,
+    confidence: 'medium',
   },
 
   // ---------------------------------------------------------------------------
@@ -158,6 +167,7 @@ export const SECURITY_LANG_RULES: ScanRule[] = [
     pattern: '(?:Statement|createStatement).*(?:execute|Query)\\s*\\(\\s*["\'].*\\+',
     patternOptions: { regex: true },
     fileFilter: [...JAVA, ...KOTLIN],
+    confidence: 'medium',
   },
   {
     id: 'java-deserialization',
@@ -171,6 +181,7 @@ export const SECURITY_LANG_RULES: ScanRule[] = [
     pattern: '\\bObjectInputStream\\b.*\\breadObject\\s*\\(',
     patternOptions: { regex: true },
     fileFilter: JAVA,
+    confidence: 'high',
   },
   {
     id: 'java-runtime-exec',
@@ -184,6 +195,7 @@ export const SECURITY_LANG_RULES: ScanRule[] = [
     pattern: 'Runtime\\.getRuntime\\(\\)\\.exec\\s*\\(',
     patternOptions: { regex: true },
     fileFilter: [...JAVA, ...KOTLIN],
+    confidence: 'high',
   },
 
   // ---------------------------------------------------------------------------
@@ -202,6 +214,7 @@ export const SECURITY_LANG_RULES: ScanRule[] = [
     pattern: '\\bgets\\s*\\(',
     patternOptions: { regex: true },
     fileFilter: C_CPP,
+    confidence: 'high',
   },
   {
     id: 'c-strcpy',
@@ -215,6 +228,7 @@ export const SECURITY_LANG_RULES: ScanRule[] = [
     patternOptions: { regex: true },
     fileFilter: C_CPP,
     excludePattern: /strncpy|strncat|snprintf|vsnprintf/,
+    confidence: 'medium',
   },
   {
     id: 'c-format-string',
@@ -228,6 +242,7 @@ export const SECURITY_LANG_RULES: ScanRule[] = [
     patternOptions: { regex: true },
     fileFilter: C_CPP,
     excludePattern: /stderr|stdout|^#/,
+    confidence: 'high',
   },
 
   // ---------------------------------------------------------------------------
@@ -247,6 +262,7 @@ export const SECURITY_LANG_RULES: ScanRule[] = [
     patternOptions: { regex: true },
     fileFilter: RUBY,
     excludePattern: /Kernel\.system.*\[|#.*system/,
+    confidence: 'medium',
   },
   {
     id: 'ruby-mass-assignment',
@@ -261,6 +277,7 @@ export const SECURITY_LANG_RULES: ScanRule[] = [
     patternOptions: { regex: true },
     fileFilter: RUBY,
     excludePattern: /require\(|permit\(/,
+    confidence: 'low',
   },
 
   // ---------------------------------------------------------------------------
@@ -279,6 +296,7 @@ export const SECURITY_LANG_RULES: ScanRule[] = [
     pattern: '\\b(?:eval|assert)\\s*\\(|preg_replace\\s*\\([^)]+/[a-z]*e[a-z]*["\']',
     patternOptions: { regex: true },
     fileFilter: PHP,
+    confidence: 'high',
   },
   {
     id: 'php-sql-injection',
@@ -292,6 +310,7 @@ export const SECURITY_LANG_RULES: ScanRule[] = [
     pattern: '(?:mysql_query|mysqli_query|\\$\\w+->query)\\s*\\(\\s*["\']\\s*(?:SELECT|INSERT|UPDATE|DELETE).*\\$',
     patternOptions: { regex: true, caseSensitive: false },
     fileFilter: PHP,
+    confidence: 'medium',
   },
   {
     id: 'php-include-var',
@@ -305,6 +324,7 @@ export const SECURITY_LANG_RULES: ScanRule[] = [
     pattern: '(?:include|require|include_once|require_once)\\s*\\(?\\s*\\$',
     patternOptions: { regex: true },
     fileFilter: PHP,
+    confidence: 'medium',
   },
 
   // ---------------------------------------------------------------------------
@@ -323,5 +343,6 @@ export const SECURITY_LANG_RULES: ScanRule[] = [
     patternOptions: { regex: true },
     fileFilter: SHELL,
     excludePattern: /"\$/,
+    confidence: 'low',
   },
 ]

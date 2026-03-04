@@ -22,6 +22,7 @@ export const SECURITY_RULES: ScanRule[] = [
     learnMoreUrl: 'https://cwe.mitre.org/data/definitions/798.html',
     pattern: '(?:AKIA|ASIA)[A-Z0-9]{16}',
     patternOptions: { regex: true, caseSensitive: true },
+    confidence: 'high',
   },
   {
     id: 'hardcoded-secret',
@@ -36,6 +37,9 @@ export const SECURITY_RULES: ScanRule[] = [
     pattern: '(?:api[_-]?key|api[_-]?secret|secret[_-]?key|access[_-]?token|auth[_-]?token|private[_-]?key|client[_-]?secret)\\s*[:=]\\s*["\'][^"\']{8,}["\']',
     patternOptions: { regex: true, caseSensitive: false },
     excludePattern: /process\.env|import\.meta\.env|env\.|getenv|os\.environ|ENV\[|example|placeholder|your[_-]|xxx|changeme|TODO|test[_-]|fake[_-]|mock[_-]|sample[_-]|dummy|fixture|\.md["']|README|schema|zod|yup|type\b|interface\b/i,
+    confidence: 'medium',
+    fix: "process.env.API_KEY",
+    fixDescription: 'Move to environment variable or secrets manager (Vault, AWS SSM)',
   },
   {
     id: 'hardcoded-password',
@@ -50,6 +54,9 @@ export const SECURITY_RULES: ScanRule[] = [
     pattern: '(?:password|passwd|pwd)\\s*[:=]\\s*["\'][^"\']{4,}["\']',
     patternOptions: { regex: true, caseSensitive: false },
     excludePattern: /process\.env|import\.meta\.env|env\.|getenv|os\.environ|placeholder|example|your[_-]|xxx|changeme|schema|zod|yup|validate|type\b|interface\b|Props|param|arg|hash|bcrypt|scrypt/i,
+    confidence: 'medium',
+    fix: "process.env.DB_PASSWORD",
+    fixDescription: 'Move to environment variable or secrets manager',
   },
   {
     id: 'private-key-inline',
@@ -64,6 +71,7 @@ export const SECURITY_RULES: ScanRule[] = [
     pattern: '-----BEGIN (?:RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----',
     patternOptions: { regex: true, caseSensitive: true },
     excludePattern: /example|test|mock|fixture|sample/i,
+    confidence: 'high',
   },
   {
     id: 'github-token',
@@ -76,6 +84,7 @@ export const SECURITY_RULES: ScanRule[] = [
     owasp: 'A07:2021 Identification and Authentication Failures',
     pattern: '(?:ghp_[A-Za-z0-9_]{36}|gho_[A-Za-z0-9_]{36}|ghu_[A-Za-z0-9_]{36}|ghs_[A-Za-z0-9_]{36}|github_pat_[A-Za-z0-9_]{22}_[A-Za-z0-9]{59})',
     patternOptions: { regex: true, caseSensitive: true },
+    confidence: 'high',
   },
 
   // ---------------------------------------------------------------------------
@@ -96,6 +105,9 @@ export const SECURITY_RULES: ScanRule[] = [
     patternOptions: { regex: true },
     fileFilter: JS_TS,
     excludePattern: /\/\/.*eval|\/\*.*eval|\*.*eval|eslint|no-eval|JSON\.parse/,
+    confidence: 'high',
+    fix: 'JSON.parse(data)',
+    fixDescription: 'Use JSON.parse() for data parsing, or Function constructor for controlled dynamic evaluation',
   },
   {
     id: 'innerhtml-xss',
@@ -111,6 +123,9 @@ export const SECURITY_RULES: ScanRule[] = [
     patternOptions: { regex: true },
     fileFilter: JS_TS,
     excludePattern: /DOMPurify|sanitize|purify|escape|xss/i,
+    confidence: 'medium',
+    fix: 'element.textContent = value',
+    fixDescription: 'Use textContent for plain text, or DOMPurify.sanitize(html) for HTML content',
   },
   {
     id: 'sql-injection',
@@ -124,6 +139,9 @@ export const SECURITY_RULES: ScanRule[] = [
     learnMoreUrl: 'https://cwe.mitre.org/data/definitions/89.html',
     pattern: '(?:query|execute|prepare|raw|exec)\\s*\\(\\s*[`"\']\\s*(?:SELECT|INSERT|UPDATE|DELETE|DROP|ALTER|CREATE|TRUNCATE).*(?:\\$\\{|\\+\\s*["\']|\\+\\s*\\w)',
     patternOptions: { regex: true, caseSensitive: false },
+    confidence: 'high',
+    fix: "db.query('SELECT * FROM users WHERE id = $1', [userId])",
+    fixDescription: 'Use parameterized queries or prepared statements with placeholders',
   },
   {
     id: 'command-injection-template',
@@ -138,6 +156,7 @@ export const SECURITY_RULES: ScanRule[] = [
     pattern: '(?:child_process\\.exec|execSync|exec)\\s*\\(\\s*`',
     patternOptions: { regex: true },
     fileFilter: JS_TS,
+    confidence: 'high',
   },
   {
     id: 'command-injection-exec-direct',
@@ -153,6 +172,7 @@ export const SECURITY_RULES: ScanRule[] = [
     patternOptions: { regex: true },
     fileFilter: JS_TS,
     excludePattern: /execFile|\/\/.*exec|test|mock/i,
+    confidence: 'high',
   },
   {
     id: 'command-injection-require-cp',
@@ -167,6 +187,7 @@ export const SECURITY_RULES: ScanRule[] = [
     pattern: '(?:require\\s*\\(\\s*[\'"]child_process[\'"]\\)|from\\s+[\'"]child_process[\'"]|from\\s+[\'"]node:child_process[\'"])',
     patternOptions: { regex: true },
     fileFilter: JS_TS,
+    confidence: 'medium',
   },
   {
     id: 'command-injection-string-concat',
@@ -182,6 +203,7 @@ export const SECURITY_RULES: ScanRule[] = [
     patternOptions: { regex: true },
     fileFilter: JS_TS,
     excludePattern: /\/\/|sql|query|css|class|style/i,
+    confidence: 'medium',
   },
   {
     id: 'command-injection-util-format',
@@ -196,6 +218,7 @@ export const SECURITY_RULES: ScanRule[] = [
     pattern: 'util\\.format\\s*\\(\\s*[\'"][^\'"]*(?:convert|identify|gs|pdftk|ffmpeg|imagemagick|graphicsmagick|wkhtmlto|phantomjs|cmd|exec|bash|sh |rm |mv |cp |cat |chmod|chown|mkdir|curl|wget)',
     patternOptions: { regex: true, caseSensitive: false },
     fileFilter: JS_TS,
+    confidence: 'high',
   },
   {
     id: 'path-traversal',
@@ -211,6 +234,7 @@ export const SECURITY_RULES: ScanRule[] = [
     patternOptions: { regex: true },
     fileFilter: JS_TS,
     excludePattern: /path\.resolve|path\.join.*startsWith|__dirname|__filename|process\.cwd/,
+    confidence: 'medium',
   },
   {
     id: 'open-redirect',
@@ -225,6 +249,7 @@ export const SECURITY_RULES: ScanRule[] = [
     pattern: '(?:redirect|location\\.href|window\\.location|res\\.redirect)\\s*(?:=|\\()\\s*(?:req\\.|params\\.|query\\.|searchParams)',
     patternOptions: { regex: true },
     fileFilter: JS_TS,
+    confidence: 'medium',
   },
 
   // ---------------------------------------------------------------------------
@@ -244,6 +269,7 @@ export const SECURITY_RULES: ScanRule[] = [
     pattern: '(?:createHash|hashlib|MessageDigest\\.getInstance|Digest::)\\s*\\(?\\s*["\'](?:md5|sha1|sha-1)["\']',
     patternOptions: { regex: true, caseSensitive: false },
     excludePattern: /checksum|etag|cache|fingerprint|\.test\.|\.spec\./i,
+    confidence: 'medium',
   },
   {
     id: 'insecure-random',
@@ -258,6 +284,7 @@ export const SECURITY_RULES: ScanRule[] = [
     pattern: 'Math\\.random\\(\\).*(?:token|session|secret|key|password|nonce|salt|csrf|id)',
     patternOptions: { regex: true, caseSensitive: false },
     fileFilter: JS_TS,
+    confidence: 'medium',
   },
 
   // ---------------------------------------------------------------------------
@@ -276,6 +303,7 @@ export const SECURITY_RULES: ScanRule[] = [
     learnMoreUrl: 'https://cwe.mitre.org/data/definitions/942.html',
     pattern: 'Access-Control-Allow-Origin["\']?\\s*[:,]\\s*["\']\\*["\']',
     patternOptions: { regex: true },
+    confidence: 'medium',
   },
   {
     id: 'jwt-no-verify',
@@ -290,5 +318,6 @@ export const SECURITY_RULES: ScanRule[] = [
     pattern: '\\bjwt\\.decode\\s*\\(',
     patternOptions: { regex: true },
     fileFilter: [...JS_TS, ...PY],
+    confidence: 'medium',
   },
 ]

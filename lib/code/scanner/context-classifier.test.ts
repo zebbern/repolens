@@ -1,4 +1,4 @@
-import { classifyLine } from '@/lib/code/scanner/context-classifier'
+import { classifyLine, computeBlockCommentLines } from '@/lib/code/scanner/context-classifier'
 
 describe('classifyLine', () => {
   // -------------------------------------------------------------------------
@@ -44,7 +44,8 @@ describe('classifyLine', () => {
         '*/',
         'const x = 1',
       ]
-      const result = classifyLine(allLines[2], 'src/app.ts', allLines, 2)
+      const blockCommentLines = computeBlockCommentLines(allLines)
+      const result = classifyLine(allLines[2], 'src/app.ts', blockCommentLines, 2)
       expect(result.isComment).toBe(true)
     })
 
@@ -54,7 +55,8 @@ describe('classifyLine', () => {
         'This docstring contains password = "secret"',
         '"""',
       ]
-      const result = classifyLine(allLines[1], 'src/app.py', allLines, 1)
+      const blockCommentLines = computeBlockCommentLines(allLines)
+      const result = classifyLine(allLines[1], 'src/app.py', blockCommentLines, 1)
       expect(result.isComment).toBe(true)
     })
 
@@ -64,7 +66,8 @@ describe('classifyLine', () => {
         'Another docstring with eval()',
         "'''",
       ]
-      const result = classifyLine(allLines[1], 'src/app.py', allLines, 1)
+      const blockCommentLines = computeBlockCommentLines(allLines)
+      const result = classifyLine(allLines[1], 'src/app.py', blockCommentLines, 1)
       expect(result.isComment).toBe(true)
     })
 
@@ -73,7 +76,8 @@ describe('classifyLine', () => {
         '/* comment */',
         'const x = eval(input)',
       ]
-      const result = classifyLine(allLines[1], 'src/app.ts', allLines, 1)
+      const blockCommentLines = computeBlockCommentLines(allLines)
+      const result = classifyLine(allLines[1], 'src/app.ts', blockCommentLines, 1)
       expect(result.isComment).toBe(false)
     })
   })

@@ -1,4 +1,7 @@
 import type { CodeIndex, IndexedFile } from '@/lib/code/code-index'
+import { createEmptyIndex, indexFile } from '@/lib/code/code-index'
+import { scanIssues } from '@/lib/code/scanner/scanner'
+import { LANG_EXTENSIONS } from '@/lib/code/scanner/constants'
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -489,20 +492,33 @@ function executeScanIssues(
   const file = findFile(codeIndex, input.path)
   if (!file) return { error: `File not found: ${input.path}` }
 
-  const issues: Array<{ line: number; severity: string; message: string }> = []
-  const lines = file.lines
+  // Build a single-file CodeIndex and run the real scanner
+  let miniIndex = createEmptyIndex()
+  miniIndex = indexFile(miniIndex, file.path, file.content, detectLang(file.path))
+  const result = scanIssues(miniIndex, null)
 
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i]
-    if (line.includes('eval(')) issues.push({ line: i + 1, severity: 'critical', message: 'Use of eval() is a security risk' })
-    if (line.includes('innerHTML')) issues.push({ line: i + 1, severity: 'warning', message: 'innerHTML can cause XSS vulnerabilities' })
-    if (line.match(/console\.(log|debug|info)\(/)) issues.push({ line: i + 1, severity: 'info', message: 'Console statement (remove before production)' })
-    if (line.includes('any') && line.match(/:\s*any\b/)) issues.push({ line: i + 1, severity: 'warning', message: 'TypeScript `any` type reduces type safety' })
-    if (line.includes('TODO') || line.includes('FIXME') || line.includes('HACK')) issues.push({ line: i + 1, severity: 'info', message: `Code annotation: ${line.trim().slice(0, 80)}` })
-    if (/(?:password|passwd|pwd)\s*[:=]\s*['"][^'"]{4,}['"]/i.test(line)) issues.push({ line: i + 1, severity: 'critical', message: 'Possible hardcoded credential' })
+  // Map CodeIssue to backward-compatible output shape
+  const issues = result.issues.slice(0, 50).map(issue => ({
+    line: issue.line,
+    severity: issue.severity,
+    message: issue.title,
+    ruleId: issue.ruleId,
+    confidence: issue.confidence,
+    fix: issue.fix,
+  }))
+
+  return { path: file.path, issueCount: result.issues.length, issues }
+}
+
+/**
+ * Detect language from file extension for indexing.
+ */
+function detectLang(filePath: string): string {
+  const ext = '.' + (filePath.split('.').pop() || '').toLowerCase()
+  for (const [lang, exts] of Object.entries(LANG_EXTENSIONS)) {
+    if (exts.includes(ext)) return lang.toLowerCase()
   }
-
-  return { path: file.path, issueCount: issues.length, issues: issues.slice(0, 50) }
+  return 'text'
 }
 
 function executeGenerateDiagram(

@@ -94,6 +94,10 @@ function createScanResults(
     rulesEvaluated: 20,
     scannedFiles: 50,
     scannedAt: new Date('2025-06-01T00:00:00Z'),
+    securityGrade: 'A',
+    qualityGrade: 'A',
+    issuesPerKloc: 0,
+    isPartialScan: false,
     ...overrides,
   }
 }

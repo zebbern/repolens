@@ -1,9 +1,9 @@
 "use client"
 
-import React, { useState, useEffect, useMemo } from "react"
+import React, { useState, useEffect, useMemo, useCallback } from "react"
 import { Code2 } from "lucide-react"
-import { useRepository } from "@/providers"
-import type { CodeBrowserProps, SidebarMode } from "./types"
+import { useRepository, useAPIKeys } from "@/providers"
+import type { CodeBrowserProps, SidebarMode, SymbolRange, InlineActionType } from "./types"
 import { useFileOperations } from "./hooks/use-file-operations"
 import { useSearch } from "./hooks/use-search"
 import { useReplace } from "./hooks/use-replace"
@@ -14,11 +14,14 @@ import type { FileIssueCounts } from "./file-tree-node"
 import { SearchSidebar } from "./search-sidebar"
 import { SymbolOutline } from "./symbol-outline"
 import { useSymbolExtraction } from "./hooks/use-symbol-extraction"
+import { useSymbolRanges } from "./hooks/use-symbol-ranges"
+import { useInlineActions } from "./hooks/use-inline-actions"
 import { useSearchStateDispatchers } from "./hooks/use-search-state-dispatchers"
 import { CodeActivityBar } from "./code-activity-bar"
 import { CodeEditorContent } from "./code-editor-content"
 import { CodeTabBar, CodeBreadcrumb } from "./code-tab-bar"
 import { CodeExplorerSidebar } from "./code-explorer-sidebar"
+import { InlineActionPanel } from "./inline-action-panel"
 
 export function CodeBrowser({ navigateToFile, onNavigateComplete }: CodeBrowserProps) {
   const { repo, files, codeIndex, updateCodeIndex, indexingProgress: sharedIndexingProgress, modifiedContents, setModifiedContents, getFileContent, codebaseAnalysis } = useRepository()
@@ -124,6 +127,59 @@ export function CodeBrowser({ navigateToFile, onNavigateComplete }: CodeBrowserP
   // Symbol extraction for outline sidebar
   const outlineSymbols = useSymbolExtraction(activeTab?.content, activeTab?.language)
 
+  // --- Inline Actions ---
+  const lineCount = activeTab?.content ? activeTab.content.split('\n').length : 0
+  const symbolRanges = useSymbolRanges(outlineSymbols, lineCount)
+  const { result: inlineResult, triggerAction, dismissAction } = useInlineActions(codeIndex)
+  const { selectedModel, apiKeys, getValidProviders } = useAPIKeys()
+  const hasApiKey = getValidProviders().length > 0 && selectedModel !== null
+  const [hoveredSymbolRange, setHoveredSymbolRange] = useState<SymbolRange | null>(null)
+  const isPanelOpen = inlineResult !== null
+
+  const onLineHover = useCallback(
+    (lineNumber: number) => {
+      if (symbolRanges.length === 0) {
+        setHoveredSymbolRange(null)
+        return
+      }
+      // Find the most specific (innermost) symbol range containing this line
+      let best: SymbolRange | null = null
+      for (const range of symbolRanges) {
+        if (lineNumber >= range.startLine && lineNumber <= range.endLine) {
+          if (!best || (range.endLine - range.startLine) < (best.endLine - best.startLine)) {
+            best = range
+          }
+        }
+      }
+      setHoveredSymbolRange(best)
+    },
+    [symbolRanges],
+  )
+
+  const onLineLeave = useCallback(() => {
+    setHoveredSymbolRange(null)
+  }, [])
+
+  const onAction = useCallback(
+    (type: InlineActionType) => {
+      if (!hoveredSymbolRange || !activeTab?.content || !activeTab?.path) return
+      const provider = selectedModel?.provider ?? ''
+      const model = selectedModel?.id ?? ''
+      const key = provider ? (apiKeys[provider as keyof typeof apiKeys]?.key ?? '') : ''
+      triggerAction(
+        type,
+        hoveredSymbolRange,
+        activeTab.content,
+        activeTab.path,
+        activeTab.language ?? '',
+        key,
+        provider,
+        model,
+      )
+    },
+    [hoveredSymbolRange, activeTab, selectedModel, apiKeys, triggerAction],
+  )
+
   // Compute scan results: issue-count-by-file map for tree badges + full issue list for editor
   const { issueCountByFile, allIssues } = useMemo<{ issueCountByFile: Map<string, FileIssueCounts>; allIssues: CodeIssue[] }>(() => {
     const map = new Map<string, FileIssueCounts>()
@@ -148,6 +204,12 @@ export function CodeBrowser({ navigateToFile, onNavigateComplete }: CodeBrowserP
     if (!activeTab?.path || allIssues.length === 0) return []
     return allIssues.filter(issue => issue.file === activeTab.path)
   }, [allIssues, activeTab?.path])
+
+  // Reset inline action panel and hovered symbol when switching files
+  useEffect(() => {
+    dismissAction()
+    setHoveredSymbolRange(null)
+  }, [activeTabPath]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Debounce search query
   useEffect(() => {
@@ -291,25 +353,38 @@ export function CodeBrowser({ navigateToFile, onNavigateComplete }: CodeBrowserP
             onSwitchToExplorer={() => setSidebarMode('explorer')}
           />
         )}
-        <div className="flex-1 overflow-auto">
-          <CodeEditorContent
-            isIndexingComplete={isIndexingComplete}
-            indexingPercent={indexingPercent}
-            indexingCurrent={indexingProgress.current}
-            indexingTotal={indexingProgress.total}
-            activeTab={activeTab ? {
-              path: activeTab.path,
-              content: activeTab.content,
-              language: activeTab.language,
-              isLoading: activeTab.isLoading,
-              error: activeTab.error,
-            } : null}
-            highlightedLine={highlightedLine}
-            onHighlightComplete={() => setHighlightedLine(null)}
-            searchQuery={debouncedSearchQuery}
-            searchOptions={searchOptions}
-            sidebarMode={sidebarMode}
-            issues={activeFileIssues}
+        <div className="flex-1 flex min-h-0">
+          <div className="flex-1 overflow-auto min-w-0">
+            <CodeEditorContent
+              isIndexingComplete={isIndexingComplete}
+              indexingPercent={indexingPercent}
+              indexingCurrent={indexingProgress.current}
+              indexingTotal={indexingProgress.total}
+              activeTab={activeTab ? {
+                path: activeTab.path,
+                content: activeTab.content,
+                language: activeTab.language,
+                isLoading: activeTab.isLoading,
+                error: activeTab.error,
+              } : null}
+              highlightedLine={highlightedLine}
+              onHighlightComplete={() => setHighlightedLine(null)}
+              searchQuery={debouncedSearchQuery}
+              searchOptions={searchOptions}
+              sidebarMode={sidebarMode}
+              issues={activeFileIssues}
+              symbolRanges={symbolRanges}
+              onLineHover={onLineHover}
+              onLineLeave={onLineLeave}
+              hoveredSymbolRange={hoveredSymbolRange}
+              onAction={onAction}
+              hasApiKey={hasApiKey}
+            />
+          </div>
+          <InlineActionPanel
+            result={inlineResult}
+            onClose={dismissAction}
+            isOpen={isPanelOpen}
           />
         </div>
       </div>

@@ -4,7 +4,7 @@ import React, { useRef } from 'react'
 import { Loader2 } from 'lucide-react'
 import { CodeEditor } from './code-editor'
 import type { CodeIssue } from '@/lib/code/issue-scanner'
-import type { SearchOptions } from './types'
+import type { SearchOptions, SymbolRange, InlineActionType } from './types'
 
 interface CodeEditorContentProps {
   /** Indexing progress state */
@@ -28,6 +28,13 @@ interface CodeEditorContentProps {
   sidebarMode: string
   /** Issues for the active file */
   issues: CodeIssue[]
+  /** Inline action props */
+  symbolRanges?: SymbolRange[]
+  onLineHover?: (lineNumber: number) => void
+  onLineLeave?: () => void
+  hoveredSymbolRange?: SymbolRange | null
+  onAction?: (type: InlineActionType) => void
+  hasApiKey?: boolean
 }
 
 export function CodeEditorContent({
@@ -42,6 +49,12 @@ export function CodeEditorContent({
   searchOptions,
   sidebarMode,
   issues,
+  symbolRanges,
+  onLineHover,
+  onLineLeave,
+  hoveredSymbolRange,
+  onAction,
+  hasApiKey,
 }: CodeEditorContentProps) {
   const editorRef = useRef<HTMLDivElement>(null)
 
@@ -112,6 +125,11 @@ export function CodeEditorContent({
           searchOptions={searchOptions}
           onHighlightComplete={onHighlightComplete}
           issues={issues}
+          onLineHover={onLineHover}
+          onLineLeave={onLineLeave}
+          hoveredSymbolRange={hoveredSymbolRange}
+          onAction={onAction}
+          hasApiKey={hasApiKey}
         />
       )
     }

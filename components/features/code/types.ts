@@ -1,5 +1,23 @@
 // Shared types for the code browser components
 
+import type { ExtractedSymbol } from './hooks/use-symbol-extraction'
+
+export type InlineActionType = 'explain' | 'refactor' | 'find-usages' | 'complexity'
+
+export interface SymbolRange {
+  symbol: ExtractedSymbol
+  startLine: number
+  endLine: number
+}
+
+export interface InlineActionResult {
+  type: InlineActionType
+  symbolName: string
+  content: string
+  isStreaming: boolean
+  error?: string
+}
+
 export interface OpenTab {
   path: string
   name: string

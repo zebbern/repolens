@@ -10,8 +10,9 @@ import {
 import { cn } from "@/lib/utils"
 import { buildSearchRegex } from "@/lib/code/code-index"
 import { useSyntaxHighlighting, type SyntaxToken } from "./hooks/use-syntax-highlighting"
-import type { SearchOptions } from "./types"
+import type { SearchOptions, SymbolRange, InlineActionType } from "./types"
 import type { CodeIssue, IssueSeverity } from "@/lib/code/issue-scanner"
+import { InlineActionBar } from "./inline-action-bar"
 
 interface CodeEditorProps {
   content: string
@@ -22,6 +23,16 @@ interface CodeEditorProps {
   onHighlightComplete?: () => void
   /** Scan issues to display as gutter markers */
   issues?: CodeIssue[]
+  /** Called when mouse enters a line row (debounced by parent) */
+  onLineHover?: (lineNumber: number) => void
+  /** Called when mouse leaves the code area */
+  onLineLeave?: () => void
+  /** The symbol range matching the currently hovered line */
+  hoveredSymbolRange?: SymbolRange | null
+  /** Handler for inline action button clicks */
+  onAction?: (type: InlineActionType) => void
+  /** Whether the user has a valid API key configured */
+  hasApiKey?: boolean
 }
 
 /** Map severity to dot colour classes (highest wins when multiple on same line). */
@@ -136,10 +147,12 @@ function mergeTokensWithMatches(
 
 /** Code viewer with syntax highlighting, line numbers, search highlighting, and copy support. */
 const CodeEditor = React.forwardRef<HTMLDivElement, CodeEditorProps>(
-  ({ content, language, highlightedLine, searchQuery, searchOptions, onHighlightComplete, issues }, ref) => {
+  ({ content, language, highlightedLine, searchQuery, searchOptions, onHighlightComplete, issues, onLineHover, onLineLeave, hoveredSymbolRange, onAction, hasApiKey }, ref) => {
     const [copied, setCopied] = useState(false)
     const containerRef = useRef<HTMLDivElement>(null)
     const highlightedRowRef = useRef<HTMLTableRowElement>(null)
+    const hoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+    const leaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
     const lines = content.split('\n')
     const syntaxLines = useSyntaxHighlighting(content, language)
 
@@ -205,6 +218,38 @@ const CodeEditor = React.forwardRef<HTMLDivElement, CodeEditorProps>(
       }
     }, [highlightedLine, onHighlightComplete])
 
+    // Hover handlers with debounce (refs to avoid re-renders per mouse move)
+    const handleRowMouseEnter = (e: React.MouseEvent<HTMLTableSectionElement>) => {
+      if (!onLineHover) return
+      const row = (e.target as HTMLElement).closest('tr[data-line]')
+      if (!row) return
+      const lineNum = Number(row.getAttribute('data-line'))
+      if (!lineNum || isNaN(lineNum)) return
+
+      // Cancel any pending leave
+      if (leaveTimerRef.current) {
+        clearTimeout(leaveTimerRef.current)
+        leaveTimerRef.current = null
+      }
+      // Debounce the hover
+      if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current)
+      hoverTimerRef.current = setTimeout(() => {
+        onLineHover(lineNum)
+      }, 150)
+    }
+
+    const handleTableMouseLeave = () => {
+      if (hoverTimerRef.current) {
+        clearTimeout(hoverTimerRef.current)
+        hoverTimerRef.current = null
+      }
+      // Short delay before hiding so user can move mouse to the toolbar
+      if (leaveTimerRef.current) clearTimeout(leaveTimerRef.current)
+      leaveTimerRef.current = setTimeout(() => {
+        onLineLeave?.()
+      }, 300)
+    }
+
     const handleCopy = async () => {
       await navigator.clipboard.writeText(content)
       setCopied(true)
@@ -254,21 +299,29 @@ const CodeEditor = React.forwardRef<HTMLDivElement, CodeEditorProps>(
         </Button>
 
         <div ref={containerRef} className="h-full text-sm font-mono overflow-auto">
-          <table className="w-full border-collapse">
-            <tbody>
+          <table className="w-full border-collapse" onMouseLeave={handleTableMouseLeave}>
+            <tbody onMouseOver={handleRowMouseEnter}>
               {lines.map((line, i) => {
                 const lineNum = i + 1
                 const isHighlighted = lineNum === highlightedLine
                 const matchCount = lineMatchCounts.get(lineNum)
                 const lineIssues = issuesByLine.get(lineNum)
+                const isHoveredSymbolStart = hoveredSymbolRange !== null &&
+                  hoveredSymbolRange !== undefined &&
+                  lineNum === hoveredSymbolRange.startLine
 
                 return (
                   <tr
                     key={i}
+                    data-line={lineNum}
                     ref={isHighlighted ? highlightedRowRef : undefined}
                     className={cn(
                       "h-5 leading-5",
-                      isHighlighted && "bg-code-selection animate-pulse"
+                      isHighlighted && "bg-code-selection animate-pulse",
+                      hoveredSymbolRange &&
+                        lineNum >= hoveredSymbolRange.startLine &&
+                        lineNum <= hoveredSymbolRange.endLine &&
+                        "bg-foreground/[0.03]",
                     )}
                   >
                     {/* Line Number + Gutter indicators */}
@@ -320,8 +373,16 @@ const CodeEditor = React.forwardRef<HTMLDivElement, CodeEditorProps>(
                       </span>
                     </td>
                     {/* Code */}
-                    <td className="text-text-primary pl-4 whitespace-pre align-top">
+                    <td className="text-text-primary pl-4 whitespace-pre align-top relative">
                       {renderLine(i)}
+                      {isHoveredSymbolStart && onAction && (
+                        <InlineActionBar
+                          symbolRange={hoveredSymbolRange!}
+                          onAction={onAction}
+                          isVisible
+                          hasApiKey={hasApiKey ?? false}
+                        />
+                      )}
                     </td>
                   </tr>
                 )

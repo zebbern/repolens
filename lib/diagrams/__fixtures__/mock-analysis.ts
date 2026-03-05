@@ -4,6 +4,25 @@ import type { FullAnalysis, FileAnalysis, DependencyGraph, TopologyAnalysis } fr
 import type { CodeIndex, IndexedFile } from '@/lib/code/code-index'
 import type { FileNode } from '@/types/repository'
 
+// ────────── Helper for creating minimal topology/graph ──────────
+
+function createEmptyGraph(): DependencyGraph {
+  return { edges: new Map(), reverseEdges: new Map(), circular: [], externalDeps: new Map() }
+}
+
+function createSingleFileTopology(path: string): TopologyAnalysis {
+  return {
+    entryPoints: [path],
+    hubs: [],
+    orphans: [],
+    leafNodes: [path],
+    connectors: [],
+    clusters: [[path]],
+    depthMap: new Map([[path, 0]]),
+    maxDepth: 0,
+  }
+}
+
 // ────────── Minimal analysis (single file, no edges) ──────────
 
 function createMinimalFileAnalysis(path: string): FileAnalysis {
@@ -305,6 +324,122 @@ export function createLargeAnalysis(fileCount = 100): FullAnalysis {
       depthMap: new Map(Array.from(files.keys()).map((p, i) => [p, i])),
       maxDepth: fileCount - 1,
     },
+    detectedFramework: null,
+    primaryLanguage: 'typescript',
+  }
+}
+
+// ────────── Analysis with complex types (utility, union, conditional, mapped) ──────────
+
+export function createComplexTypesAnalysis(): FullAnalysis {
+  const files = new Map<string, FileAnalysis>()
+
+  files.set('src/types.ts', {
+    path: 'src/types.ts',
+    imports: [],
+    exports: [
+      { name: 'Write', kind: 'type', isDefault: false },
+      { name: 'Status', kind: 'type', isDefault: false },
+      { name: 'UserConfig', kind: 'type', isDefault: false },
+      { name: 'Nullable', kind: 'type', isDefault: false },
+      { name: 'UserProps', kind: 'interface', isDefault: false },
+    ],
+    types: [
+      // Utility type — NOT an object, properties are intersection fragments
+      { name: 'Write', kind: 'type', properties: ['Omit<T, keyof U>', 'U'], exported: true },
+      // Union of string literals — NOT an object
+      { name: 'Status', kind: 'type', properties: ["'active'", "'inactive'", "'pending'"], exported: true },
+      // Type alias to an object literal — IS an object
+      { name: 'UserConfig', kind: 'type', properties: ['name: string', 'age: number', 'email?: string'], exported: true },
+      // Simple utility type — NOT an object
+      { name: 'Nullable', kind: 'type', properties: ['T | null'], exported: true },
+      // Normal interface — IS an object
+      { name: 'UserProps', kind: 'interface', properties: ['id: number', 'name: string', 'onClick: () => void'], exported: true },
+      // Type where CodeIndex leaked surrounding file context as "properties"
+      { name: 'Config', kind: 'type', properties: [
+        'name: string',
+        'export function init(): void',
+        'declare module "config"',
+        'import { something }',
+        'value: number',
+        '// This is a comment',
+      ], exported: true },
+      // Interface where CodeIndex leaked garbage into properties
+      { name: 'LeakyInterface', kind: 'interface', properties: [
+        'export const MAX = 100',
+        'import { foo } from "bar"',
+        '// comment line',
+        'export type Alias = string',
+      ], exported: true },
+    ],
+    classes: [],
+    jsxComponents: [],
+    language: 'typescript',
+  })
+
+  return {
+    files,
+    graph: { edges: new Map(), reverseEdges: new Map(), circular: [], externalDeps: new Map() },
+    topology: {
+      entryPoints: ['src/types.ts'],
+      hubs: [],
+      orphans: [],
+      leafNodes: ['src/types.ts'],
+      connectors: [],
+      clusters: [['src/types.ts']],
+      depthMap: new Map([['src/types.ts', 0]]),
+      maxDepth: 0,
+    },
+    detectedFramework: null,
+    primaryLanguage: 'typescript',
+  }
+}
+
+// ────────── Analysis with concatenated property strings ──────────
+
+export function createConcatenatedPropsAnalysis(): FullAnalysis {
+  const files = new Map<string, FileAnalysis>()
+
+  files.set('src/store.ts', {
+    path: 'src/store.ts',
+    imports: [],
+    exports: [
+      { name: 'StorageValue', kind: 'interface', isDefault: false },
+      { name: 'ExampleState', kind: 'interface', isDefault: false },
+      { name: 'CleanInterface', kind: 'interface', isDefault: false },
+    ],
+    types: [
+      // Properties jammed into a single string by CodeIndex
+      {
+        name: 'StorageValue',
+        kind: 'interface',
+        properties: ['state: S version: number export interface PersistOptions<S>'],
+        exported: true,
+      },
+      // Multiple properties concatenated without semicolons
+      {
+        name: 'ExampleState',
+        kind: 'interface',
+        properties: ['num: number numGet: number numGetState: number'],
+        exported: true,
+      },
+      // Already-clean properties (should pass through unchanged)
+      {
+        name: 'CleanInterface',
+        kind: 'interface',
+        properties: ['id: number', 'name: string', 'active: boolean'],
+        exported: true,
+      },
+    ],
+    classes: [],
+    jsxComponents: [],
+    language: 'typescript',
+  })
+
+  return {
+    files,
+    graph: createEmptyGraph(),
+    topology: createSingleFileTopology('src/store.ts'),
     detectedFramework: null,
     primaryLanguage: 'typescript',
   }

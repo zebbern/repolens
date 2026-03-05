@@ -76,7 +76,7 @@ export function generateEntryPoints(analysis: FullAnalysis, codeIndex: CodeIndex
       for (const [routePath, rfs] of sortedRoutes) {
         for (const rf of rfs) {
           const id = sanitizeId(rf.path)
-          const label = rf.type === 'page' || rf.type === 'route' ? routePath || '/' : `${routePath || '/'}[${rf.type}]`
+          const label = rf.type === 'page' || rf.type === 'route' ? routePath || '/' : `${routePath || '/'} (${rf.type})`
           chart += `  ${id}["${label}"]${styleMap[rf.type] || ''}\n`
           nodePathMap.set(id, rf.path)
           nodeCount++

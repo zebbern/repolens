@@ -1,5 +1,5 @@
 import { generateClassDiagram } from '@/lib/diagrams/generators/class-diagram'
-import { createRealisticAnalysis, createMinimalAnalysis, createEmptyAnalysis } from '@/lib/diagrams/__fixtures__/mock-analysis'
+import { createRealisticAnalysis, createMinimalAnalysis, createEmptyAnalysis, createComplexTypesAnalysis, createConcatenatedPropsAnalysis } from '@/lib/diagrams/__fixtures__/mock-analysis'
 
 describe('generateClassDiagram', () => {
   it('produces a classDiagram with types for realistic analysis', () => {
@@ -61,5 +61,118 @@ describe('generateClassDiagram', () => {
     // All type names should map to their source file paths
     expect(result.nodePathMap.get('ButtonProps')).toBe('src/types.ts')
     expect(result.nodePathMap.get('ApiClient')).toBe('src/services/api.ts')
+  })
+
+  describe('complex type handling', () => {
+    it('renders utility types without garbage property extraction', () => {
+      const result = generateClassDiagram(createComplexTypesAnalysis())
+
+      // Write is a utility type (Omit<T, keyof U> & U) — should NOT show individual
+      // fragments as separate properties like "Omit" or "U export function"
+      expect(result.chart).toContain('Write')
+      expect(result.chart).toContain('<<type>>')
+      // Should NOT have "+Omit" as a property line
+      expect(result.chart).not.toMatch(/\+Omit/)
+    })
+
+    it('renders union string literal types cleanly', () => {
+      const result = generateClassDiagram(createComplexTypesAnalysis())
+
+      expect(result.chart).toContain('Status')
+      // Union members should be shown as a signature, not as individual property lines
+      expect(result.chart).not.toMatch(/\+'active'/)
+    })
+
+    it('renders object-like type aliases with real properties', () => {
+      const result = generateClassDiagram(createComplexTypesAnalysis())
+
+      // UserConfig has real properties (name: string, age: number)
+      expect(result.chart).toContain('UserConfig')
+      expect(result.chart).toContain('name : string')
+      expect(result.chart).toContain('age : number')
+    })
+
+    it('renders interfaces with real properties normally', () => {
+      const result = generateClassDiagram(createComplexTypesAnalysis())
+
+      expect(result.chart).toContain('UserProps')
+      expect(result.chart).toContain('<<interface>>')
+      expect(result.chart).toContain('id : number')
+      expect(result.chart).toContain('name : string')
+    })
+
+    it('shows a compact type signature for non-object types', () => {
+      const result = generateClassDiagram(createComplexTypesAnalysis())
+
+      // Nullable type (T | null) should show a cleaned-up signature
+      expect(result.chart).toContain('Nullable')
+      // Should contain the signature as a single readable line, not as separate props
+      const nullableBlock = result.chart.split('Nullable')[1]?.split('}')[0] || ''
+      // The block should have <<type>> and some simplified text, not multiple property lines
+      expect(nullableBlock).toContain('<<type>>')
+    })
+
+    it('filters garbage properties from types with leaked file context', () => {
+      const result = generateClassDiagram(createComplexTypesAnalysis())
+
+      // Config has 2/6 clean properties (<50%) — should render empty class box
+      expect(result.chart).toContain('Config')
+      const configBlock = result.chart.split('Config')[1]?.split('}')[0] || ''
+      expect(configBlock).toContain('<<type>>')
+      // Should not contain any properties or garbage — just the stereotype
+      expect(configBlock).not.toContain('name')
+      expect(configBlock).not.toContain('export')
+      expect(configBlock).not.toContain('import')
+      expect(configBlock).not.toContain('declare')
+    })
+
+    it('shows empty class box for interfaces with all garbage properties', () => {
+      const result = generateClassDiagram(createComplexTypesAnalysis())
+
+      // LeakyInterface has 0/4 clean properties — should render empty box
+      expect(result.chart).toContain('LeakyInterface')
+      expect(result.chart).toContain('<<interface>>')
+      // Should NOT contain any garbage content as properties
+      const leakyBlock = result.chart.split('LeakyInterface')[1]?.split('}')[0] || ''
+      expect(leakyBlock).not.toContain('export')
+      expect(leakyBlock).not.toContain('import')
+      expect(leakyBlock).not.toContain('comment')
+    })
+  })
+
+  describe('concatenated property splitting', () => {
+    it('splits concatenated properties into individual declarations', () => {
+      const result = generateClassDiagram(createConcatenatedPropsAnalysis())
+
+      // StorageValue had "state: S version: number export interface PersistOptions<S>"
+      // After splitting: ["state: S", "version: number", "export interface PersistOptions<S>"]
+      // "export interface..." is filtered as garbage, leaving 2 clean props
+      expect(result.chart).toContain('StorageValue')
+      expect(result.chart).toContain('+state : S')
+      expect(result.chart).toContain('+version : number')
+      // Should NOT contain the garbage fragment
+      expect(result.chart).not.toContain('PersistOptions')
+    })
+
+    it('splits multiple properties jammed into one string', () => {
+      const result = generateClassDiagram(createConcatenatedPropsAnalysis())
+
+      // ExampleState had "num: number numGet: number numGetState: number"
+      // After splitting: ["num: number", "numGet: number", "numGetState: number"]
+      expect(result.chart).toContain('ExampleState')
+      expect(result.chart).toContain('+num : number')
+      expect(result.chart).toContain('+numGet : number')
+      expect(result.chart).toContain('+numGetState : number')
+    })
+
+    it('preserves already-clean properties unchanged', () => {
+      const result = generateClassDiagram(createConcatenatedPropsAnalysis())
+
+      // CleanInterface already had separate property strings
+      expect(result.chart).toContain('CleanInterface')
+      expect(result.chart).toContain('+id : number')
+      expect(result.chart).toContain('+name : string')
+      expect(result.chart).toContain('+active : boolean')
+    })
   })
 })

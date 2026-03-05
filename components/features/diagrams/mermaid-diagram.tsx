@@ -353,6 +353,27 @@ export function MermaidDiagram({ chart, className, onNodeClick, onShowRawCode, r
       }
     }, [svgContent, attachClickHandlers])
 
+    // Trim excessive whitespace in rendered SVGs by tightening the viewBox
+    // to the actual bounding box of the diagram content.
+    useEffect(() => {
+      if (!containerRef.current) return
+      const timer = setTimeout(() => {
+        const svg = containerRef.current?.querySelector('svg') as SVGSVGElement | null
+        if (!svg) return
+        try {
+          const bbox = svg.getBBox()
+          if (bbox.width <= 0 || bbox.height <= 0) return
+          const pad = 16
+          svg.setAttribute('viewBox',
+            `${bbox.x - pad} ${bbox.y - pad} ${bbox.width + pad * 2} ${bbox.height + pad * 2}`)
+          svg.removeAttribute('height')
+        } catch {
+          // getBBox can fail if SVG is not visible or detached
+        }
+      }, 150)
+      return () => clearTimeout(timer)
+    }, [darkSvg, lightSvg, previewTheme])
+
     // -------------------------------------------------------------------
     // Feature handlers
     // -------------------------------------------------------------------

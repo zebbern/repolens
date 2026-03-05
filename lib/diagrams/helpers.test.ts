@@ -104,36 +104,23 @@ describe('getAvailableDiagrams', () => {
 
     const ids = diagrams.map(d => d.id)
     expect(ids).toContain('topology')
-    expect(ids).toContain('imports')
     expect(ids).toContain('classes')
     expect(ids).toContain('entrypoints')
     expect(ids).toContain('treemap')
+    // imports and externals are no longer listed
+    expect(ids).not.toContain('imports')
+    expect(ids).not.toContain('externals')
 
-    // types.ts has types, so 'classes' should be available
+    // types.ts has types, so 'classes' should be present and available
     const classesDiagram = diagrams.find(d => d.id === 'classes')
     expect(classesDiagram?.available).toBe(true)
   })
 
-  it('marks externals as available when external deps exist', () => {
-    const analysis = createRealisticAnalysis()
-    const diagrams = getAvailableDiagrams(analysis)
-    const externalsDiagram = diagrams.find(d => d.id === 'externals')
-    expect(externalsDiagram?.available).toBe(true)
-  })
-
-  it('marks externals as unavailable when no external deps', () => {
-    const analysis = createMinimalAnalysis()
-    const diagrams = getAvailableDiagrams(analysis)
-    const externalsDiagram = diagrams.find(d => d.id === 'externals')
-    expect(externalsDiagram?.available).toBe(false)
-    expect(externalsDiagram?.reason).toBeDefined()
-  })
-
-  it('marks classes as unavailable when no types/classes exist', () => {
+  it('excludes classes from list when no types/classes exist', () => {
     const analysis = createMinimalAnalysis()
     const diagrams = getAvailableDiagrams(analysis)
     const classesDiagram = diagrams.find(d => d.id === 'classes')
-    expect(classesDiagram?.available).toBe(false)
+    expect(classesDiagram).toBeUndefined()
   })
 
   it('labels entrypoints as Routes when a framework is detected', () => {
@@ -158,14 +145,13 @@ describe('getAvailableDiagrams', () => {
     const topology = diagrams.find(d => d.id === 'topology')
     expect(topology?.available).toBe(false)
 
-    const imports = diagrams.find(d => d.id === 'imports')
-    expect(imports?.available).toBe(false)
-
+    // classes should be excluded entirely (no types in empty analysis)
     const classes = diagrams.find(d => d.id === 'classes')
-    expect(classes?.available).toBe(false)
+    expect(classes).toBeUndefined()
 
-    const externals = diagrams.find(d => d.id === 'externals')
-    expect(externals?.available).toBe(false)
+    // imports and externals are no longer listed
+    expect(diagrams.find(d => d.id === 'imports')).toBeUndefined()
+    expect(diagrams.find(d => d.id === 'externals')).toBeUndefined()
 
     const modules = diagrams.find(d => d.id === 'modules')
     expect(modules?.available).toBe(false)

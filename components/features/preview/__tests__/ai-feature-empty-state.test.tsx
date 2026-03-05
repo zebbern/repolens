@@ -43,7 +43,7 @@ describe('AIFeatureEmptyState', () => {
     it('shows all feature bullet points for diagram', () => {
       render(<AIFeatureEmptyState tabId="diagram" />)
 
-      expect(screen.getByText(/8 diagram types/)).toBeInTheDocument()
+      expect(screen.getByText(/6 diagram types/)).toBeInTheDocument()
       expect(screen.getByText(/Interactive Mermaid rendering/)).toBeInTheDocument()
       expect(screen.getByText(/Export to SVG and PNG/)).toBeInTheDocument()
       expect(screen.getByText(/Auto-generated from code analysis/)).toBeInTheDocument()

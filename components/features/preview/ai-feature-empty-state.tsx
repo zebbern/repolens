@@ -29,7 +29,7 @@ const AI_TAB_INFO: Record<string, TabInfo> = {
     description:
       "Create architecture diagrams, dependency graphs, and treemaps from your codebase. The AI analyzes your code structure and generates interactive visualizations.",
     features: [
-      "8 diagram types including architecture, imports, classes, and treemap",
+      "6 diagram types including architecture, treemap, and entry points",
       "Interactive Mermaid rendering with zoom and pan",
       "Export to SVG and PNG",
       "Auto-generated from code analysis",

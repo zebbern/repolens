@@ -1,5 +1,5 @@
 import {
-  Network, GitBranch, Boxes, Route, Component, SquareStack, Package, Layers, LayoutDashboard,
+  Network, Boxes, Route, Component, SquareStack, Layers, LayoutDashboard,
 } from 'lucide-react'
 
 // ---------------------------------------------------------------------------
@@ -38,11 +38,9 @@ export function getLangColor(lang?: string): string {
 
 export const ICON_MAP: Record<string, typeof Network> = {
   topology: Boxes,
-  imports: GitBranch,
   classes: SquareStack,
   entrypoints: Route,
   modules: Component,
   treemap: Layers,
-  externals: Package,
   summary: LayoutDashboard,
 }

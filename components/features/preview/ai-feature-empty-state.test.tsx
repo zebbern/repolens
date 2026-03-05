@@ -22,11 +22,11 @@ describe('AIFeatureEmptyState', () => {
   // ---------------------------------------------------------------------------
 
   describe('diagram marketing copy', () => {
-    it('mentions "8 diagram types" in the feature list', () => {
+    it('mentions "6 diagram types" in the feature list', () => {
       render(<AIFeatureEmptyState {...defaultProps} />)
       const featureItems = screen.getAllByRole('listitem')
       const diagramTypesItem = featureItems.find((item) =>
-        item.textContent?.includes('8 diagram types'),
+        item.textContent?.includes('6 diagram types'),
       )
       expect(diagramTypesItem).toBeTruthy()
     })
@@ -49,13 +49,12 @@ describe('AIFeatureEmptyState', () => {
       expect(hasERD).toBe(false)
     })
 
-    it('mentions accurate diagram type names (architecture, imports, classes, treemap)', () => {
+    it('mentions accurate diagram type names (architecture, treemap, entry points)', () => {
       render(<AIFeatureEmptyState {...defaultProps} />)
       const allText = screen.getAllByRole('listitem').map((li) => li.textContent).join(' ')
       expect(allText).toContain('architecture')
-      expect(allText).toContain('imports')
-      expect(allText).toContain('classes')
       expect(allText).toContain('treemap')
+      expect(allText).toContain('entry points')
     })
 
     it('does not mention unsupported diagram types in the description', () => {

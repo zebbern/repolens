@@ -45,19 +45,22 @@ export function computeCommonStats(analysis: FullAnalysis): Partial<DiagramStats
 
 export function getAvailableDiagrams(analysis: FullAnalysis): AvailableDiagram[] {
   const hasTypes = Array.from(analysis.files.values()).some(f => f.types.length > 0 || f.classes.length > 0)
-  const hasExternals = analysis.graph.externalDeps.size > 0
   const hasComponents = Array.from(analysis.files.values()).some(f => f.jsxComponents.length > 0)
   // Modules tab: show if components exist (JSX) OR if hubs exist (reverse dep tree for any language)
   const hasModules = hasComponents || analysis.topology.hubs.length > 0
 
-  return [
+  const diagrams: AvailableDiagram[] = [
     { id: 'topology', label: 'Architecture', available: analysis.files.size > 0 },
-    { id: 'imports', label: 'Imports', available: analysis.files.size > 0 },
-    { id: 'classes', label: 'Types', available: hasTypes, reason: 'No types/interfaces/classes found' },
     { id: 'entrypoints', label: analysis.detectedFramework ? 'Routes' : 'Entry Points', available: true },
     { id: 'modules', label: hasComponents ? 'Components' : 'Modules', available: hasModules, reason: 'No module usage detected' },
     { id: 'treemap', label: 'Treemap', available: true },
-    { id: 'externals', label: 'Packages', available: hasExternals, reason: 'No external dependencies found' },
     { id: 'summary', label: 'Summary', available: analysis.files.size > 0 },
   ]
+
+  // Only show the Types diagram when the codebase actually has classes or interfaces
+  if (hasTypes) {
+    diagrams.splice(1, 0, { id: 'classes', label: 'Types', available: true })
+  }
+
+  return diagrams
 }

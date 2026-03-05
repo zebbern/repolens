@@ -46,16 +46,19 @@ graph LR
 
 ## Provider Architecture
 
-The app uses six nested React Context providers. The nesting order determines dependency availability — inner providers can consume outer providers via hooks.
+The app uses nine nested React Context providers. The nesting order determines dependency availability — inner providers can consume outer providers via hooks.
 
 ```mermaid
 graph TD
   A["SessionProvider"] --> B["ThemeProvider"]
   B --> C["APIKeysProvider"]
   C --> D["RepositoryProvider"]
-  D --> E["DocsProvider"]
-  E --> F["AppProvider"]
-  F --> G["App children"]
+  D --> E["ToursProvider"]
+  E --> F["DocsProvider"]
+  F --> G["ChangelogProvider"]
+  G --> H["AppProvider"]
+  H --> I["ComparisonProvider"]
+  I --> J["App children"]
 ```
 
 | Provider | Purpose | Key State |
@@ -65,11 +68,10 @@ graph TD
 | **APIKeysProvider** | Manages AI provider API keys (OpenAI, Anthropic, Google, OpenRouter), model selection, and key validation | API keys in localStorage, selected model, available models |
 | **RepositoryProvider** | Fetches, indexes, and caches repository data. Manages the `CodeIndex`, search state, modified file contents, and codebase analysis | `GitHubRepo`, file tree, `CodeIndex`, loading stage, indexing progress, `FullAnalysis` |
 | **DocsProvider** | Hosts the `useChat` instance for documentation generation. Splits into two sub-contexts: `DocsStateContext` (generated docs list) and `DocsChatContext` (streaming chat state) | Generated docs, active doc ID, chat messages/status |
-| **AppProvider** | Lightweight global UI state | Preview URL, generating flag, sidebar width |
-
-### ComparisonProvider
-
-`ComparisonProvider` is used on the `/compare` route (not nested in the main chain). It manages side-by-side repository comparison: fetching metrics, dependencies, and file trees for up to 4 repos simultaneously.
+| **ToursProvider** | Manages repo tours: CRUD, playback state, active tour/stop tracking. Persists tours in IndexedDB via `tour-cache.ts`. Split contexts (state + playback) | Tours list, active tour, current stop index, playback state |
+| **ChangelogProvider** | Hosts `useChat` for changelog generation. Split contexts like DocsProvider (State + Chat) | Generated changelogs, active ID, chat streaming state |
+| **AppProvider** | Lightweight global UI state. Tracks selected file path for cross-feature coordination (e.g., blame view) | Preview URL, generating flag, sidebar width, selected file path |
+| **ComparisonProvider** | Wraps children at end of provider chain. On `/compare` route manages side-by-side repo comparison: fetching metrics, dependencies, and file trees for up to 4 repos | Comparison repos, metrics, loading state |
 
 ## AI Chat System
 
@@ -101,7 +103,7 @@ graph LR
 
 1. **User sends message** — `ChatSidebar.handleSubmit()` calls `sendMessage()` with the message text and a body containing the selected model, API key, repo context, and structural index.
 2. **Server receives request** — The API route (`/api/chat` or `/api/docs/generate`) validates the request with Zod, creates the AI model via `createAIModel()`, and calls `streamText()` with the `codeTools` definitions.
-3. **Tools have no `execute`** — The `codeTools` object defines 10 tools using `tool()` from the AI SDK, each with a Zod `inputSchema` but no `execute` function. This means tool calls are streamed to the client instead of being executed on the server.
+3. **Tools have no `execute`** — The `codeTools` object defines 11 tools using `tool()` from the AI SDK, each with a Zod `inputSchema` but no `execute` function. This means tool calls are streamed to the client instead of being executed on the server.
 4. **Client intercepts tool calls** — The `useChat` hook's `onToolCall` callback fires for each tool call. It delegates to `handleToolCall()`, which calls `executeToolLocally()`.
 5. **Local execution** — `executeToolLocally()` runs the tool against the in-memory `CodeIndex`: reading files, searching content, listing directories, finding symbols, scanning issues, or generating diagrams.
 6. **Results fed back** — Tool results are passed to `addToolOutput()`, which adds them to the message stream.
@@ -121,6 +123,7 @@ graph LR
 | `analyzeImports` | Analyze import/export relationships |
 | `scanIssues` | Run security and quality scanner on a file |
 | `generateDiagram` | Generate Mermaid diagrams (summary, topology, import-graph) |
+| `generateTour` | Generate an interactive code tour with ordered stops |
 | `getProjectOverview` | Get project-wide statistics and structure |
 
 ### Context Compaction
@@ -257,6 +260,110 @@ Diagrams are generated from the `FullAnalysis` (dependency graph and topology an
 2. **Diagram dispatch** — `generateDiagram(type, codeIndex, files, analysis)` routes to the appropriate generator.
 3. **Adaptive rendering** — Generators automatically collapse to directory-level representation when file count exceeds thresholds (e.g., 50 for import graphs, 80 for topology).
 
+## Chat Context Pinning
+
+Users pin files or folders to the AI chat context for targeted analysis. Pinned files are stored in `RepositoryProvider` state as a set of file paths. When sending a message, pinned file contents are fetched from the `CodeIndex` and injected into the system prompt after the file tree.
+
+### Constraints
+
+- Maximum 20 pinned files
+- Maximum 100 KB total pinned content
+- Maximum 50 KB per individual file
+- Limits are configurable via `PINNED_CONTEXT_CONFIG` in the chat system
+
+### Pinning Flow
+
+1. **User pins files** — The file tree and code browser expose pin/unpin actions that update `RepositoryProvider.pinnedFiles`.
+2. **Context injection** — On chat submit, `ChatSidebar` reads pinned file paths, resolves their content from the `CodeIndex`, and appends them to the request body.
+3. **System prompt** — The API route inserts pinned file contents into the system prompt between the file tree and the structural index, giving the AI direct access to the pinned code without requiring tool calls.
+
+## Inline Code Actions
+
+A hover action bar appears on code symbols (functions, classes) in the code browser. Actions include Explain, Refactor, Find Usages, and Complexity analysis.
+
+### Action Flow
+
+1. **Symbol detection** — `computeSymbolRanges()` identifies function and class boundaries in the current file using declaration patterns.
+2. **Action trigger** — Clicking an action (Explain, Refactor, Complexity) sends a `POST` request to `/api/inline-actions` with the symbol text and the selected action type.
+3. **AI streaming** — The API route streams back markdown analysis displayed in a slide-out panel overlaying the code browser.
+4. **Find Usages** — Runs entirely client-side via `CodeIndex.searchFiles()`, displaying results inline without an API call.
+
+## Dependency Health Dashboard
+
+Scores npm dependencies on four axes graded A–F, rendered in a sortable table with download sparklines and a detail drawer.
+
+### Scoring
+
+| Axis | Weight | Data Source |
+| ---- | ------ | ----------- |
+| Downloads | 20% | npm registry download counts |
+| Maintenance | 30% | Last publish date, open issues ratio |
+| Security | 30% | OSV.dev vulnerability database |
+| Freshness | 20% | Semver distance from latest version |
+
+### Pipeline
+
+1. **API route** — `/api/deps` receives the dependency list from `package.json`, calls npm registry and OSV.dev APIs with `mapWithConcurrency(10)` to limit parallel requests.
+2. **Rate limiting** — 429 responses trigger automatic retry with exponential backoff.
+3. **Scoring** — `health-scorer.ts` computes per-axis scores and a weighted overall grade (A–F).
+4. **UI** — `DepsPanel` renders a summary bar, sortable `DepsTable`, download `DownloadSparkline` charts, and a `DepsDetailDrawer` for per-package deep dives.
+
+## Annotated Repo Tours
+
+Interactive code tours stored in IndexedDB. Each tour has ordered stops — a file path, line range, and markdown annotation. Tours can be created manually or generated by AI.
+
+### Data model
+
+- **Tour**: `{ id, repoFullName, title, description, stops[], createdAt }`
+- **Stop**: `{ file, startLine, endLine, title, annotation }`
+- Types are defined in `types/tours.ts`.
+
+### Tour Lifecycle
+
+1. **CRUD** — `ToursProvider` manages tour state. Create, update, and delete operations persist to IndexedDB via `tour-cache.ts`.
+2. **Playback** — The provider tracks `activeTour`, `currentStopIndex`, and `isPlaying`. Navigation (next/prev stop) updates the code browser's selected file and scroll position.
+3. **AI generation** — The `generateTour` AI tool selects key files, identifies important line ranges using declaration patterns, and generates educational annotations. The tool result is parsed and persisted as a new tour.
+4. **Rendering** — The tour player highlights the target line range in the code editor with a `bg-blue-500/10` overlay and displays the stop annotation in a side panel.
+
+## AI Changelog Generator
+
+Generates changelogs from Git ref ranges using AI with configurable presets.
+
+### Presets
+
+| Preset | Description |
+| ------ | ----------- |
+| Conventional | Groups by type (feat, fix, chore) following Conventional Commits |
+| Release Notes | User-facing summary with highlights |
+| Keep a Changelog | Follows [keepachangelog.com](https://keepachangelog.com) format |
+| Custom | User-provided free-form instructions |
+
+### Changelog Generation Flow
+
+1. **User selects refs** — In `NewChangelogView`, the user picks base and head refs (tags or branches), a preset, and a quality level (Fast / Balanced / Thorough).
+2. **Commit fetching** — Commits between the refs are fetched via `fetchCommitsViaProxy` and `fetchCompareViaProxy` from the GitHub API.
+3. **AI generation** — Commits are sent to `/api/changelog/generate` with a preset-specific system prompt built by `prompt-builder.ts`. The AI streams back a formatted changelog.
+4. **Regeneration** — Stored commit data enables regeneration with a different preset or quality level without re-fetching.
+5. **Provider** — `ChangelogProvider` uses the same split-context pattern as `DocsProvider`: `ChangelogStateContext` (changelog list, active ID) and `ChangelogChatContext` (streaming state).
+
+## Git History & Blame Explorer
+
+Line-by-line blame, commit timeline, file-specific history, and commit detail with unified diff rendering.
+
+### Data sources
+
+- **Blame**: GitHub GraphQL API (`/api/github/blame` → `lib/github/graphql.ts`). Requires authentication.
+- **Commits**: GitHub REST API (`/api/github/commits`), paginated.
+- **Commit detail**: GitHub REST API (`/api/github/commit/[sha]`), includes patch data.
+
+### View Pipeline
+
+1. **Blame view** — `BlameView` fetches blame data for the currently selected file via the GraphQL proxy. Blame ranges are expanded into per-line annotations by `blame-utils.ts`. Lines are colored with an age-based heatmap (newer = green, older = red).
+2. **Commit timeline** — `CommitTimeline` fetches paginated commit history and groups commits by date using `commit-utils.ts`.
+3. **File history** — `FileHistoryList` shows commits that modified a specific file, driven by the `path` query parameter on the commits API.
+4. **Commit detail** — `CommitDetailView` fetches a single commit's metadata and patch. `parsePatch()` in `diff-utils.ts` converts unified diffs into structured hunks with line numbers for rendering.
+5. **File sync** — `AppProvider.selectedFilePath` syncs the currently selected file from the code browser, enabling file-aware blame without explicit user selection.
+
 ## Module Relationships
 
 ```mermaid
@@ -268,6 +375,8 @@ graph TD
     P4["DocsProvider"]
     P5["AppProvider"]
     P6["ComparisonProvider"]
+    P7["ToursProvider"]
+    P8["ChangelogProvider"]
   end
 
   subgraph LibGitHub["lib/github"]
@@ -275,6 +384,7 @@ graph TD
     G2["parser.ts"]
     G3["client.ts"]
     G4["zipball.ts"]
+    G5["graphql.ts"]
   end
 
   subgraph LibAI["lib/ai"]
@@ -299,8 +409,27 @@ graph TD
     D2["types.ts"]
   end
 
+  subgraph LibDeps["lib/deps"]
+    DP1["health-scorer.ts"]
+    DP2["npm-client.ts"]
+    DP3["version-checker.ts"]
+  end
+
+  subgraph LibChangelog["lib/changelog"]
+    CL1["preset-config.ts"]
+    CL2["prompt-builder.ts"]
+  end
+
+  subgraph LibGitHistory["lib/git-history"]
+    GH1["blame-utils.ts"]
+    GH2["commit-utils.ts"]
+    GH3["diff-utils.ts"]
+  end
+
   subgraph LibCache["lib/cache"]
     CA1["repo-cache.ts"]
+    CA2["tour-cache.ts"]
+    CA3["memory-cache.ts"]
   end
 
   subgraph APIRoutes["app/api"]
@@ -308,6 +437,11 @@ graph TD
     R2["/api/docs/generate"]
     R3["/api/github/*"]
     R4["/api/models/*"]
+    R5["/api/deps"]
+    R6["/api/inline-actions"]
+    R7["/api/changelog/generate"]
+    R8["/api/github/blame"]
+    R9["/api/github/commit/[sha]"]
   end
 
   P3 --> G1
@@ -318,6 +452,9 @@ graph TD
   P4 --> A4
   P4 --> A5
   P4 --> A6
+  P7 --> CA2
+  P8 --> A4
+  P8 --> A6
 
   R1 --> A1
   R1 --> A6
@@ -325,6 +462,11 @@ graph TD
   R2 --> A1
   R2 --> A6
   R2 --> A7
+  R5 --> DP2
+  R6 --> A6
+  R7 --> A6
+  R7 --> CL2
+  R8 --> G5
 
   A1 --> A2
   A3 --> A2
@@ -338,8 +480,11 @@ graph TD
   C4 --> C2
   D1 --> C2
   D1 --> C1
+  G3 --> CA3
 
   R3 --> G1
+  R8 --> G1
+  R9 --> G1
 ```
 
 ## Key Design Patterns
@@ -409,3 +554,20 @@ The Next.js middleware enables clean URLs (`/owner/repo`) by rewriting to `/?rep
 1. **Add the type** to the `DocType` union in `providers/docs-provider.tsx`.
 2. **Add a preset** to `DOC_PRESETS` with label, description, and default prompt.
 3. **Add a system prompt** in `app/api/docs/generate/route.ts` under `DOC_SYSTEM_PROMPTS`.
+
+### Adding a New Preview Tab
+
+1. **Create components** in `components/features/<feature>/`.
+2. **Add the tab** to `PREVIEW_TABS` in `components/features/preview/tab-config.ts` (icon from `lucide-react`).
+3. **Add lazy import + tab case** in `components/features/preview/preview-panel.tsx` with `FeatureErrorBoundary` + `Suspense`.
+4. **Add skeleton** to `components/features/loading/tab-skeleton.tsx`.
+5. **Add the view ID** to the `ViewId` union in `lib/export/shareable-url.ts`.
+6. **Add business logic** in `lib/<feature>/`.
+7. **Create a provider** if the feature needs shared state (see Adding a New Provider).
+
+### Adding a New Changelog Preset
+
+1. **Add the preset key** to the `ChangelogPreset` union in `lib/changelog/types.ts`.
+2. **Define the preset config** in `PRESET_CONFIGS` in `lib/changelog/preset-config.ts` (label, description, system prompt template).
+3. **Template interpolation** — The prompt template supports `{{commits}}` and `{{dateRange}}` placeholders via `lib/changelog/prompt-builder.ts`.
+4. The preset appears automatically in the `NewChangelogView` component selector.

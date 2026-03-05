@@ -252,6 +252,27 @@ const CodeEditor = React.forwardRef<HTMLDivElement, CodeEditorProps>(
       }, 300)
     }
 
+    // Keyboard focus handlers (event delegation via focusin/focusout on tbody)
+    const handleRowFocus = (e: React.FocusEvent<HTMLTableSectionElement>) => {
+      if (!onLineHover) return
+      const row = (e.target as HTMLElement).closest('tr[data-line]')
+      if (!row) return
+      const lineNum = Number(row.getAttribute('data-line'))
+      if (!lineNum || isNaN(lineNum)) return
+      if (leaveTimerRef.current) {
+        clearTimeout(leaveTimerRef.current)
+        leaveTimerRef.current = null
+      }
+      onLineHover(lineNum)
+    }
+
+    const handleRowBlur = () => {
+      if (leaveTimerRef.current) clearTimeout(leaveTimerRef.current)
+      leaveTimerRef.current = setTimeout(() => {
+        onLineLeave?.()
+      }, 300)
+    }
+
     const handleCopy = async () => {
       await navigator.clipboard.writeText(content)
       setCopied(true)
@@ -302,7 +323,7 @@ const CodeEditor = React.forwardRef<HTMLDivElement, CodeEditorProps>(
 
         <div ref={containerRef} className="h-full text-sm font-mono overflow-auto">
           <table className="w-full border-collapse" onMouseLeave={handleTableMouseLeave}>
-            <tbody onMouseOver={handleRowMouseEnter}>
+            <tbody onMouseOver={handleRowMouseEnter} onFocus={handleRowFocus} onBlur={handleRowBlur}>
               {lines.map((line, i) => {
                 const lineNum = i + 1
                 const isHighlighted = lineNum === highlightedLine
@@ -319,6 +340,7 @@ const CodeEditor = React.forwardRef<HTMLDivElement, CodeEditorProps>(
                   <tr
                     key={i}
                     data-line={lineNum}
+                    tabIndex={onLineHover ? 0 : undefined}
                     ref={isHighlighted || (isInTourRange && lineNum === highlightedRange!.startLine) ? highlightedRowRef : undefined}
                     className={cn(
                       "h-5 leading-5",

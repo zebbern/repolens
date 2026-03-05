@@ -56,7 +56,7 @@ export async function POST(request: Request): Promise<NextResponse> {
 
     return NextResponse.json({ models })
   } catch (error) {
-    console.error('[models/openrouter] Failed to fetch models:', error)
+    console.error('[models/openrouter] Failed to fetch models:', error instanceof Error ? error.message : 'Unknown error')
     return apiError('MODELS_FETCH_ERROR', 'Failed to fetch models', 500)
   }
 }

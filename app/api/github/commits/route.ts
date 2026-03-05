@@ -4,8 +4,7 @@ import { z } from "zod"
 import { getAccessToken } from "@/lib/auth/token"
 import { fetchCommits } from "@/lib/github/fetcher"
 import { apiError } from "@/lib/api/error"
-
-const GITHUB_NAME_RE = /^[\w][\w.-]*$/
+import { GITHUB_NAME_RE } from "@/lib/github/validation"
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}/
 
 const commitsQuerySchema = z.object({

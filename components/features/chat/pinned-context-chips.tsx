@@ -88,7 +88,6 @@ export function PinnedContextChips({
                     if (el) chipRefs.current.set(path, el)
                     else chipRefs.current.delete(path)
                   }}
-                  role="listitem"
                   className={cn(
                     "group flex shrink-0 items-center gap-1 rounded-md border px-2 py-1 text-xs transition-colors",
                     "border-accent-primary/20 bg-accent-primary/10 text-text-secondary",
@@ -100,7 +99,7 @@ export function PinnedContextChips({
                   <Icon className="h-3 w-3 shrink-0 text-text-muted" />
                   <span className="max-w-[120px] truncate">{displayName}</span>
                   <span
-                    className="ml-0.5 text-text-muted opacity-0 transition-opacity group-hover:opacity-100"
+                    className="ml-0.5 text-text-muted opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
                     role="presentation"
                     aria-hidden="true"
                     onClick={(e) => {

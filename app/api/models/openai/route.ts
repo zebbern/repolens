@@ -58,7 +58,7 @@ export async function POST(request: Request): Promise<NextResponse> {
 
     return NextResponse.json({ models: chatModels })
   } catch (error) {
-    console.error('[models/openai] Failed to fetch models:', error)
+    console.error('[models/openai] Failed to fetch models:', error instanceof Error ? error.message : 'Unknown error')
     return apiError('MODELS_FETCH_ERROR', 'Failed to fetch models', 500)
   }
 }

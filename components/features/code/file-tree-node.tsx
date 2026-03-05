@@ -157,12 +157,22 @@ export function FileTreeNode({
         return (
           <div key={node.path}>
             <div
+              role="treeitem"
+              tabIndex={0}
+              aria-expanded={node.type === 'directory' ? isExpanded : undefined}
+              aria-selected={isActive}
               className={cn(
                 "flex items-center gap-1 py-0.5 px-1 rounded cursor-pointer group/tree-item",
                 isActive ? "bg-code-selection" : "hover:bg-foreground/5"
               )}
               style={{ paddingLeft: `${depth * 12 + 4}px` }}
               onClick={() => node.type === 'directory' ? onToggleFolder(node.path) : onFileSelect(node)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault()
+                  node.type === 'directory' ? onToggleFolder(node.path) : onFileSelect(node)
+                }
+              }}
             >
               {node.type === 'directory' ? (
                 <>
@@ -234,6 +244,7 @@ export function FileTreeNode({
               <button
                 className="p-0.5 rounded opacity-0 group-hover/tree-item:opacity-100 text-text-muted hover:text-text-primary hover:bg-foreground/10 transition-opacity shrink-0"
                 title={node.type === 'directory' ? `Download ${node.name} as ZIP` : `Download ${node.name}`}
+                aria-label={node.type === 'directory' ? `Download ${node.name} as ZIP` : `Download ${node.name}`}
                 onClick={(e) => {
                   e.stopPropagation()
                   node.type === 'directory' ? onDownloadFolder(node) : onDownloadFile(node)

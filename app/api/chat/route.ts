@@ -204,7 +204,7 @@ No repository is currently connected. You can still answer general programming q
       consumeSseStream: consumeStream,
     })
   } catch (error) {
-    console.error('Chat API error:', error)
+    console.error('Chat API error:', error instanceof Error ? error.message : 'Unknown error')
     return apiError(
       'CHAT_ERROR',
       error instanceof Error ? error.message : 'An error occurred',

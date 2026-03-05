@@ -69,6 +69,7 @@ export function ChatInput({
             disabled={isDisabled || !value.trim()}
             size="icon"
             className="h-7 w-7 bg-interactive-hover text-text-primary hover:bg-interactive-active"
+            aria-label="Send message"
           >
             <ArrowUp className="h-4 w-4" />
           </Button>

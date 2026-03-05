@@ -91,4 +91,93 @@ describe('parsePatch', () => {
     expect(result.hunks[0].lines).toHaveLength(2)
     expect(result.hunks[0].lines.map(l => l.type)).toEqual(['remove', 'add'])
   })
+
+  // ---- Edge cases ---------------------------------------------------------
+
+  it('handles hunk header with single-line count (no comma)', () => {
+    const patch = '@@ -1 +1 @@\n-old\n+new'
+
+    const result = parsePatch(patch)
+    expect(result.hunks).toHaveLength(1)
+    expect(result.hunks[0].oldLines).toBe(1)
+    expect(result.hunks[0].newLines).toBe(1)
+  })
+
+  it('ignores lines before the first hunk header', () => {
+    const patch = [
+      'diff --git a/file.ts b/file.ts',
+      'index abc1234..def5678 100644',
+      '--- a/file.ts',
+      '+++ b/file.ts',
+      '@@ -1,2 +1,2 @@',
+      '-old',
+      '+new',
+    ].join('\n')
+
+    const result = parsePatch(patch)
+    expect(result.hunks).toHaveLength(1)
+    expect(result.hunks[0].lines).toHaveLength(2)
+  })
+
+  it('treats unrecognized prefix characters as context lines', () => {
+    const patch = [
+      '@@ -1,3 +1,3 @@',
+      ' normal',
+      '!weird prefix',
+      ' end',
+    ].join('\n')
+
+    const result = parsePatch(patch)
+    const types = result.hunks[0].lines.map(l => l.type)
+    expect(types).toEqual(['context', 'context', 'context'])
+    // The unrecognized-prefix line retains the full original text
+    expect(result.hunks[0].lines[1].content).toBe('!weird prefix')
+  })
+
+  it('handles empty final line (trailing newline in patch)', () => {
+    const patch = '@@ -1,2 +1,2 @@\n-old\n+new\n'
+
+    const result = parsePatch(patch)
+    // The trailing newline produces an empty string — prefix is undefined
+    // so it's treated as context with the full (empty) line
+    expect(result.hunks).toHaveLength(1)
+    // Should still have the two meaningful lines
+    const meaningful = result.hunks[0].lines.filter(l => l.type !== 'context' || l.content !== '')
+    expect(meaningful).toHaveLength(2)
+  })
+
+  it('handles patch with only additions', () => {
+    const patch = [
+      '@@ -0,0 +1,3 @@',
+      '+line1',
+      '+line2',
+      '+line3',
+    ].join('\n')
+
+    const result = parsePatch(patch)
+    expect(result.hunks[0].lines).toHaveLength(3)
+    expect(result.hunks[0].lines.every(l => l.type === 'add')).toBe(true)
+    expect(result.hunks[0].lines[0].newLineNumber).toBe(1)
+    expect(result.hunks[0].lines[2].newLineNumber).toBe(3)
+  })
+
+  it('handles patch with only deletions', () => {
+    const patch = [
+      '@@ -1,2 +0,0 @@',
+      '-removed1',
+      '-removed2',
+    ].join('\n')
+
+    const result = parsePatch(patch)
+    expect(result.hunks[0].lines).toHaveLength(2)
+    expect(result.hunks[0].lines.every(l => l.type === 'remove')).toBe(true)
+    expect(result.hunks[0].lines[0].oldLineNumber).toBe(1)
+  })
+
+  it('preserves hunk header text including function context', () => {
+    const patch = '@@ -10,4 +10,4 @@ function myFunction() {\n context\n-old\n+new\n context'
+
+    const result = parsePatch(patch)
+    expect(result.hunks[0].header).toBe('@@ -10,4 +10,4 @@ function myFunction() {')
+  })
 })

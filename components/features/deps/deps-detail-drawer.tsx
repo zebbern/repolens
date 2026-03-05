@@ -149,7 +149,7 @@ export function DepsDetailDrawer({ dep, cves, isOpen, onClose }: DepsDetailDrawe
                   <span className="text-lg font-bold tabular-nums">
                     {numberFormatter.format(dep.npmMeta.weeklyDownloads)}
                   </span>
-                  <DownloadSparkline data={dep.npmMeta.downloadTrend} width={180} height={48} />
+                  <DownloadSparkline data={dep.npmMeta.downloadTrend} packageName={dep.packageName} width={180} height={48} />
                 </div>
               </div>
             )}

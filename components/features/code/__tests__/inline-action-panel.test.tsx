@@ -44,7 +44,7 @@ describe('InlineActionPanel', () => {
     render(
       <InlineActionPanel result={makeResult()} onClose={vi.fn()} isOpen={true} />,
     )
-    expect(screen.getByRole('complementary')).toBeInTheDocument()
+    expect(screen.getByRole('region')).toBeInTheDocument()
   })
 
   it('displays symbol name in header', () => {
@@ -154,7 +154,7 @@ describe('InlineActionPanel', () => {
       <InlineActionPanel result={makeResult()} onClose={vi.fn()} isOpen={true} />,
     )
     expect(
-      screen.getByRole('complementary', { name: /code analysis results/i }),
+      screen.getByRole('region', { name: /ai analysis result/i }),
     ).toBeInTheDocument()
   })
 })

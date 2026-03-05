@@ -1,6 +1,6 @@
 "use client"
 
-import { createContext, useContext, useState, useCallback, useRef, useEffect, type ReactNode, type Dispatch, type SetStateAction } from "react"
+import { createContext, useContext, useState, useCallback, useRef, useEffect, useMemo, type ReactNode, type Dispatch, type SetStateAction } from "react"
 import type { GitHubRepo, FileNode, ParsedFile, RepositoryContext } from "@/types/repository"
 import type { PinnedFile, PinnedContentsResult } from "@/types/types"
 import { PINNED_CONTEXT_CONFIG } from "@/config/constants"
@@ -330,38 +330,46 @@ export function RepositoryProvider({ children }: { children: ReactNode }) {
     return () => clearTimeout(timer)
   }, [codeIndex, indexingProgress.isComplete])
 
+  const contextValue = useMemo<RepositoryContextType>(() => ({
+    repo,
+    files,
+    parsedFiles,
+    isLoading,
+    error,
+    connectRepository,
+    disconnectRepository,
+    loadFileContent,
+    getFileByPath,
+    codeIndex,
+    updateCodeIndex,
+    indexingProgress,
+    searchState,
+    setSearchState,
+    modifiedContents,
+    setModifiedContents,
+    getFileContent,
+    codebaseAnalysis,
+    failedFiles,
+    isCacheHit,
+    loadingStage,
+    pinnedFiles,
+    pinFile,
+    unpinFile,
+    clearPins,
+    isPinned,
+    getPinnedContents,
+  }), [
+    repo, files, parsedFiles, isLoading, error,
+    connectRepository, disconnectRepository, loadFileContent, getFileByPath,
+    codeIndex, updateCodeIndex, indexingProgress,
+    searchState, setSearchState,
+    modifiedContents, setModifiedContents, getFileContent,
+    codebaseAnalysis, failedFiles, isCacheHit, loadingStage,
+    pinnedFiles, pinFile, unpinFile, clearPins, isPinned, getPinnedContents,
+  ])
+
   return (
-    <RepositoryContext.Provider
-      value={{
-        repo,
-        files,
-        parsedFiles,
-        isLoading,
-        error,
-        connectRepository,
-        disconnectRepository,
-        loadFileContent,
-        getFileByPath,
-        codeIndex,
-        updateCodeIndex,
-        indexingProgress,
-        searchState,
-        setSearchState,
-        modifiedContents,
-        setModifiedContents,
-        getFileContent,
-        codebaseAnalysis,
-        failedFiles,
-        isCacheHit,
-        loadingStage,
-        pinnedFiles,
-        pinFile,
-        unpinFile,
-        clearPins,
-        isPinned,
-        getPinnedContents,
-      }}
-    >
+    <RepositoryContext.Provider value={contextValue}>
       {children}
     </RepositoryContext.Provider>
   )

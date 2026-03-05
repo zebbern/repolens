@@ -29,7 +29,7 @@ describe('AuthorAvatar', () => {
 
     const img = screen.getByRole('img')
     expect(img).toHaveAttribute('src', 'https://avatar.test/alice')
-    expect(img).toHaveAttribute('alt', 'alice')
+    expect(img).toHaveAttribute('alt', "Alice Smith's avatar")
   })
 
   it('renders initials when no avatarUrl', () => {

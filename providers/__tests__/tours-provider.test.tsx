@@ -380,4 +380,185 @@ describe('ToursProvider', () => {
     expect(stops[2].id).toBe('s1')
     expect(mockSaveTour).toHaveBeenCalled()
   })
+
+  // ---- Edge cases: no active tour (noop) ----------------------------------
+
+  it('addStop is a noop when no active tour', () => {
+    const { result } = renderHook(() => useTours(), { wrapper })
+
+    act(() => {
+      result.current.addStop({
+        filePath: 'src/test.ts',
+        startLine: 1,
+        endLine: 5,
+        annotation: 'Test',
+      })
+    })
+
+    expect(result.current.activeTour).toBeNull()
+    expect(mockSaveTour).not.toHaveBeenCalled()
+  })
+
+  it('removeStop is a noop when no active tour', () => {
+    const { result } = renderHook(() => useTours(), { wrapper })
+
+    act(() => {
+      result.current.removeStop('nonexistent')
+    })
+
+    expect(result.current.activeTour).toBeNull()
+    expect(mockSaveTour).not.toHaveBeenCalled()
+  })
+
+  it('updateStop is a noop when no active tour', () => {
+    const { result } = renderHook(() => useTours(), { wrapper })
+
+    act(() => {
+      result.current.updateStop('s1', { annotation: 'updated' })
+    })
+
+    expect(result.current.activeTour).toBeNull()
+    expect(mockSaveTour).not.toHaveBeenCalled()
+  })
+
+  it('reorderStops is a noop when no active tour', () => {
+    const { result } = renderHook(() => useTours(), { wrapper })
+
+    act(() => {
+      result.current.reorderStops(['s1', 's2'])
+    })
+
+    expect(result.current.activeTour).toBeNull()
+    expect(mockSaveTour).not.toHaveBeenCalled()
+  })
+
+  it('nextStop is a noop when no active tour', () => {
+    const { result } = renderHook(() => useTours(), { wrapper })
+
+    act(() => {
+      result.current.nextStop()
+    })
+
+    expect(result.current.activeStopIndex).toBe(0)
+  })
+
+  it('goToStop is a noop when no active tour', () => {
+    const { result } = renderHook(() => useTours(), { wrapper })
+
+    act(() => {
+      result.current.goToStop(5)
+    })
+
+    expect(result.current.activeStopIndex).toBe(0)
+  })
+
+  // ---- reorderStops filters unknown IDs -----------------------------------
+
+  it('reorderStops filters out unknown stop IDs', () => {
+    const tour = makeTour() // 3 stops: s1, s2, s3
+    const { result } = renderHook(() => useTours(), { wrapper })
+
+    act(() => {
+      result.current.startTour(tour)
+    })
+
+    act(() => {
+      result.current.reorderStops(['s2', 'nonexistent', 's1'])
+    })
+
+    const stops = result.current.activeTour!.stops
+    expect(stops).toHaveLength(2) // only s2 and s1
+    expect(stops[0].id).toBe('s2')
+    expect(stops[1].id).toBe('s1')
+  })
+
+  // ---- saveTour sync with activeTour --------------------------------------
+
+  it('saveTour updates activeTour when the saved tour has the same ID', async () => {
+    const tour = makeTour({ id: 'sync-test', name: 'Original' })
+    const { result } = renderHook(() => useTours(), { wrapper })
+
+    act(() => {
+      result.current.startTour(tour)
+    })
+    expect(result.current.activeTour!.name).toBe('Original')
+
+    const updatedTour = { ...tour, name: 'Updated' }
+    await act(async () => {
+      await result.current.saveTour(updatedTour)
+    })
+
+    expect(result.current.activeTour!.name).toBe('Updated')
+    expect(mockSaveTour).toHaveBeenCalled()
+  })
+
+  it('saveTour does NOT update activeTour when tour has different ID', async () => {
+    const active = makeTour({ id: 'active-id', name: 'Active' })
+    const other = makeTour({ id: 'other-id', name: 'Other' })
+    const { result } = renderHook(() => useTours(), { wrapper })
+
+    act(() => {
+      result.current.startTour(active)
+    })
+
+    await act(async () => {
+      await result.current.saveTour(other)
+    })
+
+    expect(result.current.activeTour!.id).toBe('active-id')
+    expect(result.current.activeTour!.name).toBe('Active')
+  })
+
+  // ---- deleteTour when not the active tour --------------------------------
+
+  it('deleteTour keeps activeTour when a different tour is deleted', async () => {
+    const active = makeTour({ id: 'keep-active' })
+    const other = makeTour({ id: 'delete-me' })
+    ;(mockGetToursByRepo as Mock).mockResolvedValue([active, other])
+
+    const { result } = renderHook(() => useTours(), { wrapper })
+
+    await act(async () => {
+      await result.current.loadTours('owner/repo')
+    })
+
+    act(() => {
+      result.current.startTour(active)
+    })
+    expect(result.current.isPlaying).toBe(true)
+
+    await act(async () => {
+      await result.current.deleteTour('delete-me')
+    })
+
+    expect(result.current.activeTour!.id).toBe('keep-active')
+    expect(result.current.isPlaying).toBe(true)
+    expect(result.current.tours).toHaveLength(1)
+  })
+
+  // ---- removeStop clamps activeStopIndex ----------------------------------
+
+  it('removeStop clamps activeStopIndex if it was pointing at the last stop', () => {
+    const tour = makeTour() // 3 stops: s1, s2, s3
+    const { result } = renderHook(() => useTours(), { wrapper })
+
+    act(() => {
+      result.current.startTour(tour)
+    })
+
+    // Go to last stop (index 2)
+    act(() => {
+      result.current.goToStop(2)
+    })
+    expect(result.current.activeStopIndex).toBe(2)
+
+    // Remove last stop
+    act(() => {
+      result.current.removeStop('s3')
+    })
+
+    // Index should be clamped to new max (1)
+    expect(result.current.activeStopIndex).toBeLessThanOrEqual(1)
+    expect(result.current.activeTour!.stops).toHaveLength(2)
+  })
 })

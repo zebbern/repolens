@@ -36,12 +36,12 @@ const mockExportSummaryClipboard = vi.fn<(...args: any[]) => string>(() => 'Summ
 const mockBuildShareableUrl = vi.fn<(...args: any[]) => string>(() => 'https://example.com/share')
 
 vi.mock('@/lib/export', () => ({
-  downloadFile: (...args: any[]) => mockDownloadFile(...args),
-  copyToClipboard: (...args: any[]) => mockCopyToClipboard(...args),
-  exportToJson: (...args: any[]) => mockExportToJson(...args),
-  exportToMarkdown: (...args: any[]) => mockExportToMarkdown(...args),
-  exportSummaryClipboard: (...args: any[]) => mockExportSummaryClipboard(...args),
-  buildShareableUrl: (...args: any[]) => mockBuildShareableUrl(...args),
+  downloadFile: (...args: unknown[]) => mockDownloadFile(...(args as Parameters<typeof mockDownloadFile>)),
+  copyToClipboard: (...args: unknown[]) => mockCopyToClipboard(...(args as Parameters<typeof mockCopyToClipboard>)),
+  exportToJson: (...args: unknown[]) => mockExportToJson(...(args as Parameters<typeof mockExportToJson>)),
+  exportToMarkdown: (...args: unknown[]) => mockExportToMarkdown(...(args as Parameters<typeof mockExportToMarkdown>)),
+  exportSummaryClipboard: (...args: unknown[]) => mockExportSummaryClipboard(...(args as Parameters<typeof mockExportSummaryClipboard>)),
+  buildShareableUrl: (...args: unknown[]) => mockBuildShareableUrl(...(args as Parameters<typeof mockBuildShareableUrl>)),
 }))
 
 vi.mock('sonner', () => ({

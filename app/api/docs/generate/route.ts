@@ -274,7 +274,7 @@ Your context window is approximately ${getModelContextWindow(model).toLocaleStri
       consumeSseStream: consumeStream,
     })
   } catch (error) {
-    console.error('Docs API error:', error)
+    console.error('Docs API error:', error instanceof Error ? error.message : 'Unknown error')
     return apiError(
       'DOCS_ERROR',
       error instanceof Error ? error.message : 'An error occurred',

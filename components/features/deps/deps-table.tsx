@@ -143,6 +143,9 @@ export function DepsTable({ deps, depTypes, onSelectDep, className }: DepsTableP
       </div>
 
       {/* Table */}
+      <div className="sr-only" aria-live="polite" aria-atomic="true">
+        {`Sorted by ${COLUMNS.find(c => c.id === sortField)?.label ?? sortField}, ${sortDir === 'asc' ? 'ascending' : 'descending'}`}
+      </div>
       <ScrollArea className="flex-1">
         <table className="w-full text-sm" role="grid">
           <thead className="sticky top-0 z-10 bg-background">
@@ -151,11 +154,19 @@ export function DepsTable({ deps, depTypes, onSelectDep, className }: DepsTableP
                 <th
                   key={col.id}
                   scope="col"
+                  tabIndex={0}
+                  role="columnheader"
                   className={cn(
                     'cursor-pointer select-none px-3 py-2 text-left text-xs font-medium text-muted-foreground hover:text-foreground transition-colors',
                     col.className,
                   )}
                   onClick={() => handleSort(col.id)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault()
+                      handleSort(col.id)
+                    }
+                  }}
                   aria-sort={
                     sortField === col.id
                       ? sortDir === 'asc' ? 'ascending' : 'descending'
@@ -223,6 +234,7 @@ export function DepsTable({ deps, depTypes, onSelectDep, className }: DepsTableP
                       {dep.npmMeta && dep.npmMeta.downloadTrend.length > 0 && (
                         <DownloadSparkline
                           data={dep.npmMeta.downloadTrend}
+                          packageName={dep.packageName}
                           width={80}
                           height={24}
                         />

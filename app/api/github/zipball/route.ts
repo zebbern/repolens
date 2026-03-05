@@ -3,8 +3,7 @@ import type { NextRequest } from 'next/server'
 import { z } from 'zod'
 import { getAccessToken } from '@/lib/auth/token'
 import { apiError } from '@/lib/api/error'
-
-const GITHUB_NAME_RE = /^[\w][\w.-]*$/
+import { GITHUB_NAME_RE } from '@/lib/github/validation'
 
 const zipballSchema = z.object({
   owner: z.string().min(1).regex(GITHUB_NAME_RE, 'Invalid owner name'),

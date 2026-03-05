@@ -13,6 +13,7 @@ const numberFormatter = new Intl.NumberFormat('en-US', { notation: 'compact' })
 
 interface DownloadSparklineProps {
   data: DownloadPoint[]
+  packageName?: string
   width?: number
   height?: number
   className?: string
@@ -42,6 +43,7 @@ function CustomTooltip({
 
 export function DownloadSparkline({
   data,
+  packageName,
   width = 120,
   height = 40,
   className,
@@ -59,7 +61,12 @@ export function DownloadSparkline({
   }
 
   return (
-    <div className={className} style={{ width, height }}>
+    <div
+      className={className}
+      style={{ width, height }}
+      role="img"
+      aria-label={packageName ? `Download trend for ${packageName}` : 'Download trend'}
+    >
       <ResponsiveContainer width="100%" height="100%">
         <AreaChart data={chartData} margin={{ top: 2, right: 2, bottom: 2, left: 2 }}>
           <defs>

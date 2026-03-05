@@ -104,7 +104,7 @@ export function TourPlayerBar({
         </div>
 
         {/* Stop info */}
-        <div className="flex-1 min-w-0 flex items-center gap-2">
+        <div className="flex-1 min-w-0 flex items-center gap-2" role="status" aria-live="polite" aria-atomic="true">
           <span className="text-xs text-text-muted shrink-0">
             {activeStopIndex + 1}/{totalStops}
           </span>
@@ -121,18 +121,20 @@ export function TourPlayerBar({
           {tour.stops.map((_, idx) => (
             <button
               key={idx}
-              className={cn(
-                "w-1.5 h-1.5 rounded-full transition-colors cursor-pointer",
+              className="p-2 -m-2 flex items-center justify-center cursor-pointer"
+              onClick={() => onGoToStop(idx)}
+              title={`Go to stop ${idx + 1}`}
+              aria-label={`Go to stop ${idx + 1}`}
+            >
+              <span className={cn(
+                "w-1.5 h-1.5 rounded-full block transition-colors",
                 idx === activeStopIndex
                   ? "bg-accent-primary"
                   : idx < activeStopIndex
                     ? "bg-accent-primary/40"
                     : "bg-foreground/[0.1]"
-              )}
-              onClick={() => onGoToStop(idx)}
-              title={`Go to stop ${idx + 1}`}
-              aria-label={`Go to stop ${idx + 1}`}
-            />
+              )} />
+            </button>
           ))}
         </div>
 

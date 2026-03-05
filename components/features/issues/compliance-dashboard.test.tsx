@@ -37,8 +37,8 @@ const mockGenerateComplianceReport = vi.fn<(...args: any[]) => ComplianceReport>
 const mockExportComplianceJSON = vi.fn<(...args: any[]) => string>(() => '{}')
 
 vi.mock('@/lib/code/issue-scanner', () => ({
-  generateComplianceReport: (...args: any[]) => mockGenerateComplianceReport(...args),
-  exportComplianceJSON: (...args: any[]) => mockExportComplianceJSON(...args),
+  generateComplianceReport: (...args: unknown[]) => mockGenerateComplianceReport(...(args as Parameters<typeof mockGenerateComplianceReport>)),
+  exportComplianceJSON: (...args: unknown[]) => mockExportComplianceJSON(...(args as Parameters<typeof mockExportComplianceJSON>)),
   getAllRules: () => mockGetAllRules(),
   lookupCves: vi.fn().mockResolvedValue({ results: [], scannedPackages: 0, vulnerablePackages: 0, lookupErrors: [] }),
 }))

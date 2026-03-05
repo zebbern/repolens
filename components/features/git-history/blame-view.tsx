@@ -84,6 +84,14 @@ export function BlameView({
       <div className="flex-1 overflow-auto">
         <TooltipProvider>
           <table className="w-full border-collapse text-xs font-mono">
+            <thead className="sr-only">
+              <tr>
+                <th scope="col">Age</th>
+                <th scope="col">Author & Commit</th>
+                <th scope="col">Line</th>
+                <th scope="col">Code</th>
+              </tr>
+            </thead>
             <tbody>
               {lines.map((line, idx) => {
                 const lineNum = idx + 1

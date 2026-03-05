@@ -193,6 +193,13 @@ interface DiffContentProps {
 function DiffContent({ hunks }: DiffContentProps) {
   return (
     <table className="w-full border-collapse text-xs font-mono">
+      <thead className="sr-only">
+        <tr>
+          <th scope="col">Old line</th>
+          <th scope="col">New line</th>
+          <th scope="col">Code</th>
+        </tr>
+      </thead>
       <tbody>
         {hunks.map((hunk, hunkIdx) => (
           <HunkSection key={hunkIdx} hunk={hunk} />

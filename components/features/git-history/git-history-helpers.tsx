@@ -36,7 +36,7 @@ export function AuthorAvatar({ login, avatarUrl, name, size = 24 }: AuthorAvatar
     return (
       <img
         src={avatarUrl}
-        alt={login ?? name}
+        alt={`${name}'s avatar`}
         width={size}
         height={size}
         className="rounded-full shrink-0"

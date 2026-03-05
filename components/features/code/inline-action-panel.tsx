@@ -1,6 +1,6 @@
 "use client"
 
-import React from "react"
+import React, { useEffect, useRef } from "react"
 import { X, Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -26,12 +26,22 @@ export function InlineActionPanel({
   onClose,
   isOpen,
 }: InlineActionPanelProps) {
+  const panelRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (isOpen) {
+      panelRef.current?.focus()
+    }
+  }, [isOpen])
+
   if (!isOpen) return null
 
   return (
     <div
-      role="complementary"
-      aria-label="Code analysis results"
+      ref={panelRef}
+      tabIndex={-1}
+      role="region"
+      aria-label="AI analysis result"
       className={cn(
         "w-[350px] shrink-0 flex flex-col",
         "bg-background border-l border-foreground/[0.06]",
@@ -67,7 +77,7 @@ export function InlineActionPanel({
       </div>
 
       {/* Content */}
-      <div className="flex-1 overflow-auto p-3">
+      <div className="flex-1 overflow-auto p-3" aria-live="polite">
         {result === null ? (
           <div className="flex items-center justify-center h-full">
             <p className="text-sm text-text-muted">

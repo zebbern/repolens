@@ -1,6 +1,6 @@
 "use client"
 
-import { createContext, useContext, useState, type ReactNode } from 'react'
+import { createContext, useContext, useState, useCallback, useMemo, type ReactNode } from 'react'
 
 // App Context Types
 interface AppState {
@@ -39,12 +39,11 @@ export function AppProvider({ children }: AppProviderProps) {
   const [sidebarWidth, setSidebarWidth] = useState(initialState.sidebarWidth)
   const [selectedFilePath, setSelectedFilePath] = useState<string | null>(initialState.selectedFilePath)
 
-  const setPreviewUrl = (url: string | null) => {
-    if (url === previewUrl) return
-    setPreviewUrlState(url)
-  }
+  const setPreviewUrl = useCallback((url: string | null) => {
+    setPreviewUrlState(prev => prev === url ? prev : url)
+  }, [])
 
-  const contextValue: AppContextType = {
+  const contextValue = useMemo<AppContextType>(() => ({
     previewUrl,
     isGenerating,
     sidebarWidth,
@@ -53,7 +52,7 @@ export function AppProvider({ children }: AppProviderProps) {
     setIsGenerating,
     setSidebarWidth,
     setSelectedFilePath,
-  }
+  }), [previewUrl, isGenerating, sidebarWidth, selectedFilePath, setPreviewUrl])
 
   return <AppContext.Provider value={contextValue}>{children}</AppContext.Provider>
 }

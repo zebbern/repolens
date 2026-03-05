@@ -77,7 +77,7 @@ export async function POST(req: Request) {
 
     return NextResponse.json(result)
   } catch (error) {
-    console.error('[validate] AI validation failed for issue', issue.id, error)
+    console.error('[validate] AI validation failed for issue', issue.id, error instanceof Error ? error.message : 'Unknown error')
     return NextResponse.json(
       {
         issueId: issue.id,

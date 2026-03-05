@@ -49,7 +49,7 @@ export async function POST(request: Request) {
     // For other errors, still return models if we got a response
     return NextResponse.json({ models: ANTHROPIC_MODELS })
   } catch (error) {
-    console.error('[models/anthropic] Failed to validate key:', error)
+    console.error('[models/anthropic] Failed to validate key:', error instanceof Error ? error.message : 'Unknown error')
     return apiError('KEY_VALIDATION_ERROR', 'Failed to validate key', 500)
   }
 }

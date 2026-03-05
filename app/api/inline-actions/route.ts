@@ -80,7 +80,7 @@ Analyze the ${symbolKind} \`${symbolName}\` above.`
 
     return result.toTextStreamResponse()
   } catch (error) {
-    console.error('Inline action API error:', error)
+    console.error('Inline action API error:', error instanceof Error ? error.message : 'Unknown error')
     return apiError(
       'INLINE_ACTION_ERROR',
       error instanceof Error ? error.message : 'An error occurred',

@@ -62,11 +62,17 @@ let lastScanRef: WeakRef<CodeIndex> | null = null
 let lastScanAnalysis: FullAnalysis | null = null
 let lastScanResult: ScanResults | null = null
 
+// In-flight async scan dedup — prevents concurrent scans for the same index.
+let pendingScan: Promise<ScanResults | null> | null = null
+let pendingScanIndex: WeakRef<CodeIndex> | null = null
+
 /** Clear the scan cache, e.g. for testing. */
 export function clearScanCache(): void {
   lastScanRef = null
   lastScanAnalysis = null
   lastScanResult = null
+  pendingScan = null
+  pendingScanIndex = null
   clearASTCache()
 }
 
@@ -584,6 +590,265 @@ export function scanIssues(
   const riskDistribution = getRiskDistribution(issues)
 
   // Health grades
+  const sloc = Array.from(filesToScan.values()).reduce((sum, f) => sum + f.lineCount, 0)
+  const critCount = issues.filter(i => i.severity === 'critical').length
+  const warnCount = issues.filter(i => i.severity === 'warning').length
+  const infoCount = issues.filter(i => i.severity === 'info').length
+  const grades = computeHealthGrades(issues, sloc)
+
+  const result: ScanResults = {
+    issues,
+    summary: {
+      total: issues.length,
+      critical: critCount,
+      warning: warnCount,
+      info: infoCount,
+      bySecurity: issues.filter(i => i.category === 'security').length,
+      byBadPractice: issues.filter(i => i.category === 'bad-practice').length,
+      byReliability: issues.filter(i => i.category === 'reliability').length,
+    },
+    healthGrade: grades.healthGrade,
+    healthScore: grades.healthScore,
+    ruleOverflow,
+    languagesDetected: detectLanguages(codeIndex),
+    rulesEvaluated,
+    scannedFiles: isPartialScan ? filesToScan.size : codeIndex.totalFiles,
+    scannedAt: new Date(),
+    securityGrade: grades.securityGrade,
+    qualityGrade: grades.qualityGrade,
+    issuesPerKloc: grades.issuesPerKloc,
+    isPartialScan,
+    suppressionCount,
+    projectRiskScore,
+    riskDistribution,
+  }
+
+  // Cache full scan results for memoization
+  if (!changedFiles) {
+    lastScanRef = new WeakRef(codeIndex)
+    lastScanAnalysis = analysis
+    lastScanResult = result
+  }
+
+  return result
+}
+
+// ---------------------------------------------------------------------------
+// Async scanner — yields to main thread between phases to avoid blocking UI
+// ---------------------------------------------------------------------------
+
+/** Yield to the main thread so the browser can process events / paint. */
+function yieldToMain(): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, 0))
+}
+
+/**
+ * Async version of `scanIssues` that yields to the main thread between each
+ * scanning phase so the UI stays responsive on large codebases.
+ *
+ * Accepts an optional `isStale` callback checked after every yield. When
+ * `isStale()` returns `true` the scan aborts early and returns `null`.
+ *
+ * Shares the same WeakRef memoization cache as the synchronous `scanIssues`.
+ */
+export async function scanIssuesAsync(
+  codeIndex: CodeIndex,
+  analysis: FullAnalysis | null,
+  options?: {
+    changedFiles?: string[]
+    isStale?: () => boolean
+  },
+): Promise<ScanResults | null> {
+  const changedFiles = options?.changedFiles
+  const isStale = options?.isStale
+
+  // Return cached result if the same codeIndex instance + analysis is requested.
+  if (!changedFiles && lastScanRef && lastScanResult) {
+    const cachedRef = lastScanRef.deref()
+    if (cachedRef === codeIndex && lastScanAnalysis === analysis) {
+      return lastScanResult
+    }
+  }
+
+  // Dedup: if a full scan is already in-flight for the same codeIndex, reuse it.
+  if (!changedFiles && pendingScanIndex?.deref() === codeIndex && pendingScan) {
+    return pendingScan
+  }
+
+  const scanPromise = scanIssuesAsyncImpl(codeIndex, analysis, options)
+
+  if (!changedFiles) {
+    pendingScan = scanPromise
+    pendingScanIndex = new WeakRef(codeIndex)
+  }
+
+  return scanPromise.finally(() => {
+    pendingScan = null
+    pendingScanIndex = null
+  })
+}
+
+async function scanIssuesAsyncImpl(
+  codeIndex: CodeIndex,
+  analysis: FullAnalysis | null,
+  options?: {
+    changedFiles?: string[]
+    isStale?: () => boolean
+  },
+): Promise<ScanResults | null> {
+  const changedFiles = options?.changedFiles
+  const isStale = options?.isStale
+
+  const issues: CodeIssue[] = []
+  const seenIds = new Set<string>()
+
+  const isPartialScan = changedFiles !== undefined && changedFiles.length > 0
+
+  // Build the set of files to scan
+  const filesToScan = new Map<string, FileEntry>()
+  if (isPartialScan) {
+    for (const changed of changedFiles!) {
+      const file = codeIndex.files.get(changed)
+      if (file) filesToScan.set(changed, file)
+    }
+  } else {
+    for (const [path, file] of codeIndex.files) {
+      filesToScan.set(path, file)
+    }
+  }
+
+  const scanCodeIndex = codeIndex
+
+  // Pre-compute extension-based data structures
+  const blockCommentCache = new Map<string, Set<number> | undefined>()
+  const presentExtensions = new Set(
+    Array.from(filesToScan.keys()).map(p => '.' + (p.split('.').pop() || '').toLowerCase())
+  )
+  const filesByExtension = new Map<string, Map<string, FileEntry>>()
+  for (const [path, file] of filesToScan) {
+    const ext = '.' + (path.split('.').pop() || '').toLowerCase()
+    let group = filesByExtension.get(ext)
+    if (!group) {
+      group = new Map<string, FileEntry>()
+      filesByExtension.set(ext, group)
+    }
+    group.set(path, file)
+  }
+
+  // --- Phase 1: Regex-based rules ---
+  const regexResult = runRegexRules({
+    filesToScan, scanCodeIndex, isPartialScan,
+    blockCommentCache, presentExtensions, filesByExtension,
+  })
+  for (const issue of regexResult.issues) {
+    if (!seenIds.has(issue.id)) {
+      seenIds.add(issue.id)
+      issues.push(issue)
+    }
+  }
+  let rulesEvaluated = regexResult.rulesEvaluated
+  const suppressionCount = regexResult.suppressionCount
+  const ruleOverflow = regexResult.ruleOverflow
+
+  await yieldToMain()
+  if (isStale?.()) return null
+
+  // --- Phase 2: AST analysis + taint tracking ---
+  for (const issue of runAstAnalysis(filesToScan)) {
+    if (!seenIds.has(issue.id)) {
+      seenIds.add(issue.id)
+      issues.push(issue)
+    }
+  }
+  for (const issue of runTaintAnalysis(filesToScan)) {
+    if (!seenIds.has(issue.id)) {
+      seenIds.add(issue.id)
+      issues.push(issue)
+    }
+  }
+  deduplicateIssues(issues, scanCodeIndex, ruleOverflow)
+
+  await yieldToMain()
+  if (isStale?.()) return null
+
+  // --- Phase 3: Composite rules ---
+  const compositeIssues = scanCompositeRules(codeIndex)
+  rulesEvaluated += COMPOSITE_RULES.length
+  for (const issue of compositeIssues) {
+    if (isPartialScan && !filesToScan.has(issue.file)) continue
+    if (!seenIds.has(issue.id)) {
+      seenIds.add(issue.id)
+      issues.push(issue)
+    }
+  }
+
+  await yieldToMain()
+  if (isStale?.()) return null
+
+  // --- Phase 4: Structural rules ---
+  const structuralIssues = scanStructuralIssues(codeIndex, analysis)
+  const structuralRuleIds = new Set(structuralIssues.map(i => i.ruleId))
+  rulesEvaluated += structuralRuleIds.size
+  for (const issue of structuralIssues) {
+    if (isPartialScan && !filesToScan.has(issue.file)) continue
+    if (!seenIds.has(issue.id)) {
+      seenIds.add(issue.id)
+      issues.push(issue)
+    }
+  }
+
+  await yieldToMain()
+  if (isStale?.()) return null
+
+  // --- Phase 5: Supply chain rules ---
+  const supplyChainIssues = scanSupplyChain(scanCodeIndex)
+  const supplyChainRuleIds = new Set(supplyChainIssues.map(i => i.ruleId))
+  rulesEvaluated += supplyChainRuleIds.size
+  for (const issue of supplyChainIssues) {
+    if (isPartialScan && !filesToScan.has(issue.file)) continue
+    if (!seenIds.has(issue.id)) {
+      seenIds.add(issue.id)
+      issues.push(issue)
+    }
+  }
+
+  await yieldToMain()
+  if (isStale?.()) return null
+
+  // --- Phase 6: Context cross-reference + sorting + risk scoring ---
+  if (analysis) {
+    for (const issue of issues) {
+      const importers = analysis.graph.reverseEdges.get(issue.file)
+      const importerCount = importers?.size ?? 0
+      const isEntryPoint = analysis.topology.entryPoints.includes(issue.file)
+      const isDead = !isEntryPoint && importerCount === 0
+
+      if (isDead && issue.category !== 'security' && (issue.severity === 'warning' || issue.severity === 'critical')) {
+        issue.severity = 'info'
+      }
+      if (isEntryPoint && issue.category === 'security') {
+        issue.description += ' (entry point — publicly accessible)'
+      }
+      if (importerCount >= 10) {
+        issue.description += ` (high fan-in: ${importerCount} importers — changes affect many consumers)`
+      }
+    }
+  }
+
+  const severityOrder: Record<IssueSeverity, number> = { critical: 0, warning: 1, info: 2 }
+  issues.sort((a, b) => {
+    const sev = severityOrder[a.severity] - severityOrder[b.severity]
+    if (sev !== 0) return sev
+    return a.file.localeCompare(b.file)
+  })
+
+  for (const issue of issues) {
+    issue.riskScore = scoreIssue(issue)
+    issue.cvssVector = buildCvssVector(issue)
+  }
+  const projectRiskScore = scoreProject(issues)
+  const riskDistribution = getRiskDistribution(issues)
+
   const sloc = Array.from(filesToScan.values()).reduce((sum, f) => sum + f.lineCount, 0)
   const critCount = issues.filter(i => i.severity === 'critical').length
   const warnCount = issues.filter(i => i.severity === 'warning').length

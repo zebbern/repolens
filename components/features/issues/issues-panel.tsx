@@ -1,9 +1,9 @@
 "use client"
 
-import { useState, useMemo, useCallback, useRef } from 'react'
+import { useState, useMemo, useCallback, useRef, useEffect } from 'react'
 import type { CodeIndex } from '@/lib/code/code-index'
 import {
-  scanIssues,
+  scanIssuesAsync,
   generateFix,
   validateFinding,
   type ScanResults,
@@ -52,9 +52,32 @@ export function IssuesPanel({ codeIndex, onNavigateToFile }: IssuesPanelProps) {
   const { codebaseAnalysis: analysis } = useRepository()
   const { selectedProvider, selectedModel, apiKeys } = useAPIKeys()
 
-  const results: ScanResults | null = useMemo(() => {
-    if (codeIndex.totalFiles === 0) return null
-    return scanIssues(codeIndex, analysis)
+  const [results, setResults] = useState<ScanResults | null>(null)
+  const [scanLoading, setScanLoading] = useState(false)
+
+  useEffect(() => {
+    if (codeIndex.totalFiles === 0) {
+      setResults(null)
+      return
+    }
+
+    let stale = false
+    setScanLoading(true)
+
+    scanIssuesAsync(codeIndex, analysis, { isStale: () => stale })
+      .then(scanResults => {
+        if (stale) return
+        setResults(scanResults)
+      })
+      .catch(err => {
+        if (stale) return
+        console.warn('[issues-panel] Scanner failed', err)
+      })
+      .finally(() => {
+        if (!stale) setScanLoading(false)
+      })
+
+    return () => { stale = true }
   }, [codeIndex, analysis])
 
   const {
@@ -152,6 +175,18 @@ export function IssuesPanel({ codeIndex, onNavigateToFile }: IssuesPanelProps) {
     return map
   }, [filteredIssues])
 
+  const criticalWarningCount = filteredIssues.filter(
+    (i) => i.severity === 'critical' || i.severity === 'warning',
+  ).length
+
+  const handleBatchValidate = useCallback(() => {
+    batchValidate(filteredIssues)
+  }, [batchValidate, filteredIssues])
+
+  const handleBatchGenerateFixes = useCallback(() => {
+    batchGenerateFixes(filteredIssues)
+  }, [batchGenerateFixes, filteredIssues])
+
   if (codeIndex.totalFiles === 0) {
     return (
       <div className="flex items-center justify-center h-full">
@@ -166,7 +201,21 @@ export function IssuesPanel({ codeIndex, onNavigateToFile }: IssuesPanelProps) {
     )
   }
 
-  if (!results) return null
+  if (!results) {
+    if (scanLoading) {
+      return (
+        <div className="flex items-center justify-center h-full">
+          <div className="flex flex-col items-center gap-4 text-text-muted animate-in fade-in duration-300">
+            <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-foreground/[0.04] border border-foreground/[0.06]">
+              <Shield className="h-6 w-6 text-text-secondary animate-pulse" />
+            </div>
+            <p className="text-sm font-medium text-text-secondary">Scanning for issues…</p>
+          </div>
+        </div>
+      )
+    }
+    return null
+  }
 
   const autoExpand = groupedByFile.size <= 5 && groupedByFile.size > 0
   const isGroupExpanded = (file: string) => autoExpand ? !expandedGroups.has(file) : expandedGroups.has(file)
@@ -176,18 +225,6 @@ export function IssuesPanel({ codeIndex, onNavigateToFile }: IssuesPanelProps) {
   }
   const toggleGroup = toggleSet(setExpandedGroups)
   const toggleIssue = toggleSet(setExpandedIssues)
-
-  const criticalWarningCount = filteredIssues.filter(
-    (i) => i.severity === 'critical' || i.severity === 'warning',
-  ).length
-
-  const handleBatchValidate = useCallback(() => {
-    batchValidate(filteredIssues)
-  }, [batchValidate, filteredIssues])
-
-  const handleBatchGenerateFixes = useCallback(() => {
-    batchGenerateFixes(filteredIssues)
-  }, [batchGenerateFixes, filteredIssues])
 
   return (
     <TooltipProvider delayDuration={300}>

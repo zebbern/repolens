@@ -8,7 +8,7 @@ import { useFileOperations } from "./hooks/use-file-operations"
 import { useSearch } from "./hooks/use-search"
 import { useReplace } from "./hooks/use-replace"
 import { useDownloads } from "./hooks/use-downloads"
-import { scanIssues } from "@/lib/code/issue-scanner"
+import { scanIssuesAsync } from "@/lib/code/issue-scanner"
 import { flattenFiles } from "@/lib/code/code-index"
 import type { CodeIssue } from "@/lib/code/issue-scanner"
 import type { FileIssueCounts } from "./file-tree-node"
@@ -256,22 +256,41 @@ export function CodeBrowser({ navigateToFile, navigateToLine, onNavigateComplete
   )
 
   // Compute scan results: issue-count-by-file map for tree badges + full issue list for editor
-  const { issueCountByFile, allIssues } = useMemo<{ issueCountByFile: Map<string, FileIssueCounts>; allIssues: CodeIssue[] }>(() => {
-    const map = new Map<string, FileIssueCounts>()
-    if (codeIndex.totalFiles === 0 || !codebaseAnalysis) return { issueCountByFile: map, allIssues: [] }
-    try {
-      const results = scanIssues(codeIndex, codebaseAnalysis)
-      for (const issue of results.issues) {
-        const existing = map.get(issue.file) ?? { critical: 0, warning: 0, info: 0 }
-        existing[issue.severity] += 1
-        map.set(issue.file, existing)
-      }
-      return { issueCountByFile: map, allIssues: results.issues }
-    } catch (err) {
-      // Scanner failure should not break the tree
-      console.warn('[code-browser] Scanner failed during issue analysis', err)
+  const [scanLoading, setScanLoading] = useState(false)
+  const [issueCountByFile, setIssueCountByFile] = useState<Map<string, FileIssueCounts>>(new Map())
+  const [allIssues, setAllIssues] = useState<CodeIssue[]>([])
+
+  useEffect(() => {
+    if (codeIndex.totalFiles === 0 || !codebaseAnalysis) {
+      setIssueCountByFile(new Map())
+      setAllIssues([])
+      return
     }
-    return { issueCountByFile: map, allIssues: [] }
+
+    let stale = false
+    setScanLoading(true)
+
+    scanIssuesAsync(codeIndex, codebaseAnalysis, { isStale: () => stale })
+      .then(results => {
+        if (stale || !results) return
+        const map = new Map<string, FileIssueCounts>()
+        for (const issue of results.issues) {
+          const existing = map.get(issue.file) ?? { critical: 0, warning: 0, info: 0 }
+          existing[issue.severity as keyof FileIssueCounts] += 1
+          map.set(issue.file, existing)
+        }
+        setIssueCountByFile(map)
+        setAllIssues(results.issues)
+      })
+      .catch(err => {
+        if (stale) return
+        console.warn('[code-browser] Scanner failed during issue analysis', err)
+      })
+      .finally(() => {
+        if (!stale) setScanLoading(false)
+      })
+
+    return () => { stale = true }
   }, [codeIndex, codebaseAnalysis])
 
   // Filter issues for the currently active file (for editor gutter markers)

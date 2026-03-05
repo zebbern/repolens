@@ -10,7 +10,7 @@ export type {
   CompositeRule,
 } from './types'
 
-export { scanIssues, getAllRules, clearScanCache } from './scanner'
+export { scanIssues, scanIssuesAsync, getAllRules, clearScanCache } from './scanner'
 
 export {
   calculateCoverage,

@@ -1,6 +1,7 @@
 "use client"
 
-import { useMemo } from "react"
+import { useRef, useMemo, useCallback, memo } from "react"
+import { useVirtualizer } from "@tanstack/react-virtual"
 import { expandBlameRanges, type BlameAuthorStats, type BlameLineInfo } from "@/lib/git-history"
 import type { BlameData } from "@/types/git-history"
 import { AuthorAvatar, CommitMessage, AgeIndicator, RelativeDate, ageToColor } from "./git-history-helpers"
@@ -10,6 +11,9 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip"
+
+const ROW_HEIGHT = 20
+const OVERSCAN = 20
 
 // ---------------------------------------------------------------------------
 // Props
@@ -51,6 +55,26 @@ export function BlameView({
     return map
   }, [blameLines])
 
+  const scrollRef = useRef<HTMLDivElement>(null)
+
+  const estimateSize = useCallback(() => ROW_HEIGHT, [])
+
+  const virtualizer = useVirtualizer({
+    count: lines.length,
+    getScrollElement: () => scrollRef.current,
+    estimateSize,
+    overscan: OVERSCAN,
+  })
+
+  const virtualItems = virtualizer.getVirtualItems()
+  const totalSize = virtualizer.getTotalSize()
+
+  // Spacer heights for the table approach
+  const topPad = virtualItems.length > 0 ? virtualItems[0].start : 0
+  const bottomPad = virtualItems.length > 0
+    ? totalSize - virtualItems[virtualItems.length - 1].end
+    : 0
+
   return (
     <div className="flex h-full flex-col overflow-hidden">
       {/* Stats summary */}
@@ -80,8 +104,8 @@ export function BlameView({
         </div>
       )}
 
-      {/* Blame gutter + code lines */}
-      <div className="flex-1 overflow-auto">
+      {/* Blame gutter + code lines (virtualized) */}
+      <div ref={scrollRef} className="flex-1 overflow-auto">
         <TooltipProvider>
           <table className="w-full border-collapse text-xs font-mono">
             <thead className="sr-only">
@@ -93,19 +117,26 @@ export function BlameView({
               </tr>
             </thead>
             <tbody>
-              {lines.map((line, idx) => {
+              {topPad > 0 && (
+                <tr aria-hidden="true"><td colSpan={4} style={{ height: topPad, padding: 0 }} /></tr>
+              )}
+              {virtualItems.map((virtualRow) => {
+                const idx = virtualRow.index
                 const lineNum = idx + 1
                 const info = blameByLine.get(lineNum)
                 return (
                   <BlameRow
                     key={lineNum}
                     lineNumber={lineNum}
-                    content={line}
+                    content={lines[idx]}
                     blameInfo={info ?? null}
                     onCommitClick={onCommitClick}
                   />
                 )
               })}
+              {bottomPad > 0 && (
+                <tr aria-hidden="true"><td colSpan={4} style={{ height: bottomPad, padding: 0 }} /></tr>
+              )}
             </tbody>
           </table>
         </TooltipProvider>
@@ -125,7 +156,7 @@ interface BlameRowProps {
   onCommitClick: (sha: string) => void
 }
 
-function BlameRow({ lineNumber, content, blameInfo, onCommitClick }: BlameRowProps) {
+const BlameRow = memo(function BlameRow({ lineNumber, content, blameInfo, onCommitClick }: BlameRowProps) {
   const isRangeStart = blameInfo?.isRangeStart ?? false
   const commit = blameInfo?.commit
   const age = blameInfo?.age ?? 5
@@ -197,4 +228,4 @@ function BlameRow({ lineNumber, content, blameInfo, onCommitClick }: BlameRowPro
       </td>
     </tr>
   )
-}
+})

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 
 // Mock child components and providers
@@ -81,9 +81,9 @@ const mockScanResults = {
 }
 
 vi.mock('@/lib/code/issue-scanner', () => ({
-  scanIssues: vi.fn((codeIndex: any) => {
-    if (codeIndex.totalFiles === 0) return null
-    return mockScanResults
+  scanIssuesAsync: vi.fn((codeIndex: any) => {
+    if (codeIndex.totalFiles === 0) return Promise.resolve(null)
+    return Promise.resolve(mockScanResults)
   }),
   generateFix: vi.fn(() => null),
   validateFinding: vi.fn().mockResolvedValue({
@@ -144,19 +144,25 @@ describe('IssuesPanel', () => {
     vi.clearAllMocks()
   })
 
-  it('renders issue summary', () => {
+  it('renders issue summary', async () => {
     render(<IssuesPanel codeIndex={mockCodeIndex as any} />)
-    expect(screen.getByTestId('issue-summary')).toBeInTheDocument()
+    await waitFor(() => {
+      expect(screen.getByTestId('issue-summary')).toBeInTheDocument()
+    })
   })
 
-  it('renders issue filters', () => {
+  it('renders issue filters', async () => {
     render(<IssuesPanel codeIndex={mockCodeIndex as any} />)
-    expect(screen.getByTestId('issue-filters')).toBeInTheDocument()
+    await waitFor(() => {
+      expect(screen.getByTestId('issue-filters')).toBeInTheDocument()
+    })
   })
 
-  it('renders issue list with filtered issues', () => {
+  it('renders issue list with filtered issues', async () => {
     render(<IssuesPanel codeIndex={mockCodeIndex as any} />)
-    expect(screen.getByTestId('issue-list')).toBeInTheDocument()
+    await waitFor(() => {
+      expect(screen.getByTestId('issue-list')).toBeInTheDocument()
+    })
     // By default, hideInfo is true, so info-level issues are hidden
     expect(screen.getByText('Dangerous eval usage')).toBeInTheDocument()
     expect(screen.getByText('Console log usage')).toBeInTheDocument()
@@ -166,7 +172,7 @@ describe('IssuesPanel', () => {
   it('renders nothing useful when codeIndex has zero files', () => {
     const emptyIndex = { totalFiles: 0, files: new Map() }
     const { container } = render(<IssuesPanel codeIndex={emptyIndex as any} />)
-    // With 0 files, scanIssues returns null → no issue-summary rendered
+    // With 0 files, scanIssuesAsync is not called → no issue-summary rendered
     expect(screen.queryByTestId('issue-summary')).not.toBeInTheDocument()
   })
 })

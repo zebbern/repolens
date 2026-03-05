@@ -445,6 +445,74 @@ export function createConcatenatedPropsAnalysis(): FullAnalysis {
   }
 }
 
+// ────────── Analysis with composition (types referencing each other in properties) ──────────
+
+export function createCompositionAnalysis(): FullAnalysis {
+  const files = new Map<string, FileAnalysis>()
+
+  files.set('src/models.ts', {
+    path: 'src/models.ts',
+    imports: [],
+    exports: [
+      { name: 'User', kind: 'interface', isDefault: false },
+      { name: 'Address', kind: 'interface', isDefault: false },
+      { name: 'Order', kind: 'interface', isDefault: false },
+      { name: 'OrderItem', kind: 'interface', isDefault: false },
+      { name: 'Product', kind: 'interface', isDefault: false },
+      { name: 'Status', kind: 'enum', isDefault: false },
+    ],
+    types: [
+      {
+        name: 'User',
+        kind: 'interface',
+        properties: ['name: string', 'address: Address', 'orders: Order[]', 'metadata: Map<string, Product>'],
+        exported: true,
+      },
+      {
+        name: 'Address',
+        kind: 'interface',
+        properties: ['street: string', 'city: string', 'country: string'],
+        exported: true,
+      },
+      {
+        name: 'Order',
+        kind: 'interface',
+        properties: ['id: number', 'items: OrderItem[]', 'status: Status', 'mainItem: OrderItem'],
+        exported: true,
+      },
+      {
+        name: 'OrderItem',
+        kind: 'interface',
+        properties: ['product: Product', 'quantity: number', 'price: number'],
+        exported: true,
+      },
+      {
+        name: 'Product',
+        kind: 'interface',
+        properties: ['name: string', 'price: number', 'category: string'],
+        exported: true,
+      },
+      {
+        name: 'Status',
+        kind: 'enum',
+        properties: ['Pending', 'Shipped', 'Delivered', 'Cancelled'],
+        exported: true,
+      },
+    ],
+    classes: [],
+    jsxComponents: [],
+    language: 'typescript',
+  })
+
+  return {
+    files,
+    graph: createEmptyGraph(),
+    topology: createSingleFileTopology('src/models.ts'),
+    detectedFramework: null,
+    primaryLanguage: 'typescript',
+  }
+}
+
 // ────────── Mock CodeIndex ──────────
 
 export function createMockCodeIndex(): CodeIndex {

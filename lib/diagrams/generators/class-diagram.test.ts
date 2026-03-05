@@ -1,5 +1,5 @@
 import { generateClassDiagram } from '@/lib/diagrams/generators/class-diagram'
-import { createRealisticAnalysis, createMinimalAnalysis, createEmptyAnalysis, createComplexTypesAnalysis, createConcatenatedPropsAnalysis } from '@/lib/diagrams/__fixtures__/mock-analysis'
+import { createRealisticAnalysis, createMinimalAnalysis, createEmptyAnalysis, createComplexTypesAnalysis, createConcatenatedPropsAnalysis, createCompositionAnalysis } from '@/lib/diagrams/__fixtures__/mock-analysis'
 
 describe('generateClassDiagram', () => {
   it('produces a classDiagram with types for realistic analysis', () => {
@@ -137,6 +137,72 @@ describe('generateClassDiagram', () => {
       expect(leakyBlock).not.toContain('export')
       expect(leakyBlock).not.toContain('import')
       expect(leakyBlock).not.toContain('comment')
+    })
+  })
+
+  describe('composition edges', () => {
+    it('generates composition edges when properties reference other rendered types', () => {
+      const result = generateClassDiagram(createCompositionAnalysis())
+
+      // User has address: Address and orders: Order[]
+      expect(result.chart).toContain('User *-- Address')
+      expect(result.chart).toContain('User *-- Order')
+      // Order has items: OrderItem[] and status: Status
+      expect(result.chart).toContain('Order *-- OrderItem')
+      expect(result.chart).toContain('Order *-- Status')
+      // OrderItem has product: Product
+      expect(result.chart).toContain('OrderItem *-- Product')
+    })
+
+    it('extracts type references from generic type arguments', () => {
+      const result = generateClassDiagram(createCompositionAnalysis())
+
+      // User has metadata: Map<string, Product> — should extract Product from generics
+      expect(result.chart).toContain('User *-- Product')
+    })
+
+    it('deduplicates composition edges per type pair', () => {
+      const result = generateClassDiagram(createCompositionAnalysis())
+
+      // Order has both items: OrderItem[] and mainItem: OrderItem
+      // Should only emit one edge
+      const orderItemEdges = result.chart.split('\n').filter(l => l.includes('Order *-- OrderItem'))
+      expect(orderItemEdges).toHaveLength(1)
+    })
+
+    it('does not generate composition edges for built-in types', () => {
+      const result = generateClassDiagram(createCompositionAnalysis())
+
+      // No edges to Map, Promise, Array, Record, etc.
+      expect(result.chart).not.toContain('*-- Map')
+      expect(result.chart).not.toContain('*-- Promise')
+      expect(result.chart).not.toContain('*-- Array')
+    })
+
+    it('includes composition edges in totalEdges count', () => {
+      const result = generateClassDiagram(createCompositionAnalysis())
+
+      // At least 5 composition edges: User->Address, User->Order, User->Product,
+      // Order->OrderItem, Order->Status, OrderItem->Product
+      expect(result.stats.totalEdges).toBeGreaterThanOrEqual(5)
+    })
+
+    it('does not create self-referencing composition edges', () => {
+      const result = generateClassDiagram(createCompositionAnalysis())
+
+      const selfEdges = result.chart.split('\n').filter(l => {
+        const match = l.match(/(\w+) \*-- (\w+)/)
+        return match && match[1] === match[2]
+      })
+      expect(selfEdges).toHaveLength(0)
+    })
+
+    it('preserves inheritance edges alongside composition edges', () => {
+      const result = generateClassDiagram(createRealisticAnalysis())
+
+      // Existing inheritance edges should still be present
+      expect(result.chart).toContain('BaseClient <|-- ApiClient')
+      expect(result.chart).toContain('HttpClient <|.. ApiClient')
     })
   })
 

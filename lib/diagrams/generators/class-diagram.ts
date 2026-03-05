@@ -359,6 +359,51 @@ export function generateClassDiagram(analysis: FullAnalysis): MermaidDiagramResu
     }
   }
 
+  // ── Composition edges from property type references ──
+  const BUILTIN_TYPES = new Set([
+    'Promise', 'Array', 'Record', 'Map', 'Set', 'Date', 'Error',
+    'RegExp', 'Symbol', 'Function', 'Object',
+    'Partial', 'Required', 'Readonly', 'Pick', 'Omit',
+    'Exclude', 'Extract', 'NonNullable', 'ReturnType', 'InstanceType',
+    'Parameters', 'ConstructorParameters', 'ThisType', 'Awaited',
+    'WeakMap', 'WeakSet', 'WeakRef', 'Iterator', 'Generator',
+    'PromiseLike', 'ArrayLike',
+  ])
+
+  function extractReferencedTypes(raw: string): string[] {
+    const trimmed = raw.trim()
+      .replace(/^(?:readonly|static|abstract|const|override|declare|public|private|protected)\s+/g, '')
+      .replace(/^(?:readonly|static|abstract|const|override|declare|public|private|protected)\s+/g, '')
+    const colonIdx = trimmed.indexOf(':')
+    if (colonIdx <= 0) return []
+    const typePart = trimmed.slice(colonIdx + 1)
+    const refs: string[] = []
+    const regex = /\b([A-Z][a-zA-Z0-9_]+)\b/g
+    let match
+    while ((match = regex.exec(typePart)) !== null) {
+      if (!BUILTIN_TYPES.has(match[1])) refs.push(match[1])
+    }
+    return refs
+  }
+
+  const compositionEdges = new Set<string>()
+  for (const t of typesToRender) {
+    const allMembers = [...t.properties, ...(t.methods || [])]
+    for (const member of allMembers) {
+      for (const ref of extractReferencedTypes(member)) {
+        const safeRef = sanitizeName(ref)
+        if (safeRef !== t.safeName && renderedNames.has(safeRef)) {
+          const edgeKey = `${t.safeName}--${safeRef}`
+          if (!compositionEdges.has(edgeKey)) {
+            compositionEdges.add(edgeKey)
+            chart += `  ${t.safeName} *-- ${safeRef}\n`
+            edgeCount++
+          }
+        }
+      }
+    }
+  }
+
   if (nodeCount === 0) chart = 'flowchart TD\n  empty["No classes, interfaces, or types found"]\n'
 
   const truncated = totalFound > MAX_TYPES ? ` (showing top ${nodeCount} of ${totalFound})` : ''

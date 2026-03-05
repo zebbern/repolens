@@ -196,38 +196,63 @@ export function generateEntryPoints(analysis: FullAnalysis, codeIndex: CodeIndex
     }
   }
 
-  // Show entry points and their first-level dependencies.
-  // Use directory context in labels so multiple "index.ts" files are distinguishable.
+  // Virtual root node connects all entry points so the graph stays connected
+  // and Mermaid renders vertically instead of as a flat horizontal line.
   const contextLabel = (p: string): string => {
     const parts = p.split('/')
     if (parts.length <= 1) return p
-    // Show parent/filename, e.g. "handlers/index.ts"
     return parts.slice(-2).join('/')
   }
 
-  for (const entry of topology.entryPoints) {
-    const id = sanitizeId(entry)
-    const name = contextLabel(entry)
-    const deps = graph.edges.get(entry)
-    chart += `  ${id}["${name}"]:::entryStyle\n`
-    nodePathMap.set(id, entry)
-    nodeCount++
+  chart += '  root["Application"]:::rootStyle\n'
+  nodeCount++
 
+  const addedEdges = new Set<string>()
+
+  const addNode = (path: string, style: string): string => {
+    const id = sanitizeId(path)
+    if (!nodePathMap.has(id)) {
+      chart += `  ${id}["${contextLabel(path)}"]:::${style}\n`
+      nodePathMap.set(id, path)
+      nodeCount++
+    }
+    return id
+  }
+
+  const addEdge = (fromId: string, toId: string): void => {
+    const key = `${fromId}-->${toId}`
+    if (!addedEdges.has(key)) {
+      chart += `  ${fromId} --> ${toId}\n`
+      addedEdges.add(key)
+    }
+  }
+
+  for (const entry of topology.entryPoints) {
+    const entryId = addNode(entry, 'entryStyle')
+    addEdge('root', entryId)
+
+    // Depth 1: direct dependencies
+    const deps = graph.edges.get(entry)
     if (deps) {
       for (const dep of deps) {
-        const depId = sanitizeId(dep)
-        const depName = contextLabel(dep)
-        if (!nodePathMap.has(depId)) {
-          chart += `  ${depId}["${depName}"]:::depStyle\n`
-          nodePathMap.set(depId, dep)
-          nodeCount++
+        const depId = addNode(dep, 'depStyle')
+        addEdge(entryId, depId)
+
+        // Depth 2: transitive dependencies
+        const subDeps = graph.edges.get(dep)
+        if (subDeps) {
+          for (const subDep of subDeps) {
+            const subDepId = addNode(subDep, 'depStyle')
+            addEdge(depId, subDepId)
+          }
         }
-        chart += `  ${id} --> ${depId}\n`
       }
     }
   }
 
-  chart += '\n  classDef entryStyle fill:#22c55e,stroke:#4ade80,color:#000\n'
+  chart += '\n  style root fill:#4a5568,stroke:#2d3748,color:#fff\n'
+  chart += '  classDef rootStyle fill:#4a5568,stroke:#2d3748,color:#fff\n'
+  chart += '  classDef entryStyle fill:#22c55e,stroke:#4ade80,color:#000\n'
   chart += '  classDef depStyle fill:#3b82f6,stroke:#60a5fa,color:#fff\n'
 
   return {

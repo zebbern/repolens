@@ -93,7 +93,7 @@ vi.mock('../tab-config', () => ({
     { id: 'repo', label: 'Overview', icon: null },
     { id: 'issues', label: 'Issues', icon: null },
     { id: 'docs', label: 'Docs', icon: null, requiresAI: true },
-    { id: 'diagram', label: 'Diagrams', icon: null, requiresAI: true },
+    { id: 'diagram', label: 'Diagrams', icon: null },
     { id: 'code', label: 'Code', icon: null },
     { id: 'deps', label: 'Deps', icon: null },
     { id: 'changelog', label: 'Changelog', icon: null, requiresAI: true },
@@ -207,12 +207,13 @@ describe('PreviewPanel', () => {
       expect(screen.getByTestId('ai-empty-state-docs')).toBeInTheDocument()
     })
 
-    it('shows AIFeatureEmptyState for diagram tab when no API key', async () => {
+    it('shows DiagramViewer for diagram tab even without API key', async () => {
       const user = userEvent.setup()
       render(<PreviewPanel />)
 
       await user.click(screen.getByText('diagram-tab'))
-      expect(screen.getByTestId('ai-empty-state-diagram')).toBeInTheDocument()
+      expect(await screen.findByText('DiagramViewer')).toBeInTheDocument()
+      expect(screen.queryByTestId('ai-empty-state-diagram')).not.toBeInTheDocument()
     })
 
     it('shows AIFeatureEmptyState for changelog tab when no API key', async () => {

@@ -14,7 +14,7 @@ const TABS: PreviewTab[] = [
   { id: 'repo', label: 'Repo', icon: StubIcon as any },
   NON_AI_TAB,
   AI_TAB,
-  { id: 'diagram', label: 'Diagram', icon: StubIcon as any, requiresAI: true },
+  { id: 'diagram', label: 'Diagram', icon: StubIcon as any },
   { id: 'code', label: 'Code', icon: StubIcon as any },
   { id: 'changelog', label: 'Changelog', icon: StubIcon as any, requiresAI: true },
 ]
@@ -44,9 +44,6 @@ describe('PreviewTabBar', () => {
       const docsButton = screen.getByRole('tab', { name: /docs/i })
       expect(docsButton).toHaveClass('opacity-50')
 
-      const diagramButton = screen.getByRole('tab', { name: /diagram/i })
-      expect(diagramButton).toHaveClass('opacity-50')
-
       const changelogButton = screen.getByRole('tab', { name: /changelog/i })
       expect(changelogButton).toHaveClass('opacity-50')
     })
@@ -54,9 +51,9 @@ describe('PreviewTabBar', () => {
     it('shows Lock icon on AI tabs', () => {
       const { container } = render(<PreviewTabBar {...DEFAULT_PROPS} hasApiKey={false} />)
 
-      // AI tabs should have lock icons — there are 3 AI tabs
+      // AI tabs should have lock icons — there are 2 AI tabs
       const lockIcons = container.querySelectorAll('.lucide-lock')
-      expect(lockIcons.length).toBe(3)
+      expect(lockIcons.length).toBe(2)
     })
 
     it('sets locked title on AI tabs', () => {
@@ -65,8 +62,8 @@ describe('PreviewTabBar', () => {
       const docsButton = screen.getByRole('tab', { name: /docs/i })
       expect(docsButton).toHaveAttribute('title', 'Requires API key — set up in Settings')
 
-      const diagramButton = screen.getByRole('tab', { name: /diagram/i })
-      expect(diagramButton).toHaveAttribute('title', 'Requires API key — set up in Settings')
+      const changelogButton = screen.getByRole('tab', { name: /changelog/i })
+      expect(changelogButton).toHaveAttribute('title', 'Requires API key — set up in Settings')
     })
 
     it('does NOT apply opacity-50 to non-AI tabs', () => {
@@ -77,6 +74,9 @@ describe('PreviewTabBar', () => {
 
       const issuesButton = screen.getByRole('tab', { name: /issues/i })
       expect(issuesButton).not.toHaveClass('opacity-50')
+
+      const diagramButton = screen.getByRole('tab', { name: /diagram/i })
+      expect(diagramButton).not.toHaveClass('opacity-50')
 
       const codeButton = screen.getByRole('tab', { name: /code/i })
       expect(codeButton).not.toHaveClass('opacity-50')
@@ -100,8 +100,8 @@ describe('PreviewTabBar', () => {
       const docsButton = screen.getByRole('tab', { name: /docs/i })
       expect(docsButton).not.toHaveClass('opacity-50')
 
-      const diagramButton = screen.getByRole('tab', { name: /diagram/i })
-      expect(diagramButton).not.toHaveClass('opacity-50')
+      const changelogButton = screen.getByRole('tab', { name: /changelog/i })
+      expect(changelogButton).not.toHaveClass('opacity-50')
     })
 
     it('does NOT show Lock icon on AI tabs', () => {

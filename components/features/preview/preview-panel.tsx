@@ -243,15 +243,11 @@ export function PreviewPanel({ className }: { className?: string }) {
             <AIFeatureEmptyState tabId="docs" onOpenSettings={handleOpenSettings} />
           )
         ) : activeTab === "diagram" ? (
-          hasApiKey ? (
-            <FeatureErrorBoundary featureName="Diagram Viewer">
-              <Suspense fallback={<DiagramTabSkeleton />}>
-                <DiagramViewer files={files} codeIndex={codeIndex} onNavigateToFile={handleNavigateToFile} />
-              </Suspense>
-            </FeatureErrorBoundary>
-          ) : (
-            <AIFeatureEmptyState tabId="diagram" onOpenSettings={handleOpenSettings} />
-          )
+          <FeatureErrorBoundary featureName="Diagram Viewer">
+            <Suspense fallback={<DiagramTabSkeleton />}>
+              <DiagramViewer files={files} codeIndex={codeIndex} onNavigateToFile={handleNavigateToFile} />
+            </Suspense>
+          </FeatureErrorBoundary>
         ) : activeTab === "code" ? (
           <FeatureErrorBoundary featureName="Code Browser">
             <Suspense fallback={<CodeTabSkeleton />}>

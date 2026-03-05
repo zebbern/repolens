@@ -41,7 +41,7 @@ describe('tab-config', () => {
   })
 
   describe('requiresAI field', () => {
-    it.each(['docs', 'diagram', 'changelog'])(
+    it.each(['docs', 'changelog'])(
       'marks "%s" tab as requiresAI',
       (tabId) => {
         const tab = PREVIEW_TABS.find(t => t.id === tabId)
@@ -50,7 +50,7 @@ describe('tab-config', () => {
       }
     )
 
-    it.each(['repo', 'issues', 'code', 'deps', 'git-history'])(
+    it.each(['repo', 'issues', 'diagram', 'code', 'deps', 'git-history'])(
       'does NOT mark "%s" tab as requiresAI',
       (tabId) => {
         const tab = PREVIEW_TABS.find(t => t.id === tabId)

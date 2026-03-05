@@ -1,7 +1,9 @@
 // GitHub API Fetcher
 
 import type { GitHubRepo, RepoTree, FileNode, GitHubTag, GitHubBranch, GitHubCommit, GitHubComparison } from '@/types/repository'
+import type { BlameData, CommitDetail, CommitFile } from '@/types/git-history'
 import { buildRepoApiUrl, buildTreeApiUrl, buildRawContentUrl } from './parser'
+import { githubGraphQL } from './graphql'
 
 const GITHUB_API_BASE = 'https://api.github.com'
 
@@ -209,6 +211,7 @@ export async function fetchCommits(
     until?: string
     perPage?: number
     page?: number
+    path?: string
   } = {},
 ): Promise<GitHubCommit[]> {
   const headers = buildHeaders(options.token)
@@ -222,6 +225,7 @@ export async function fetchCommits(
   if (options.sha) params.set('sha', options.sha)
   if (options.since) params.set('since', options.since)
   if (options.until) params.set('until', options.until)
+  if (options.path) params.set('path', options.path)
 
   const url = `${GITHUB_API_BASE}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/commits?${params.toString()}`
   const response = await fetch(url, { headers })
@@ -268,6 +272,153 @@ export async function fetchCompare(
       deletions: file.deletions as number,
       changes: file.changes as number,
       patch: file.patch as string | undefined,
+    })),
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Blame (GraphQL) and Commit Detail (REST) fetchers
+// ---------------------------------------------------------------------------
+
+const BLAME_QUERY = `
+query BlameData($owner: String!, $name: String!, $expression: String!) {
+  repository(owner: $owner, name: $name) {
+    object(expression: $expression) {
+      ... on Blob {
+        byteSize
+        isTruncated
+        blame(startingLine: 1) {
+          ranges {
+            startingLine
+            endingLine
+            age
+            commit {
+              oid
+              abbreviatedOid
+              message
+              messageHeadline
+              committedDate
+              url
+              author {
+                name
+                email
+                date
+                user {
+                  login
+                  avatarUrl
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+`
+
+interface BlameGraphQLResponse {
+  repository: {
+    object: {
+      byteSize: number
+      isTruncated: boolean
+      blame: {
+        ranges: BlameData['ranges']
+      }
+    } | null
+  }
+}
+
+/**
+ * Fetch blame data for a file via GitHub GraphQL API.
+ * Requires authentication — GitHub GraphQL API does not support unauthenticated requests.
+ */
+export async function fetchBlame(
+  owner: string,
+  name: string,
+  ref: string,
+  path: string,
+  options: FetchOptions = {},
+): Promise<BlameData> {
+  if (!options.token) {
+    throw new Error('Authentication required to fetch blame data')
+  }
+
+  const expression = `${ref}:${path}`
+  const data = await githubGraphQL<BlameGraphQLResponse>(
+    BLAME_QUERY,
+    { owner, name, expression },
+    options.token,
+  )
+
+  const blob = data.repository.object
+  if (!blob) {
+    throw new Error(`File not found: ${path}`)
+  }
+
+  return {
+    ranges: blob.blame.ranges,
+    isTruncated: blob.isTruncated,
+    byteSize: blob.byteSize,
+  }
+}
+
+/**
+ * Fetch detailed commit information including stats and file changes.
+ */
+export async function fetchCommitDetail(
+  owner: string,
+  name: string,
+  sha: string,
+  options: FetchOptions = {},
+): Promise<CommitDetail> {
+  const headers = buildHeaders(options.token)
+
+  const url = `${GITHUB_API_BASE}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/commits/${encodeURIComponent(sha)}`
+  const response = await fetch(url, { headers })
+
+  if (!response.ok) {
+    if (response.status === 404) {
+      throw new Error(`Commit not found: ${sha}`)
+    }
+    handleGitHubError(response, 'Commit')
+  }
+
+  const data = (await response.json()) as Record<string, unknown>
+  const commit = data.commit as Record<string, unknown>
+  const commitAuthor = commit.author as Record<string, string>
+  const commitCommitter = commit.committer as Record<string, string>
+  const author = data.author as Record<string, string> | null
+  const stats = data.stats as Record<string, number>
+  const rawFiles = (data.files as Array<Record<string, unknown>>) ?? []
+
+  return {
+    sha: data.sha as string,
+    message: commit.message as string,
+    authorName: commitAuthor.name,
+    authorEmail: commitAuthor.email,
+    authorDate: commitAuthor.date,
+    committerName: commitCommitter.name,
+    committerDate: commitCommitter.date,
+    url: data.html_url as string,
+    authorLogin: author?.login ?? null,
+    authorAvatarUrl: author?.avatar_url ?? null,
+    parents: ((data.parents as Array<Record<string, string>>) ?? []).map((p) => ({
+      sha: p.sha,
+    })),
+    stats: {
+      additions: stats.additions,
+      deletions: stats.deletions,
+      total: stats.total,
+    },
+    files: rawFiles.map((file): CommitFile => ({
+      filename: file.filename as string,
+      status: file.status as CommitFile['status'],
+      additions: file.additions as number,
+      deletions: file.deletions as number,
+      changes: file.changes as number,
+      patch: file.patch as string | undefined,
+      previousFilename: file.previous_filename as string | undefined,
     })),
   }
 }

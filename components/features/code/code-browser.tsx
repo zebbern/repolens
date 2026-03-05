@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useMemo, useCallback } from "react"
 import { Code2 } from "lucide-react"
-import { useRepository, useAPIKeys, useTours } from "@/providers"
+import { useRepository, useAPIKeys, useTours, useApp } from "@/providers"
 import type { CodeBrowserProps, SidebarMode, SymbolRange, InlineActionType } from "./types"
 import { useFileOperations } from "./hooks/use-file-operations"
 import { useSearch } from "./hooks/use-search"
@@ -64,6 +64,9 @@ export function CodeBrowser({ navigateToFile, onNavigateComplete }: CodeBrowserP
     ? Math.round((indexingProgress.current / indexingProgress.total) * 100)
     : 0
 
+  // Sync selected file path to app-level state for cross-tab awareness
+  const { setSelectedFilePath } = useApp()
+
   // --- Custom Hooks ---
 
   const {
@@ -84,6 +87,12 @@ export function CodeBrowser({ navigateToFile, onNavigateComplete }: CodeBrowserP
     navigateToFile,
     onNavigateComplete,
   })
+
+  // Sync activeTabPath to app-level selectedFilePath for Git History tab
+  useEffect(() => {
+    setSelectedFilePath(activeTabPath)
+    return () => setSelectedFilePath(null)
+  }, [activeTabPath, setSelectedFilePath])
 
   const {
     searchResults,

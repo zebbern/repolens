@@ -47,6 +47,16 @@ describe('buildShareableUrl', () => {
     expect(parsed.searchParams.has('view')).toBe(false)
   })
 
+  it('includes a view param for git-history', () => {
+    const url = buildShareableUrl({
+      repoUrl: 'https://github.com/owner/repo',
+      view: 'git-history',
+    })
+
+    const parsed = new URL(url)
+    expect(parsed.searchParams.get('view')).toBe('git-history')
+  })
+
   it('handles hyphenated repo names correctly', () => {
     const url = buildShareableUrl({
       repoUrl: 'https://github.com/owner/my-repo',

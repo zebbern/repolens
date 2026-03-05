@@ -21,6 +21,7 @@ import {
   CodeTabSkeleton,
   DepsTabSkeleton,
   ChangelogTabSkeleton,
+  GitHistoryTabSkeleton,
 } from "@/components/features/loading/tab-skeleton"
 import { FeatureErrorBoundary } from "@/components/ui/feature-error-boundary"
 
@@ -42,6 +43,9 @@ const DepsPanel = lazy(() =>
 )
 const ChangelogViewer = lazy(() =>
   import("@/components/features/changelog/changelog-viewer").then(m => ({ default: m.ChangelogViewer }))
+)
+const GitHistoryPanel = lazy(() =>
+  import("@/components/features/git-history/git-history-panel").then(m => ({ default: m.GitHistoryPanel }))
 )
 
 export function PreviewPanel({ className }: { className?: string }) {
@@ -93,7 +97,7 @@ export function PreviewPanel({ className }: { className?: string }) {
   // Shareable URL: sync URL bar when repo or tab changes
   useEffect(() => {
     if (repo) {
-      updateUrlState({ repoUrl: repo.url, view: activeTab as 'repo' | 'issues' | 'docs' | 'diagram' | 'code' | 'deps' | 'changelog' })
+      updateUrlState({ repoUrl: repo.url, view: activeTab as 'repo' | 'issues' | 'docs' | 'diagram' | 'code' | 'deps' | 'changelog' | 'git-history' })
     } else if (!isConnecting) {
       clearUrlState()
     }
@@ -262,6 +266,12 @@ export function PreviewPanel({ className }: { className?: string }) {
           <FeatureErrorBoundary featureName="Changelog">
             <Suspense fallback={<ChangelogTabSkeleton />}>
               <ChangelogViewer />
+            </Suspense>
+          </FeatureErrorBoundary>
+        ) : activeTab === "git-history" ? (
+          <FeatureErrorBoundary featureName="Git History">
+            <Suspense fallback={<GitHistoryTabSkeleton />}>
+              <GitHistoryPanel navigateToFile={pendingNavigateFile} />
             </Suspense>
           </FeatureErrorBoundary>
         ) : (

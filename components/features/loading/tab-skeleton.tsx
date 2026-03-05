@@ -151,6 +151,38 @@ export function ChangelogTabSkeleton() {
 }
 
 /**
+ * Skeleton fallback for the Git History tab.
+ * Mimics a toolbar row + scrollable commit timeline rows.
+ */
+export function GitHistoryTabSkeleton() {
+  return (
+    <div role="status" aria-label="Loading git history" className="flex h-full flex-col gap-3 p-4">
+      {/* Toolbar area */}
+      <div className="flex items-center gap-2">
+        <Skeleton className="h-7 w-20 rounded-md" />
+        <Skeleton className="h-7 w-20 rounded-md" />
+        <Skeleton className="h-7 w-24 rounded-md" />
+        <div className="flex-1" />
+        <Skeleton className="h-4 w-32" />
+      </div>
+      {/* Date header */}
+      <Skeleton className="h-5 w-28" />
+      {/* Commit rows */}
+      {Array.from({ length: 10 }).map((_, i) => (
+        <div key={i} className="flex items-center gap-3 rounded-md px-3 py-2">
+          <Skeleton className="h-6 w-6 rounded-full" />
+          <div className="flex-1 space-y-1.5">
+            <Skeleton className="h-4" style={{ width: `${40 + ((i * 23) % 40)}%` }} />
+            <Skeleton className="h-3 w-20" />
+          </div>
+          <Skeleton className="h-3 w-14" />
+        </div>
+      ))}
+    </div>
+  )
+}
+
+/**
  * Skeleton fallback for the Deps tab.
  * Mimics the summary cards row + dependency table rows.
  */

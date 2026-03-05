@@ -17,6 +17,13 @@ describe('tab-config', () => {
     expect(ids).toContain('code')
     expect(ids).toContain('deps')
     expect(ids).toContain('changelog')
+    expect(ids).toContain('git-history')
+  })
+
+  it('includes a "git-history" tab', () => {
+    const tab = PREVIEW_TABS.find(t => t.id === 'git-history')
+    expect(tab).toBeDefined()
+    expect(tab!.label).toBe('Git History')
   })
 
   it('includes a "changelog" tab', () => {

@@ -16,6 +16,7 @@ const commitsQuerySchema = z.object({
   until: z.string().regex(ISO_DATE_RE, 'Invalid date format').optional(),
   per_page: z.coerce.number().int().min(1).max(100).optional(),
   page: z.coerce.number().int().min(1).optional(),
+  path: z.string().min(1).max(4096).optional(),
 })
 
 export async function GET(request: NextRequest) {
@@ -27,13 +28,14 @@ export async function GET(request: NextRequest) {
     until: request.nextUrl.searchParams.get("until") ?? undefined,
     per_page: request.nextUrl.searchParams.get("per_page") ?? undefined,
     page: request.nextUrl.searchParams.get("page") ?? undefined,
+    path: request.nextUrl.searchParams.get("path") ?? undefined,
   })
 
   if (!params.success) {
     return apiError('VALIDATION_ERROR', 'Missing required parameters: owner, name', 400)
   }
 
-  const { owner, name, sha, since, until, per_page, page } = params.data
+  const { owner, name, sha, since, until, per_page, page, path } = params.data
 
   try {
     const token = await getAccessToken(request)
@@ -45,6 +47,7 @@ export async function GET(request: NextRequest) {
       until,
       perPage: per_page,
       page,
+      path,
     })
 
     return NextResponse.json(commits)

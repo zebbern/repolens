@@ -7,12 +7,14 @@ interface AppState {
   previewUrl: string | null
   isGenerating: boolean
   sidebarWidth: number
+  selectedFilePath: string | null
 }
 
 interface AppContextType extends AppState {
   setPreviewUrl: (url: string | null) => void
   setIsGenerating: (generating: boolean) => void
   setSidebarWidth: (width: number) => void
+  setSelectedFilePath: (path: string | null) => void
 }
 
 // Initial state
@@ -20,6 +22,7 @@ const initialState: AppState = {
   previewUrl: null,
   isGenerating: false,
   sidebarWidth: 320,
+  selectedFilePath: null,
 }
 
 // Context
@@ -34,6 +37,7 @@ export function AppProvider({ children }: AppProviderProps) {
   const [previewUrl, setPreviewUrlState] = useState<string | null>(initialState.previewUrl)
   const [isGenerating, setIsGenerating] = useState(initialState.isGenerating)
   const [sidebarWidth, setSidebarWidth] = useState(initialState.sidebarWidth)
+  const [selectedFilePath, setSelectedFilePath] = useState<string | null>(initialState.selectedFilePath)
 
   const setPreviewUrl = (url: string | null) => {
     if (url === previewUrl) return
@@ -44,9 +48,11 @@ export function AppProvider({ children }: AppProviderProps) {
     previewUrl,
     isGenerating,
     sidebarWidth,
+    selectedFilePath,
     setPreviewUrl,
     setIsGenerating,
     setSidebarWidth,
+    setSelectedFilePath,
   }
 
   return <AppContext.Provider value={contextValue}>{children}</AppContext.Provider>

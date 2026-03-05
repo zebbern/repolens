@@ -1,4 +1,5 @@
 import type { GitHubRepo, RepoTree, GitHubTag, GitHubBranch, GitHubCommit, GitHubComparison } from "@/types/repository"
+import type { BlameData, CommitDetail } from "@/types/git-history"
 import {
   getCached,
   getStale,
@@ -19,6 +20,8 @@ const CACHE_TTL_TAGS       = 600_000  // 10 minutes
 const CACHE_TTL_BRANCHES   = 300_000  // 5 minutes
 const CACHE_TTL_COMMITS    = 300_000  // 5 minutes
 const CACHE_TTL_COMPARE    = 600_000  // 10 minutes
+const CACHE_TTL_BLAME         = 600_000  // 10 minutes
+const CACHE_TTL_COMMIT_DETAIL = 600_000  // 10 minutes
 
 // ---------------------------------------------------------------------------
 // Internal helpers
@@ -210,6 +213,101 @@ export async function fetchCompareViaProxy(
 }
 
 // ---------------------------------------------------------------------------
+// Git History & Blame — proxy fetch functions
+// ---------------------------------------------------------------------------
+
+/**
+ * Fetch blame data through the proxy (POST — requires auth).
+ * Uses manual cache + POST since cachedProxyFetch is GET-only.
+ */
+export async function fetchBlameViaProxy(
+  owner: string,
+  name: string,
+  ref: string,
+  path: string,
+): Promise<BlameData> {
+  const safePath = path.replace(/:/g, '%3A')
+  const key = `blame:${owner}/${name}:${ref}:${safePath}`
+
+  // Check fresh cache
+  const fresh = getCached<BlameData>(key)
+  if (fresh !== null) return fresh
+
+  // Check stale cache (SWR)
+  const stale = getStale<BlameData>(key)
+  if (stale !== null && stale.isStale) {
+    // Fire-and-forget background revalidation
+    fetchBlameFromApi(owner, name, ref, path)
+      .then((data) => setCache(key, data, CACHE_TTL_BLAME))
+      .catch((err) => {
+        console.warn('[fetchBlameViaProxy] Background revalidation failed:', key, err)
+      })
+    return stale.data
+  }
+
+  // Cache miss — fetch, cache, return
+  const data = await fetchBlameFromApi(owner, name, ref, path)
+  setCache(key, data, CACHE_TTL_BLAME)
+  return data
+}
+
+/** Internal helper: POST to /api/github/blame and parse response. */
+async function fetchBlameFromApi(
+  owner: string,
+  name: string,
+  ref: string,
+  path: string,
+): Promise<BlameData> {
+  const response = await fetch('/api/github/blame', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ owner, name, ref, path }),
+  })
+
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}))
+    const parsed = body as { error?: string | { message?: string } }
+    const message =
+      typeof parsed.error === 'string'
+        ? parsed.error
+        : parsed.error?.message ?? `Request failed: ${response.statusText}`
+    throw new Error(message)
+  }
+
+  return response.json() as Promise<BlameData>
+}
+
+/**
+ * Fetch commits for a specific file through the proxy.
+ */
+export async function fetchFileCommitsViaProxy(
+  owner: string,
+  name: string,
+  path: string,
+  opts?: { perPage?: number },
+): Promise<GitHubCommit[]> {
+  const params = new URLSearchParams({ owner, name, path })
+  if (opts?.perPage !== undefined) params.set('per_page', String(opts.perPage))
+
+  const key = `file-commits:${owner}/${name}:${path}:${params.toString()}`
+  const url = `/api/github/commits?${params.toString()}`
+  return cachedProxyFetch<GitHubCommit[]>(key, url, CACHE_TTL_COMMITS)
+}
+
+/**
+ * Fetch detailed commit information through the proxy.
+ */
+export async function fetchCommitDetailViaProxy(
+  owner: string,
+  name: string,
+  sha: string,
+): Promise<CommitDetail> {
+  const key = `commit-detail:${owner}/${name}:${sha}`
+  const url = `/api/github/commit/${encodeURIComponent(sha)}?owner=${encodeURIComponent(owner)}&name=${encodeURIComponent(name)}`
+  return cachedProxyFetch<CommitDetail>(key, url, CACHE_TTL_COMMIT_DETAIL)
+}
+
+// ---------------------------------------------------------------------------
 // Cache management — exported for manual invalidation
 // ---------------------------------------------------------------------------
 
@@ -228,4 +326,7 @@ export function invalidateRepoCache(owner: string, repo: string): void {
   invalidatePattern(`branches:${owner}/${repo}`)
   invalidatePattern(`commits:${owner}/${repo}`)
   invalidatePattern(`compare:${owner}/${repo}`)
+  invalidatePattern(`blame:${owner}/${repo}`)
+  invalidatePattern(`commit-detail:${owner}/${repo}`)
+  invalidatePattern(`file-commits:${owner}/${repo}`)
 }

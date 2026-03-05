@@ -1,4 +1,4 @@
-import { Github, Bug, FileText, Network, Code2, Package, History } from "lucide-react"
+import { Github, Bug, FileText, Network, Code2, Package, History, GitCommitHorizontal } from "lucide-react"
 import type { LucideIcon } from "lucide-react"
 
 export interface PreviewTab {
@@ -15,4 +15,5 @@ export const PREVIEW_TABS: PreviewTab[] = [
   { id: "code", label: "Code", icon: Code2 },
   { id: "deps", label: "Deps", icon: Package },
   { id: "changelog", label: "Changelog", icon: History },
+  { id: "git-history", label: "Git History", icon: GitCommitHorizontal },
 ]

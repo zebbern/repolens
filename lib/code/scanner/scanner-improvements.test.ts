@@ -59,13 +59,14 @@ describe('context-aware suppression', () => {
     expect(consoleIssues).toHaveLength(0)
   })
 
-  it('still triggers security rules in test files', () => {
+  it('suppresses eval-usage in test files (excludeFiles)', () => {
     let index = createEmptyIndex()
     index = indexFile(index, '__tests__/utils.test.ts', 'const result = eval(userInput)', 'typescript')
 
     const result = scanIssues(index, null)
     const evalIssues = result.issues.filter(i => i.ruleId === 'eval-usage')
-    expect(evalIssues.length).toBeGreaterThanOrEqual(1)
+    // eval-usage has excludeFiles that matches test files — both regex and AST paths
+    expect(evalIssues).toHaveLength(0)
   })
 
   it('suppresses non-security rules in generated files', () => {

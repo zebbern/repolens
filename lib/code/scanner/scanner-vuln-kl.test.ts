@@ -70,14 +70,13 @@ describe('Category K: Framework-Specific Detection', () => {
     expect(hits.length).toBeGreaterThanOrEqual(1)
   })
 
-  it('K5: Express app WITH helmet on same line — suppressed', () => {
-    // express-no-helmet excludePattern checks per-line: helmet must appear
-    // on the same line as express() to suppress. When helmet is imported on
-    // a separate line, the rule still fires as an informational reminder.
+  it('K5: Express app WITH helmet — suppressed', () => {
+    // express-no-helmet is now a composite rule that checks the whole file
+    // for helmet import/usage. When helmet appears anywhere, the rule is suppressed.
     const code = "const app = require('express')(); const helmet = require('helmet')"
     const result = scanCode('src/server.ts', code, 'typescript')
     const hits = issuesForRule(result.issues, 'express-no-helmet')
-    // helmet appears on the same line as express() → excludePattern matches
+    // helmet appears in the file → mitigation matches → suppressed
     expect(hits).toHaveLength(0)
   })
 

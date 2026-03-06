@@ -1002,10 +1002,11 @@ describe('Category J: Edge Cases & Obfuscation', () => {
     expect(hits).toHaveLength(0)
   })
 
-  it('J8: security rule in test file still fires', () => {
+  it('J8: eval-usage suppressed in test file (excludeFiles)', () => {
     const result = scanCode('__tests__/util.test.ts', 'const x = eval(userInput)', 'typescript')
     const hits = issuesForRule(result.issues, 'eval-usage')
-    expect(hits.length).toBeGreaterThanOrEqual(1)
+    // eval-usage has explicit excludeFiles for test/spec/mock files
+    expect(hits).toHaveLength(0)
   })
 
   it('J9: non-security rule in test file is suppressed', () => {

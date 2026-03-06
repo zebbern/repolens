@@ -141,6 +141,31 @@ export const COMPOSITE_RULES: CompositeRule[] = [
   },
 
   // -----------------------------------------------------------------------
+  // Helmet (CWE-693)
+  // -----------------------------------------------------------------------
+
+  // Express app without helmet middleware
+  {
+    id: 'express-no-helmet',
+    category: 'security',
+    severity: 'info',
+    title: 'Express App — Verify Helmet Middleware',
+    description:
+      'An Express application was detected. Helmet sets security-related HTTP headers (X-Content-Type-Options, Strict-Transport-Security, etc.). Verify that helmet middleware is registered.',
+    suggestion:
+      "Install and use helmet: app.use(helmet()). See https://helmetjs.github.io/",
+    cwe: 'CWE-693',
+    owasp: 'A05:2021 Security Misconfiguration',
+    fileFilter: JS_TS,
+    requiredPatterns: [
+      /express\s*\(\s*\)/,
+    ],
+    sinkPattern: /express\s*\(\s*\)/,
+    mitigations: [/helmet|require\(['"]helmet['"]\)/i],
+    confidence: 'low',
+  },
+
+  // -----------------------------------------------------------------------
   // CSRF (CWE-352)
   // -----------------------------------------------------------------------
   // Rate Limiting (CWE-770)

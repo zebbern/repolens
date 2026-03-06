@@ -423,11 +423,19 @@ function deduplicateIssues(
 
   // Normalize remaining ast-eval-usage (AST-only findings) to eval-usage
   // and apply MAX_PER_RULE cap + inline suppression.
+  // Also apply the regex eval-usage rule's excludeFiles so test/fixture files
+  // are not flagged by the AST path (which has no excludeFiles of its own).
+  const EVAL_EXCLUDE_FILES = /rules-security|rules-security-lang|rules-quality|rules-framework|rules-composite|\.d\.ts$|\.test\.|\.spec\.|__tests__|fixture|mock/i
   const existingEvalCount = issues.filter(i => i.ruleId === 'eval-usage').length
   let normalizedEvalCount = existingEvalCount
   for (let i = issues.length - 1; i >= 0; i--) {
     const issue = issues[i]
     if (issue.ruleId !== 'ast-eval-usage') continue
+    // Apply excludeFiles check (mirrors regex eval-usage rule)
+    if (EVAL_EXCLUDE_FILES.test(issue.file)) {
+      issues.splice(i, 1)
+      continue
+    }
     issue.ruleId = 'eval-usage'
     issue.id = issue.id.replace('ast-eval-usage', 'eval-usage')
     if (!issue.cwe) issue.cwe = 'CWE-94'

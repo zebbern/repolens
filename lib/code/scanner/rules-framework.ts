@@ -136,24 +136,8 @@ export const FRAMEWORK_RULES: ScanRule[] = [
   // requires composite / structural analysis (cross-file). These rules flag
   // the express app creation as an informational reminder.
 
-  {
-    id: 'express-no-helmet',
-    category: 'security',
-    severity: 'info',
-    title: 'Express App — Verify Helmet Middleware',
-    description:
-      'An Express application was detected. Helmet sets security-related HTTP headers (X-Content-Type-Options, Strict-Transport-Security, etc.). Verify that helmet middleware is registered.',
-    suggestion:
-      "Install and use helmet: app.use(helmet()). See https://helmetjs.github.io/",
-    cwe: 'CWE-693',
-    owasp: 'A05:2021 Security Misconfiguration',
-    pattern: 'express\\s*\\(\\s*\\)',
-    patternOptions: { regex: true },
-    fileFilter: JS_TS,
-    // Suppress when helmet is imported/required in the same file
-    excludePattern: /helmet|require\(['"]helmet['"]\)/i,
-    confidence: 'low',
-  },
+  // express-no-helmet moved to rules-composite.ts for file-level analysis
+  // (needs to check entire file for helmet import, not just the matched line)
 
   {
     id: 'express-cookie-not-signed',

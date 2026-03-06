@@ -2153,8 +2153,7 @@ export type { AuthConfig };`,
       language: 'typescript',
     },
     expected: [
-      // AST analyzer produces ast-eval-usage (no excludeFiles check), normalized to eval-usage
-      { ruleId: 'eval-usage', line: 3, verdict: 'fp' },
+      // eval-usage suppressed: AST analyzer now applies regex rule's excludeFiles for test files
     ],
   },
 
@@ -2341,6 +2340,90 @@ REDIS_URL=redis://localhost:6379`,
     },
     expected: [
       // .ya?ml$ in excludeFiles + ${{ secrets.* }} are vault references, not hardcoded values
+    ],
+  },
+
+  // -----------------------------------------------------------------------
+  // 107. express-with-helmet — helmet import suppresses no-helmet (negative)
+  // -----------------------------------------------------------------------
+  {
+    name: 'express-with-helmet',
+    description: 'Express app WITH helmet import — express-no-helmet should NOT fire',
+    file: {
+      path: 'src/app.ts',
+      content: `import express from 'express'
+import helmet from 'helmet'
+
+const app = express()
+app.use(helmet())
+app.use(express.json())
+
+app.get('/health', (req, res) => res.send('OK'))
+app.listen(3000)`,
+      language: 'typescript',
+    },
+    expected: [
+      // express-no-helmet suppressed: helmet is imported and used
+      { ruleId: 'express-body-parser-no-limit', line: 6, verdict: 'tp' },
+    ],
+  },
+
+  // -----------------------------------------------------------------------
+  // 108. express-with-require-helmet — require('helmet') variant (negative)
+  // -----------------------------------------------------------------------
+  {
+    name: 'express-with-require-helmet',
+    description: 'Express app with require(helmet) — express-no-helmet should NOT fire',
+    file: {
+      path: 'src/server.js',
+      content: `const express = require('express')
+const helmet = require('helmet')
+
+const app = express()
+app.use(helmet())
+app.get('/', (req, res) => res.send('Hello'))
+app.listen(8080)`,
+      language: 'javascript',
+    },
+    expected: [
+      // express-no-helmet suppressed: helmet is required
+    ],
+  },
+
+  // -----------------------------------------------------------------------
+  // 109. eval-in-spec-file — eval in .spec.ts file (negative)
+  // -----------------------------------------------------------------------
+  {
+    name: 'eval-in-spec-file',
+    description: 'eval() in a .spec.ts file — should be suppressed by excludeFiles',
+    file: {
+      path: 'src/parser.spec.ts',
+      content: `import { parse } from './parser'
+
+test('dynamic evaluation', () => {
+  const result = eval('1 + 1')
+  expect(result).toBe(2)
+})`,
+      language: 'typescript',
+    },
+    expected: [
+      // eval-usage suppressed: excludeFiles for .spec. files
+    ],
+  },
+
+  // -----------------------------------------------------------------------
+  // 110. eval-in-mock-file — eval in mock file (negative)
+  // -----------------------------------------------------------------------
+  {
+    name: 'eval-in-mock-file',
+    description: 'eval() in a mock file — should be suppressed by excludeFiles',
+    file: {
+      path: 'src/__mocks__/evaluator.mock.ts',
+      content: `export const mockEval = (code: string) => eval(code)`,
+      language: 'typescript',
+    },
+    expected: [
+      // eval-usage suppressed: excludeFiles for mock files
     ],
   },
 ]

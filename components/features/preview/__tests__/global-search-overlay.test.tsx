@@ -7,11 +7,18 @@ import type { ExtractedSymbol } from '@/components/features/code/hooks/use-symbo
 
 /* ── Hoisted mocks (available to vi.mock factories) ───────────────── */
 
-const { mockSearchIndex, mockBuildSearchRegex, mockExtractSymbols } = vi.hoisted(() => ({
-  mockSearchIndex: vi.fn((): SearchResult[] => []),
-  mockBuildSearchRegex: vi.fn((): RegExp | null => null),
-  mockExtractSymbols: vi.fn((): ExtractedSymbol[] => []),
-}))
+const { mockSearchIndex, mockBuildSearchRegex, mockExtractSymbols, mockSearchInWorker, mockCancelPendingSearches } = vi.hoisted(() => {
+  const mockSearchIndex = vi.fn((): SearchResult[] => [])
+  return {
+    mockSearchIndex,
+    mockBuildSearchRegex: vi.fn((): RegExp | null => null),
+    mockExtractSymbols: vi.fn((): ExtractedSymbol[] => []),
+    mockSearchInWorker: vi.fn((...args: Parameters<typeof mockSearchIndex>) =>
+      Promise.resolve(mockSearchIndex(...args)),
+    ),
+    mockCancelPendingSearches: vi.fn(),
+  }
+})
 
 /* ── Mock lucide-react icons as simple spans ──────────────────────── */
 
@@ -46,14 +53,37 @@ vi.mock('lucide-react', () => {
 /* ── Mock code-index ──────────────────────────────────────────────── */
 
 vi.mock('@/lib/code/code-index', () => ({
-  searchIndex: mockSearchIndex,
   buildSearchRegex: mockBuildSearchRegex,
+}))
+
+/* ── Mock search worker client ────────────────────────────────────── */
+
+vi.mock('@/lib/code/search-worker-client', () => ({
+  searchInWorker: mockSearchInWorker,
+  cancelPendingSearches: mockCancelPendingSearches,
 }))
 
 /* ── Mock extractSymbols ──────────────────────────────────────────── */
 
 vi.mock('@/components/features/code/hooks/use-symbol-extraction', () => ({
   extractSymbols: mockExtractSymbols,
+}))
+
+/* ── Mock @tanstack/react-virtual — jsdom has no scroll container dimensions ── */
+
+vi.mock('@tanstack/react-virtual', () => ({
+  useVirtualizer: vi.fn(({ count }: { count: number }) => ({
+    getVirtualItems: () =>
+      Array.from({ length: count }, (_, i) => ({
+        index: i,
+        start: i * 30,
+        end: (i + 1) * 30,
+        size: 30,
+        key: i,
+      })),
+    getTotalSize: () => count * 30,
+    scrollToIndex: vi.fn(),
+  })),
 }))
 
 /* ── Helpers ──────────────────────────────────────────────────────── */
@@ -355,13 +385,13 @@ describe('GlobalSearchOverlay', () => {
       )
 
       // Not yet called with full query before debounce
-      expect(mockSearchIndex).not.toHaveBeenCalledWith(
+      expect(mockSearchInWorker).not.toHaveBeenCalledWith(
         expect.anything(), 'hello', expect.anything(),
       )
 
-      act(() => { vi.advanceTimersByTime(300) })
+      await act(async () => { vi.advanceTimersByTime(300) })
 
-      expect(mockSearchIndex).toHaveBeenCalledWith(
+      expect(mockSearchInWorker).toHaveBeenCalledWith(
         expect.anything(),
         'hello',
         expect.objectContaining({ caseSensitive: false, regex: false, wholeWord: false }),
@@ -384,7 +414,7 @@ describe('GlobalSearchOverlay', () => {
       await user.type(
         screen.getByPlaceholderText('Search in file contents...'), 'hello',
       )
-      act(() => { vi.advanceTimersByTime(300) })
+      await act(async () => { vi.advanceTimersByTime(300) })
 
       expect(screen.getByText('src/app.ts')).toBeInTheDocument()
       expect(screen.getByText('10')).toBeInTheDocument()
@@ -399,7 +429,7 @@ describe('GlobalSearchOverlay', () => {
       await user.type(
         screen.getByPlaceholderText('Search in file contents...'), 'zzz',
       )
-      act(() => { vi.advanceTimersByTime(300) })
+      await act(async () => { vi.advanceTimersByTime(300) })
 
       expect(screen.getByText('No matches found')).toBeInTheDocument()
     })
@@ -423,14 +453,14 @@ describe('GlobalSearchOverlay', () => {
       await user.type(
         screen.getByPlaceholderText('Search in file contents...'), 'const',
       )
-      act(() => { vi.advanceTimersByTime(300) })
+      await act(async () => { vi.advanceTimersByTime(300) })
 
       await user.click(screen.getByText('15'))
 
       expect(props.onSelect).toHaveBeenCalledWith('src/app.ts', 15)
     })
 
-    it('toggles case-sensitive and passes to searchIndex', async () => {
+    it('toggles case-sensitive and passes to searchInWorker', async () => {
       mockSearchIndex.mockReturnValue([])
       const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
       renderOverlay()
@@ -444,9 +474,9 @@ describe('GlobalSearchOverlay', () => {
       await user.type(
         screen.getByPlaceholderText('Search in file contents...'), 'test',
       )
-      act(() => { vi.advanceTimersByTime(300) })
+      await act(async () => { vi.advanceTimersByTime(300) })
 
-      expect(mockSearchIndex).toHaveBeenCalledWith(
+      expect(mockSearchInWorker).toHaveBeenCalledWith(
         expect.anything(), 'test',
         expect.objectContaining({ caseSensitive: true }),
       )
@@ -490,7 +520,7 @@ describe('GlobalSearchOverlay', () => {
       await user.type(
         screen.getByPlaceholderText('Search in file contents...'), 'hello',
       )
-      act(() => { vi.advanceTimersByTime(300) })
+      await act(async () => { vi.advanceTimersByTime(300) })
 
       expect(screen.getByText(/3 matches in 2 files/)).toBeInTheDocument()
     })
@@ -513,7 +543,7 @@ describe('GlobalSearchOverlay', () => {
       await user.type(
         screen.getByPlaceholderText('Search in file contents...'), 'x',
       )
-      act(() => { vi.advanceTimersByTime(300) })
+      await act(async () => { vi.advanceTimersByTime(300) })
 
       expect(screen.getByText('src/app.ts')).toBeInTheDocument()
       expect(screen.queryByText('pnpm-lock.yaml')).not.toBeInTheDocument()
@@ -539,7 +569,7 @@ describe('GlobalSearchOverlay', () => {
       await user.type(
         screen.getByPlaceholderText('Search in file contents...'), 'x',
       )
-      act(() => { vi.advanceTimersByTime(300) })
+      await act(async () => { vi.advanceTimersByTime(300) })
 
       expect(screen.getByText('src/app.ts')).toBeInTheDocument()
       expect(screen.getByText('pnpm-lock.yaml')).toBeInTheDocument()
@@ -577,7 +607,7 @@ describe('GlobalSearchOverlay', () => {
       await user.click(screen.getByTitle('Hide enums'))
       await user.click(screen.getByTitle('Hide variables'))
 
-      act(() => { vi.advanceTimersByTime(300) })
+      await act(async () => { vi.advanceTimersByTime(300) })
 
       expect(screen.getByText(/symbols indexed — type to search/)).toBeInTheDocument()
     })
@@ -589,7 +619,7 @@ describe('GlobalSearchOverlay', () => {
       await user.type(
         screen.getByPlaceholderText('Search for symbols...'), 'foo',
       )
-      act(() => { vi.advanceTimersByTime(300) })
+      await act(async () => { vi.advanceTimersByTime(300) })
 
       expect(screen.getByText('foo')).toBeInTheDocument()
       expect(screen.queryByText('Bar')).not.toBeInTheDocument()
@@ -602,7 +632,7 @@ describe('GlobalSearchOverlay', () => {
       await user.type(
         screen.getByPlaceholderText('Search for symbols...'), 'nonexistent',
       )
-      act(() => { vi.advanceTimersByTime(300) })
+      await act(async () => { vi.advanceTimersByTime(300) })
 
       expect(screen.getByText('No matching symbols')).toBeInTheDocument()
     })
@@ -614,7 +644,7 @@ describe('GlobalSearchOverlay', () => {
       await user.type(
         screen.getByPlaceholderText('Search for symbols...'), 'foo',
       )
-      act(() => { vi.advanceTimersByTime(300) })
+      await act(async () => { vi.advanceTimersByTime(300) })
 
       await user.click(screen.getByText('foo'))
       expect(props.onSelect).toHaveBeenCalledWith('src/utils.ts', 1)
@@ -631,7 +661,7 @@ describe('GlobalSearchOverlay', () => {
       await user.type(
         screen.getByPlaceholderText('Search for symbols...'), 'foo',
       )
-      act(() => { vi.advanceTimersByTime(300) })
+      await act(async () => { vi.advanceTimersByTime(300) })
 
       expect(screen.queryByText('foo')).not.toBeInTheDocument()
     })
@@ -647,7 +677,7 @@ describe('GlobalSearchOverlay', () => {
       await user.type(
         screen.getByPlaceholderText('Search for symbols...'), 'foo',
       )
-      act(() => { vi.advanceTimersByTime(300) })
+      await act(async () => { vi.advanceTimersByTime(300) })
 
       expect(screen.getByText('foo')).toBeInTheDocument()
     })
@@ -659,7 +689,7 @@ describe('GlobalSearchOverlay', () => {
       await user.type(
         screen.getByPlaceholderText('Search for symbols...'), 'foo',
       )
-      act(() => { vi.advanceTimersByTime(300) })
+      await act(async () => { vi.advanceTimersByTime(300) })
 
       // 'fn' appears both as filter button label and as the result badge
       const fnElements = screen.getAllByText('fn')
@@ -734,7 +764,7 @@ describe('GlobalSearchOverlay', () => {
       await user.type(
         screen.getByPlaceholderText('Search in file contents...'), 'const',
       )
-      act(() => { vi.advanceTimersByTime(300) })
+      await act(async () => { vi.advanceTimersByTime(300) })
 
       await user.keyboard('{Enter}')
       expect(props.onSelect).toHaveBeenCalledWith('src/main.ts', 42)
@@ -753,7 +783,7 @@ describe('GlobalSearchOverlay', () => {
       await user.type(
         screen.getByPlaceholderText('Search for symbols...'), 'myFunc',
       )
-      act(() => { vi.advanceTimersByTime(300) })
+      await act(async () => { vi.advanceTimersByTime(300) })
 
       await user.keyboard('{Enter}')
       expect(props.onSelect).toHaveBeenCalledWith('src/mod.ts', 7)
@@ -892,8 +922,8 @@ describe('GlobalSearchOverlay', () => {
       expect(options[0]).toHaveAttribute('aria-selected', 'true')
     })
 
-    it('shows overflow message when matches exceed MAX_CODE_RESULTS', async () => {
-      // Create enough matches to exceed the cap
+    it('shows all matches in stats when many results exist', async () => {
+      // Create enough matches to previously exceed the cap
       const matches = Array.from({ length: 60 }, (_, i) => ({
         line: i + 1, content: `match ${i}`, column: 0, length: 5,
       }))
@@ -908,9 +938,9 @@ describe('GlobalSearchOverlay', () => {
       await user.type(
         screen.getByPlaceholderText('Search in file contents...'), 'match',
       )
-      act(() => { vi.advanceTimersByTime(300) })
+      await act(async () => { vi.advanceTimersByTime(300) })
 
-      expect(screen.getByText(/Showing 100 of 120 matches in 2 files/)).toBeInTheDocument()
+      expect(screen.getByText(/120 matches in 2 files/)).toBeInTheDocument()
     })
   })
 })

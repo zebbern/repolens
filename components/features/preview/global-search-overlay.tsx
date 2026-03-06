@@ -1,14 +1,17 @@
 "use client"
 
 import { useRef, useEffect, useState, useMemo, useCallback } from "react"
+import { useVirtualizer } from "@tanstack/react-virtual"
 import {
   Search, Code2, FileText, Braces, Box, Shapes, Type, List, Code,
   CaseSensitive, WholeWord, Regex, X, ChevronRight, ChevronDown,
   Filter, FilterX,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
-import type { CodeIndex, SearchResult, SearchMatch } from "@/lib/code/code-index"
-import { searchIndex, buildSearchRegex } from "@/lib/code/code-index"
+import type { CodeIndex, SearchMatch } from "@/lib/code/code-index"
+import { buildSearchRegex } from "@/lib/code/code-index"
+import { searchInWorker, cancelPendingSearches } from "@/lib/code/search-worker-client"
+import { fuzzyMatch } from "@/lib/code/fuzzy-match"
 import { extractSymbols, type ExtractedSymbol } from "@/components/features/code/hooks/use-symbol-extraction"
 
 /* ── Types ─────────────────────────────────────────────────────────── */
@@ -37,9 +40,6 @@ interface GlobalSearchOverlayProps {
 }
 
 /* ── Constants ─────────────────────────────────────────────────────── */
-
-const INITIAL_VISIBLE_COUNT = 100
-const VISIBLE_COUNT_INCREMENT = 100
 
 const GENERATED_FILE_PATTERNS = [
   /pnpm-lock\.yaml$/,
@@ -184,6 +184,41 @@ function HighlightedText({ text, query, options }: {
   )
 }
 
+/* ── Fuzzy highlighting ────────────────────────────────────────────── */
+
+function FuzzyHighlight({ text, indices }: { text: string; indices: number[] }) {
+  if (indices.length === 0) return <>{text}</>
+  const indexSet = new Set(indices)
+  const parts: React.ReactNode[] = []
+  let i = 0
+  while (i < text.length) {
+    if (indexSet.has(i)) {
+      let end = i
+      while (end < text.length && indexSet.has(end)) end++
+      parts.push(
+        <mark key={i} className="bg-yellow-400/30 text-text-primary rounded-sm px-px">
+          {text.slice(i, end)}
+        </mark>,
+      )
+      i = end
+    } else {
+      let end = i
+      while (end < text.length && !indexSet.has(end)) end++
+      parts.push(<span key={i}>{text.slice(i, end)}</span>)
+      i = end
+    }
+  }
+  return <>{parts}</>
+}
+
+/* ── Virtualization types ──────────────────────────────────────────── */
+
+type CodeFlatItem =
+  | { type: 'header'; file: string; matchCount: number; isCollapsed: boolean }
+  | { type: 'match'; item: CodeResultItem; selectableIndex: number }
+
+type CodeResultItem = { file: string; match: SearchMatch; language?: string }
+
 /* ── Main Component ────────────────────────────────────────────────── */
 
 export function GlobalSearchOverlay({
@@ -231,7 +266,6 @@ export function GlobalSearchOverlay({
 
   // Collapsible file groups (code tab)
   const [collapsedFiles, setCollapsedFiles] = useState<Set<string>>(new Set())
-  const [codeVisibleCount, setCodeVisibleCount] = useState(INITIAL_VISIBLE_COUNT)
 
   const toggleFileCollapse = useCallback((file: string) => {
     setCollapsedFiles(prev => {
@@ -242,72 +276,117 @@ export function GlobalSearchOverlay({
     })
   }, [])
 
-  const loadMoreCodeResults = useCallback(() => {
-    setCodeVisibleCount(prev => prev + VISIBLE_COUNT_INCREMENT)
-  }, [])
-
   // Reset selected index when query or tab changes
   useEffect(() => {
     setSelectedIndex(0)
     setCollapsedFiles(new Set())
-    setCodeVisibleCount(INITIAL_VISIBLE_COUNT)
   }, [debouncedQuery, activeTab])
 
   /* ── File search ──────────────────────────────────────────────── */
 
   const fileResults = useMemo(() => {
     if (activeTab !== 'files' || !query.trim()) return []
-    const q = query.toLowerCase()
-    return allFiles
-      .filter(f => f.path.toLowerCase().includes(q) || f.name.toLowerCase().includes(q))
-      .slice(0, 50)
-  }, [query, allFiles, activeTab])
-
-  /* ── Code search ──────────────────────────────────────────────── */
-
-  const { codeResults, totalCodeMatches } = useMemo(() => {
-    if (activeTab !== 'code' || !debouncedQuery.trim()) return { codeResults: [], totalCodeMatches: 0 }
-    const results = searchIndex(codeIndex, debouncedQuery, codeSearchOptions)
-    const filtered = excludeGenerated
-      ? results.filter(r => !GENERATED_FILE_PATTERNS.some(p => p.test(r.file)))
-      : results
-    const items: Array<{ file: string; match: SearchMatch; language?: string }> = []
-    let total = 0
-    for (const result of filtered) {
-      total += result.matches.length
-      for (const match of result.matches) {
-        items.push({ file: result.file, match, language: result.language })
+    const matches: Array<FileResult & { matchIndices: number[]; score: number }> = []
+    for (const f of allFiles) {
+      const result = fuzzyMatch(query, f.path)
+      if (result) {
+        matches.push({ ...f, matchIndices: result.indices, score: result.score })
       }
     }
-    return { codeResults: items, totalCodeMatches: total }
+    matches.sort((a, b) => b.score - a.score)
+    return matches.slice(0, 200)
+  }, [query, allFiles, activeTab])
+
+  /* ── Code search (Web Worker) ──────────────────────────────────── */
+
+  const [codeResults, setCodeResults] = useState<CodeResultItem[]>([])
+  const [totalCodeMatches, setTotalCodeMatches] = useState(0)
+  const [isSearching, setIsSearching] = useState(false)
+
+  useEffect(() => {
+    if (activeTab !== 'code' || !debouncedQuery.trim()) {
+      setCodeResults([])
+      setTotalCodeMatches(0)
+      setIsSearching(false)
+      return
+    }
+
+    let stale = false
+    setIsSearching(true)
+    cancelPendingSearches()
+
+    searchInWorker(codeIndex, debouncedQuery, codeSearchOptions)
+      .then(results => {
+        if (stale) return
+        const filtered = excludeGenerated
+          ? results.filter(r => !GENERATED_FILE_PATTERNS.some(p => p.test(r.file)))
+          : results
+        const items: CodeResultItem[] = []
+        let total = 0
+        for (const result of filtered) {
+          total += result.matches.length
+          for (const match of result.matches) {
+            items.push({ file: result.file, match, language: result.language })
+          }
+        }
+        setCodeResults(items)
+        setTotalCodeMatches(total)
+      })
+      .catch(err => {
+        if (!stale && err?.message !== 'Search cancelled') {
+          console.warn('[search-worker] Search failed:', err)
+        }
+      })
+      .finally(() => {
+        if (!stale) setIsSearching(false)
+      })
+
+    return () => { stale = true }
   }, [debouncedQuery, codeIndex, codeSearchOptions, activeTab, excludeGenerated])
 
-  // Visible code results: exclude collapsed files, limit by visibleCount
-  const visibleCodeItems = useMemo(() => {
-    const items: typeof codeResults = []
+  // Cancel pending worker searches on unmount
+  useEffect(() => {
+    return () => cancelPendingSearches()
+  }, [])
+
+  // Selectable code items: matches excluding collapsed files (for keyboard nav)
+  const codeSelectableItems = useMemo(() => {
+    return codeResults.filter(r => !collapsedFiles.has(r.file))
+  }, [codeResults, collapsedFiles])
+
+  // Flat items list for virtualized rendering (headers + matches)
+  const codeFlatItems = useMemo((): CodeFlatItem[] => {
+    if (activeTab !== 'code' || codeResults.length === 0) return []
+    const fileOrder: string[] = []
+    const fileMatchMap = new Map<string, CodeResultItem[]>()
     for (const r of codeResults) {
-      if (collapsedFiles.has(r.file)) continue
-      items.push(r)
-      if (items.length >= codeVisibleCount) break
+      if (!fileMatchMap.has(r.file)) {
+        fileOrder.push(r.file)
+        fileMatchMap.set(r.file, [])
+      }
+      fileMatchMap.get(r.file)!.push(r)
+    }
+    const items: CodeFlatItem[] = []
+    let selectableIndex = 0
+    for (const file of fileOrder) {
+      const matches = fileMatchMap.get(file)!
+      const isCollapsed = collapsedFiles.has(file)
+      items.push({ type: 'header', file, matchCount: matches.length, isCollapsed })
+      if (!isCollapsed) {
+        for (const m of matches) {
+          items.push({ type: 'match', item: m, selectableIndex })
+          selectableIndex++
+        }
+      }
     }
     return items
-  }, [codeResults, collapsedFiles, codeVisibleCount])
-
-  const hasMoreCodeResults = useMemo(() => {
-    let count = 0
-    for (const r of codeResults) {
-      if (collapsedFiles.has(r.file)) continue
-      count++
-      if (count > codeVisibleCount) return true
-    }
-    return false
-  }, [codeResults, collapsedFiles, codeVisibleCount])
+  }, [codeResults, collapsedFiles, activeTab])
 
   const codeResultStats = useMemo(() => {
     if (activeTab !== 'code' || !debouncedQuery.trim() || codeResults.length === 0) return null
     const fileCount = new Set(codeResults.map(r => r.file)).size
-    return { totalMatches: totalCodeMatches, fileCount, visibleCount: visibleCodeItems.length }
-  }, [debouncedQuery, codeResults, activeTab, totalCodeMatches, visibleCodeItems.length])
+    return { totalMatches: totalCodeMatches, fileCount }
+  }, [debouncedQuery, codeResults, activeTab, totalCodeMatches])
 
   /* ── Symbol search ────────────────────────────────────────────── */
 
@@ -339,7 +418,6 @@ export function GlobalSearchOverlay({
         if (!q) return true
         return s.symbol.name.toLowerCase().includes(q)
       })
-      .slice(0, INITIAL_VISIBLE_COUNT)
   }, [debouncedQuery, allSymbols, activeKinds, activeTab])
 
   /* ── Navigable items ──────────────────────────────────────────── */
@@ -347,7 +425,7 @@ export function GlobalSearchOverlay({
   const itemCount = activeTab === 'files'
     ? fileResults.length
     : activeTab === 'code'
-      ? visibleCodeItems.length
+      ? codeSelectableItems.length
       : symbolResults.length
 
   // Clamp selectedIndex when itemCount shrinks (e.g. file collapse)
@@ -360,13 +438,13 @@ export function GlobalSearchOverlay({
       const result = fileResults[index]
       if (result) onSelect(result.path)
     } else if (activeTab === 'code') {
-      const result = visibleCodeItems[index]
+      const result = codeSelectableItems[index]
       if (result) onSelect(result.file, result.match.line)
     } else {
       const result = symbolResults[index]
       if (result) onSelect(result.filePath, result.symbol.line)
     }
-  }, [activeTab, fileResults, visibleCodeItems, symbolResults, onSelect])
+  }, [activeTab, fileResults, codeSelectableItems, symbolResults, onSelect])
 
   /* ── Keyboard ─────────────────────────────────────────────────── */
 
@@ -399,14 +477,6 @@ export function GlobalSearchOverlay({
     }
 
   }, [onClose, itemCount, selectedIndex, selectItem, activeTab])
-
-  // Scroll selected item into view
-  useEffect(() => {
-    const container = resultsRef.current
-    if (!container) return
-    const item = container.querySelector(`[data-index="${selectedIndex}"]`) as HTMLElement | null
-    if (item) item.scrollIntoView({ block: 'nearest' })
-  }, [selectedIndex])
 
   /* ── Placeholder text ─────────────────────────────────────────── */
 
@@ -501,7 +571,7 @@ export function GlobalSearchOverlay({
         )}
 
         {/* Results */}
-        <div ref={resultsRef} id="search-results" role="listbox" className="max-h-80 overflow-y-auto py-1">
+        <div ref={resultsRef} id="search-results" role="listbox" className="max-h-80 overflow-y-auto">
           {activeTab === 'files' && (
             <FileResultsList
               query={query}
@@ -509,22 +579,20 @@ export function GlobalSearchOverlay({
               totalFileCount={allFiles.length}
               selectedIndex={selectedIndex}
               onSelect={onSelect}
+              scrollRef={resultsRef}
             />
           )}
           {activeTab === 'code' && (
             <CodeResultsList
               query={debouncedQuery}
-              results={codeResults}
-              codeVisibleCount={visibleCodeItems.length}
+              flatItems={codeFlatItems}
               stats={codeResultStats}
               searchOptions={codeSearchOptions}
               selectedIndex={selectedIndex}
               onSelect={onSelect}
-              collapsedFiles={collapsedFiles}
               onToggleFile={toggleFileCollapse}
-              hasMore={hasMoreCodeResults}
-              onLoadMore={loadMoreCodeResults}
-              scrollContainerRef={resultsRef}
+              scrollRef={resultsRef}
+              isSearching={isSearching}
             />
           )}
           {activeTab === 'symbols' && (
@@ -534,6 +602,7 @@ export function GlobalSearchOverlay({
               totalSymbolCount={allSymbols.length}
               selectedIndex={selectedIndex}
               onSelect={onSelect}
+              scrollRef={resultsRef}
             />
           )}
         </div>
@@ -550,13 +619,28 @@ function FileResultsList({
   totalFileCount,
   selectedIndex,
   onSelect,
+  scrollRef,
 }: {
   query: string
-  results: FileResult[]
+  results: Array<FileResult & { matchIndices: number[]; score: number }>
   totalFileCount: number
   selectedIndex: number
   onSelect: (path: string, line?: number) => void
+  scrollRef: React.RefObject<HTMLDivElement | null>
 }) {
+  const virtualizer = useVirtualizer({
+    count: results.length,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: () => 33,
+    overscan: 20,
+  })
+
+  useEffect(() => {
+    if (selectedIndex >= 0 && selectedIndex < results.length) {
+      virtualizer.scrollToIndex(selectedIndex, { align: 'auto' })
+    }
+  }, [selectedIndex, virtualizer, results.length])
+
   if (!query.trim()) {
     return (
       <div className="px-3 py-4 text-center text-xs text-text-muted">
@@ -569,30 +653,44 @@ function FileResultsList({
   }
   return (
     <>
-      {results.map((f, i) => (
-        <button
-          key={f.path}
-          id={`search-result-${i}`}
-          data-index={i}
-          role="option"
-          aria-selected={i === selectedIndex}
-          onClick={() => onSelect(f.path)}
-          className={cn(
-            "w-full flex items-center gap-2 px-3 py-2 text-left transition-colors duration-150",
-            "focus-visible:outline-none group",
-            i === selectedIndex ? "bg-foreground/10" : "hover:bg-foreground/5",
-          )}
-        >
-          <Code2 className="h-3.5 w-3.5 text-text-muted shrink-0" />
-          <div className="flex flex-col min-w-0 flex-1">
-            <span className="text-xs text-text-primary truncate group-hover:text-white">{f.name}</span>
-            <span className="text-[10px] text-text-muted truncate">{f.path}</span>
-          </div>
-          <span className="text-[10px] text-text-muted tabular-nums shrink-0">
-            L{f.lineCount}
-          </span>
-        </button>
-      ))}
+      <div style={{ height: virtualizer.getTotalSize(), position: 'relative' }}>
+        {virtualizer.getVirtualItems().map(virtualRow => {
+          const f = results[virtualRow.index]
+          const i = virtualRow.index
+          return (
+            <button
+              key={f.path}
+              id={`search-result-${i}`}
+              data-index={i}
+              role="option"
+              aria-selected={i === selectedIndex}
+              onClick={() => onSelect(f.path)}
+              style={{
+                position: 'absolute',
+                top: virtualRow.start,
+                height: virtualRow.size,
+                width: '100%',
+              }}
+              className={cn(
+                "flex items-center gap-2 px-3 text-left transition-colors duration-150",
+                "focus-visible:outline-none group",
+                i === selectedIndex ? "bg-foreground/10" : "hover:bg-foreground/5",
+              )}
+            >
+              <Code2 className="h-3.5 w-3.5 text-text-muted shrink-0" />
+              <div className="flex flex-col min-w-0 flex-1">
+                <span className="text-xs text-text-primary truncate group-hover:text-white">{f.name}</span>
+                <span className="text-[10px] text-text-muted truncate">
+                  <FuzzyHighlight text={f.path} indices={f.matchIndices} />
+                </span>
+              </div>
+              <span className="text-[10px] text-text-muted tabular-nums shrink-0">
+                L{f.lineCount}
+              </span>
+            </button>
+          )
+        })}
+      </div>
       <div className="px-3 py-1.5 text-[10px] text-text-muted text-center border-t border-foreground/[0.04]">
         {results.length} file{results.length !== 1 ? 's' : ''} found
       </div>
@@ -600,51 +698,48 @@ function FileResultsList({
   )
 }
 
-type CodeResultItem = { file: string; match: SearchMatch; language?: string }
-
 function CodeResultsList({
   query,
-  results,
-  codeVisibleCount,
+  flatItems,
   stats,
   searchOptions,
   selectedIndex,
   onSelect,
-  collapsedFiles,
   onToggleFile,
-  hasMore,
-  onLoadMore,
-  scrollContainerRef,
+  scrollRef,
+  isSearching,
 }: {
   query: string
-  results: CodeResultItem[]
-  codeVisibleCount: number
-  stats: { totalMatches: number; fileCount: number; visibleCount: number } | null
+  flatItems: CodeFlatItem[]
+  stats: { totalMatches: number; fileCount: number } | null
   searchOptions: { caseSensitive: boolean; regex: boolean; wholeWord: boolean }
   selectedIndex: number
   onSelect: (path: string, line?: number) => void
-  collapsedFiles: Set<string>
   onToggleFile: (file: string) => void
-  hasMore: boolean
-  onLoadMore: () => void
-  scrollContainerRef: React.RefObject<HTMLDivElement | null>
+  scrollRef: React.RefObject<HTMLDivElement | null>
+  isSearching: boolean
 }) {
-  const sentinelRef = useRef<HTMLDivElement>(null)
+  const estimateSize = useCallback(
+    (index: number) => flatItems[index]?.type === 'header' ? 40 : 28,
+    [flatItems],
+  )
 
-  // Intersection observer for infinite scroll
+  const virtualizer = useVirtualizer({
+    count: flatItems.length,
+    getScrollElement: () => scrollRef.current,
+    estimateSize,
+    overscan: 20,
+  })
+
   useEffect(() => {
-    if (!hasMore) return
-    const sentinel = sentinelRef.current
-    const container = scrollContainerRef.current
-    if (!sentinel || !container) return
-
-    const observer = new IntersectionObserver(
-      ([entry]) => { if (entry.isIntersecting) onLoadMore() },
-      { root: container, threshold: 0 },
+    if (selectedIndex < 0) return
+    const flatIdx = flatItems.findIndex(
+      item => item.type === 'match' && item.selectableIndex === selectedIndex,
     )
-    observer.observe(sentinel)
-    return () => observer.disconnect()
-  }, [hasMore, onLoadMore, scrollContainerRef])
+    if (flatIdx >= 0) {
+      virtualizer.scrollToIndex(flatIdx, { align: 'auto' })
+    }
+  }, [selectedIndex, flatItems, virtualizer])
 
   if (!query.trim()) {
     return (
@@ -653,97 +748,83 @@ function CodeResultsList({
       </div>
     )
   }
-  if (results.length === 0) {
+  if (isSearching && flatItems.length === 0) {
+    return <div className="px-3 py-4 text-center text-xs text-text-muted">Searching…</div>
+  }
+  if (flatItems.length === 0) {
     return <div className="px-3 py-4 text-center text-xs text-text-muted">No matches found</div>
   }
 
-  // Group all results by file (preserving order)
-  const fileOrder: string[] = []
-  const fileMatches = new Map<string, CodeResultItem[]>()
-  for (const r of results) {
-    if (!fileMatches.has(r.file)) {
-      fileOrder.push(r.file)
-      fileMatches.set(r.file, [])
-    }
-    fileMatches.get(r.file)!.push(r)
-  }
-
-  let visibleIdx = 0
-  let visibleCount = 0
-
   return (
     <>
-      {/* Stats header */}
       {stats && (
         <div className="px-3 py-1.5 text-[10px] text-text-muted text-center border-b border-foreground/[0.04]">
-          {stats.visibleCount < stats.totalMatches
-            ? `Showing ${stats.visibleCount} of ${stats.totalMatches} matches in ${stats.fileCount} file${stats.fileCount !== 1 ? 's' : ''}`
-            : `${stats.totalMatches} match${stats.totalMatches !== 1 ? 'es' : ''} in ${stats.fileCount} file${stats.fileCount !== 1 ? 's' : ''}`
-          }
+          {stats.totalMatches} match{stats.totalMatches !== 1 ? 'es' : ''} in {stats.fileCount} file{stats.fileCount !== 1 ? 's' : ''}
         </div>
       )}
-      {fileOrder.map(file => {
-        const matches = fileMatches.get(file)!
-        const isCollapsed = collapsedFiles.has(file)
-
-        const matchElements: React.JSX.Element[] = []
-        if (!isCollapsed) {
-          for (const r of matches) {
-            if (visibleCount >= codeVisibleCount) break
-            visibleCount++
-            const idx = visibleIdx++
-            matchElements.push(
+      <div style={{ height: virtualizer.getTotalSize(), position: 'relative' }}>
+        {virtualizer.getVirtualItems().map(virtualRow => {
+          const flatItem = flatItems[virtualRow.index]
+          if (flatItem.type === 'header') {
+            return (
               <button
-                key={`${r.file}-${r.match.line}-${r.match.column}`}
-                id={`search-result-${idx}`}
-                data-index={idx}
-                role="option"
-                aria-selected={idx === selectedIndex}
-                onClick={() => onSelect(r.file, r.match.line)}
-                className={cn(
-                  "w-full flex items-center gap-2 px-3 py-1 text-left transition-colors duration-150",
-                  "focus-visible:outline-none",
-                  idx === selectedIndex ? "bg-foreground/10" : "hover:bg-foreground/5",
-                )}
+                key={`header-${flatItem.file}`}
+                type="button"
+                onClick={() => onToggleFile(flatItem.file)}
+                aria-expanded={!flatItem.isCollapsed}
+                style={{
+                  position: 'absolute',
+                  top: virtualRow.start,
+                  height: virtualRow.size,
+                  width: '100%',
+                }}
+                className="flex items-center gap-1.5 px-3 bg-muted/40 border-b border-border/30 hover:bg-muted/60 transition-colors"
               >
-                <span className="text-[10px] text-text-muted tabular-nums w-8 text-right shrink-0">
-                  {r.match.line}
-                </span>
-                <span className="text-xs text-text-secondary truncate font-mono">
-                  <HighlightedText
-                    text={r.match.content.trim()}
-                    query={query}
-                    options={searchOptions}
-                  />
-                </span>
-              </button>,
+                {flatItem.isCollapsed
+                  ? <ChevronRight className="h-3 w-3 text-text-muted shrink-0" />
+                  : <ChevronDown className="h-3 w-3 text-text-muted shrink-0" />
+                }
+                <Code2 className="h-3 w-3 text-blue-400 shrink-0" />
+                <span className="text-[10px] font-semibold text-text-secondary truncate">{flatItem.file}</span>
+              </button>
             )
           }
-        }
-
-        // Skip file groups with no visible matches (beyond visible limit)
-        if (matchElements.length === 0 && !isCollapsed) return null
-
-        return (
-          <div key={file}>
+          const r = flatItem.item
+          const idx = flatItem.selectableIndex
+          return (
             <button
-              type="button"
-              onClick={() => onToggleFile(file)}
-              aria-expanded={!isCollapsed}
-              className="w-full flex items-center gap-1.5 px-3 py-1.5 bg-muted/40 border-b border-border/30 sticky top-0 z-10 hover:bg-muted/60 transition-colors"
+              key={`${r.file}-${r.match.line}-${r.match.column}`}
+              id={`search-result-${idx}`}
+              data-index={idx}
+              role="option"
+              aria-selected={idx === selectedIndex}
+              onClick={() => onSelect(r.file, r.match.line)}
+              style={{
+                position: 'absolute',
+                top: virtualRow.start,
+                height: virtualRow.size,
+                width: '100%',
+              }}
+              className={cn(
+                "flex items-center gap-2 px-3 text-left transition-colors duration-150",
+                "focus-visible:outline-none",
+                idx === selectedIndex ? "bg-foreground/10" : "hover:bg-foreground/5",
+              )}
             >
-              {isCollapsed
-                ? <ChevronRight className="h-3 w-3 text-text-muted shrink-0" />
-                : <ChevronDown className="h-3 w-3 text-text-muted shrink-0" />
-              }
-              <Code2 className="h-3 w-3 text-blue-400 shrink-0" />
-              <span className="text-[10px] font-semibold text-text-secondary truncate">{file}</span>
+              <span className="text-[10px] text-text-muted tabular-nums w-8 text-right shrink-0">
+                {r.match.line}
+              </span>
+              <span className="text-xs text-text-secondary truncate font-mono">
+                <HighlightedText
+                  text={r.match.content.trim()}
+                  query={query}
+                  options={searchOptions}
+                />
+              </span>
             </button>
-            {matchElements}
-          </div>
-        )
-      })}
-      {hasMore && <div ref={sentinelRef} className="h-1" />}
+          )
+        })}
+      </div>
     </>
   )
 }
@@ -754,13 +835,28 @@ function SymbolResultsList({
   totalSymbolCount,
   selectedIndex,
   onSelect,
+  scrollRef,
 }: {
   query: string
   results: SymbolResult[]
   totalSymbolCount: number
   selectedIndex: number
   onSelect: (path: string, line?: number) => void
+  scrollRef: React.RefObject<HTMLDivElement | null>
 }) {
+  const virtualizer = useVirtualizer({
+    count: results.length,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: () => 30,
+    overscan: 20,
+  })
+
+  useEffect(() => {
+    if (selectedIndex >= 0 && selectedIndex < results.length) {
+      virtualizer.scrollToIndex(selectedIndex, { align: 'auto' })
+    }
+  }, [selectedIndex, virtualizer, results.length])
+
   if (!query.trim() && results.length === 0) {
     return (
       <div className="px-3 py-4 text-center text-xs text-text-muted">
@@ -775,38 +871,48 @@ function SymbolResultsList({
   }
   return (
     <>
-      {results.map((r, i) => {
-        const Icon = SYMBOL_ICON_MAP[r.symbol.kind]
-        const color = SYMBOL_KIND_COLORS[r.symbol.kind]
-        return (
-          <button
-            key={`${r.filePath}-${r.symbol.name}-${r.symbol.line}-${i}`}
-            id={`search-result-${i}`}
-            data-index={i}
-            role="option"
-            aria-selected={i === selectedIndex}
-            onClick={() => onSelect(r.filePath, r.symbol.line)}
-            className={cn(
-              "w-full flex items-center gap-2 px-3 py-1.5 text-left transition-colors duration-150",
-              "focus-visible:outline-none group",
-              i === selectedIndex ? "bg-foreground/10" : "hover:bg-foreground/5",
-            )}
-          >
-            <Icon className={cn("h-3.5 w-3.5 shrink-0", color)} />
-            <span className={cn("text-xs truncate", r.symbol.isExported ? "text-text-primary font-medium" : "text-text-secondary")}>
-              {r.symbol.name}
-            </span>
-            <span className={cn(
-              "text-[10px] px-1 py-0.5 rounded border shrink-0",
-              "border-foreground/10 text-text-muted"
-            )}>
-              {SYMBOL_KIND_LABELS[r.symbol.kind]}
-            </span>
-            <span className="text-[10px] text-text-muted truncate ml-auto">{r.fileName}</span>
-            <span className="text-[10px] text-text-muted tabular-nums shrink-0">:{r.symbol.line}</span>
-          </button>
-        )
-      })}
+      <div style={{ height: virtualizer.getTotalSize(), position: 'relative' }}>
+        {virtualizer.getVirtualItems().map(virtualRow => {
+          const r = results[virtualRow.index]
+          const i = virtualRow.index
+          const Icon = SYMBOL_ICON_MAP[r.symbol.kind]
+          const color = SYMBOL_KIND_COLORS[r.symbol.kind]
+          return (
+            <button
+              key={`${r.filePath}-${r.symbol.name}-${r.symbol.line}-${i}`}
+              id={`search-result-${i}`}
+              data-index={i}
+              role="option"
+              aria-selected={i === selectedIndex}
+              onClick={() => onSelect(r.filePath, r.symbol.line)}
+              style={{
+                position: 'absolute',
+                top: virtualRow.start,
+                height: virtualRow.size,
+                width: '100%',
+              }}
+              className={cn(
+                "flex items-center gap-2 px-3 text-left transition-colors duration-150",
+                "focus-visible:outline-none group",
+                i === selectedIndex ? "bg-foreground/10" : "hover:bg-foreground/5",
+              )}
+            >
+              <Icon className={cn("h-3.5 w-3.5 shrink-0", color)} />
+              <span className={cn("text-xs truncate", r.symbol.isExported ? "text-text-primary font-medium" : "text-text-secondary")}>
+                {r.symbol.name}
+              </span>
+              <span className={cn(
+                "text-[10px] px-1 py-0.5 rounded border shrink-0",
+                "border-foreground/10 text-text-muted"
+              )}>
+                {SYMBOL_KIND_LABELS[r.symbol.kind]}
+              </span>
+              <span className="text-[10px] text-text-muted truncate ml-auto">{r.fileName}</span>
+              <span className="text-[10px] text-text-muted tabular-nums shrink-0">:{r.symbol.line}</span>
+            </button>
+          )
+        })}
+      </div>
       <div className="px-3 py-1.5 text-[10px] text-text-muted text-center border-t border-foreground/[0.04]">
         {results.length} symbol{results.length !== 1 ? 's' : ''} found
       </div>

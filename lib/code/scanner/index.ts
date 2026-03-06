@@ -12,6 +12,8 @@ export type {
 
 export { scanIssues, scanIssuesAsync, getAllRules, clearScanCache } from './scanner'
 
+export { scanInWorker, terminateScanWorker } from './scanner-client'
+
 export {
   calculateCoverage,
   getComplianceItems,

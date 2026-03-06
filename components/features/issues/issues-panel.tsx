@@ -3,7 +3,7 @@
 import { useState, useMemo, useCallback, useRef, useEffect } from 'react'
 import type { CodeIndex } from '@/lib/code/code-index'
 import {
-  scanIssuesAsync,
+  scanInWorker,
   generateFix,
   validateFinding,
   type ScanResults,
@@ -64,7 +64,7 @@ export function IssuesPanel({ codeIndex, onNavigateToFile }: IssuesPanelProps) {
     let stale = false
     setScanLoading(true)
 
-    scanIssuesAsync(codeIndex, analysis, { isStale: () => stale })
+    scanInWorker(codeIndex, analysis)
       .then(scanResults => {
         if (stale) return
         setResults(scanResults)

@@ -8,7 +8,7 @@ import { useFileOperations } from "./hooks/use-file-operations"
 import { useSearch } from "./hooks/use-search"
 import { useReplace } from "./hooks/use-replace"
 import { useDownloads } from "./hooks/use-downloads"
-import { scanIssuesAsync } from "@/lib/code/issue-scanner"
+import { scanInWorker } from "@/lib/code/issue-scanner"
 import { flattenFiles } from "@/lib/code/code-index"
 import type { CodeIssue } from "@/lib/code/issue-scanner"
 import type { FileIssueCounts } from "./file-tree-node"
@@ -270,9 +270,9 @@ export function CodeBrowser({ navigateToFile, navigateToLine, onNavigateComplete
     let stale = false
     setScanLoading(true)
 
-    scanIssuesAsync(codeIndex, codebaseAnalysis, { isStale: () => stale })
+    scanInWorker(codeIndex, codebaseAnalysis)
       .then(results => {
-        if (stale || !results) return
+        if (stale) return
         const map = new Map<string, FileIssueCounts>()
         for (const issue of results.issues) {
           const existing = map.get(issue.file) ?? { critical: 0, warning: 0, info: 0 }

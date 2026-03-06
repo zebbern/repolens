@@ -81,7 +81,7 @@ const mockScanResults = {
 }
 
 vi.mock('@/lib/code/issue-scanner', () => ({
-  scanIssuesAsync: vi.fn((codeIndex: any) => {
+  scanInWorker: vi.fn((codeIndex: any) => {
     if (codeIndex.totalFiles === 0) return Promise.resolve(null)
     return Promise.resolve(mockScanResults)
   }),
@@ -172,7 +172,7 @@ describe('IssuesPanel', () => {
   it('renders nothing useful when codeIndex has zero files', () => {
     const emptyIndex = { totalFiles: 0, files: new Map() }
     const { container } = render(<IssuesPanel codeIndex={emptyIndex as any} />)
-    // With 0 files, scanIssuesAsync is not called → no issue-summary rendered
+    // With 0 files, scanInWorker is not called → no issue-summary rendered
     expect(screen.queryByTestId('issue-summary')).not.toBeInTheDocument()
   })
 })

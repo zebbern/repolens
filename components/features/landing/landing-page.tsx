@@ -46,7 +46,7 @@ export function LandingPage({
 
   return (
     <div className="flex h-full flex-col overflow-auto">
-      <div className="mx-auto flex w-full max-w-lg flex-col items-center justify-center gap-10 px-6 py-16 sm:py-24 min-h-[calc(100vh-3rem)]">
+      <div className="mx-auto flex w-full max-w-lg flex-1 flex-col items-center justify-center gap-10 px-6 py-16 sm:py-24">
         {/* ── Hero Section ── */}
         <section className="flex flex-col items-center gap-8 text-center">
           {/* Icon cluster */}

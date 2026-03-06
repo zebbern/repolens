@@ -2114,4 +2114,233 @@ export async function navigateAction(searchParams: { dest: string }) {
       { ruleId: 'nextjs-redirect-input', line: 3, verdict: 'tp' },
     ],
   },
+
+  // -----------------------------------------------------------------------
+  // 96. typescript-interface-secrets — TypeScript interface with secret fields (negative)
+  // -----------------------------------------------------------------------
+  {
+    name: 'typescript-interface-secrets',
+    description: 'TypeScript interface with password/secret/apiKey fields — type definitions not secrets',
+    file: {
+      path: 'src/types/config.ts',
+      content: `interface AuthConfig {
+  password: string;
+  secret: string;
+  apiKey: string;
+  token: string;
+}
+export type { AuthConfig };`,
+      language: 'typescript',
+    },
+    expected: [
+      // Type annotation suppression + excludePattern (interface keyword) should prevent fires
+    ],
+  },
+
+  // -----------------------------------------------------------------------
+  // 97. test-file-eval — eval in test file (negative)
+  // -----------------------------------------------------------------------
+  {
+    name: 'test-file-eval',
+    description: 'eval() in a test file — regex excludeFiles suppresses, but AST-based detection leaks through',
+    file: {
+      path: 'src/__tests__/expression.test.ts',
+      content: `describe('expression parser', () => {
+  it('evaluates simple math', () => {
+    expect(eval('2 + 2')).toBe(4);
+  });
+});`,
+      language: 'typescript',
+    },
+    expected: [
+      // AST analyzer produces ast-eval-usage (no excludeFiles check), normalized to eval-usage
+      { ruleId: 'eval-usage', line: 3, verdict: 'fp' },
+    ],
+  },
+
+  // -----------------------------------------------------------------------
+  // 98. test-file-hardcoded-secret — secrets in test file (negative)
+  // -----------------------------------------------------------------------
+  {
+    name: 'test-file-hardcoded-secret',
+    description: 'Hardcoded tokens in test file — excludeFiles suppresses hardcoded-secret/password',
+    file: {
+      path: 'src/__tests__/auth.test.ts',
+      content: `const TEST_API_KEY = 'sk-test-1234567890abcdef1234567890abcdef';
+const TEST_PASSWORD = 'testpassword123';
+describe('auth', () => {
+  it('validates', () => {
+    expect(validate(TEST_API_KEY)).toBe(true);
+  });
+});`,
+      language: 'typescript',
+    },
+    expected: [
+      // hardcoded-secret and hardcoded-password both excludeFiles for \.test\. files
+    ],
+  },
+
+  // -----------------------------------------------------------------------
+  // 99. jsdoc-password-mention — JSDoc with password in comments (negative)
+  // -----------------------------------------------------------------------
+  {
+    name: 'jsdoc-password-mention',
+    description: 'JSDoc comment mentioning password — comment context should suppress hardcoded-password',
+    file: {
+      path: 'src/services/auth.ts',
+      content: `/**
+ * Validates the user password against the stored hash.
+ * @param password - The plaintext password to verify
+ * @returns true if the password matches
+ */
+export function validatePassword(password: string): boolean {
+  return bcrypt.compareSync(password, storedHash);
+}`,
+      language: 'typescript',
+    },
+    expected: [
+      // Comments mentioning password should not trigger hardcoded-password
+      // (no assignment pattern like password = "value", just JSDoc text)
+    ],
+  },
+
+  // -----------------------------------------------------------------------
+  // 100. readme-example-code — comment with URL patterns (negative)
+  // -----------------------------------------------------------------------
+  {
+    name: 'readme-example-code',
+    description: 'Comments with URL and localStorage examples — should not trigger security rules',
+    file: {
+      path: 'docs/api-reference.ts',
+      content: `// Example: fetch('https://api.example.com/login?token=my-token')
+// Usage: localStorage.setItem('apiKey', response.token)
+export const API_DOCS_VERSION = '1.0';`,
+      language: 'typescript',
+    },
+    expected: [
+      // Comment lines — context classifier suppresses non-critical rules on comments
+      // sensitive-data-in-url and localstorage-secret patterns are in comments
+    ],
+  },
+
+  // -----------------------------------------------------------------------
+  // 101. crypto-best-practices — proper crypto usage (negative)
+  // -----------------------------------------------------------------------
+  {
+    name: 'crypto-best-practices',
+    description: 'Proper crypto usage with random key/IV and strong cipher — no crypto rules should fire',
+    file: {
+      path: 'src/crypto/secure.ts',
+      content: `import crypto from 'crypto'
+export function secureEncrypt(data: string) {
+  const key = crypto.randomBytes(32)
+  const iv = crypto.randomBytes(16)
+  const cipher = crypto.createCipheriv('aes-256-gcm', key, iv)
+  return cipher.update(data, 'utf8', 'hex') + cipher.final('hex')
+}`,
+      language: 'typescript',
+    },
+    expected: [
+      // aes-256-gcm is a strong cipher, randomBytes for key and IV — no weak crypto rules fire
+    ],
+  },
+
+  // -----------------------------------------------------------------------
+  // 102. nextjs-api-with-auth — Next.js route with getServerSession (negative)
+  // -----------------------------------------------------------------------
+  {
+    name: 'nextjs-api-with-auth-session',
+    description: 'Next.js API route with getServerSession — nextjs-api-no-auth should NOT fire',
+    file: {
+      path: 'pages/api/protected.ts',
+      content: `import { getServerSession } from 'next-auth'
+export default async function handler(req, res) {
+  const session = await getServerSession(req, res)
+  if (!session) return res.status(401).json({ error: 'Unauthorized' })
+  res.json({ data: [] })
+}`,
+      language: 'typescript',
+    },
+    expected: [
+      // getServerSession present → nextjs-api-no-auth should NOT fire
+      // But async function without try-catch triggers composite-async-no-try-catch
+      { ruleId: 'composite-async-no-try-catch', line: 2, verdict: 'tp' },
+    ],
+  },
+
+  // -----------------------------------------------------------------------
+  // 103. minified-code-snippet — dense one-liner with multiple triggers
+  // -----------------------------------------------------------------------
+  {
+    name: 'minified-code-snippet',
+    description: 'Minified code with eval, new Function, password — tests scanner on dense patterns',
+    file: {
+      path: 'src/legacy-bundle.js',
+      content: `var a=function(b){return eval(b)},c=function(d){return new Function(d)},e="password="+f;`,
+      language: 'javascript',
+    },
+    expected: [
+      // eval-usage fires on eval(b) and new Function(d)
+      // Path avoids dist/ (SKIP_VENDORED) so scanner processes it
+      { ruleId: 'eval-usage', line: 1, verdict: 'tp' },
+    ],
+  },
+
+  // -----------------------------------------------------------------------
+  // 104. env-example-file — .env.example with placeholder secrets (negative)
+  // -----------------------------------------------------------------------
+  {
+    name: 'env-example-file-fixture',
+    description: '.env.example with placeholder values — excludeFiles suppresses secrets on .env.example',
+    file: {
+      path: '.env.example',
+      content: `DATABASE_URL=postgresql://user:password@localhost:5432/db
+API_KEY=your-api-key-here
+SECRET_KEY=change-me-in-production
+REDIS_URL=redis://localhost:6379`,
+      language: 'plaintext',
+    },
+    expected: [
+      // .env.example is in excludeFiles for hardcoded-secret and hardcoded-password
+    ],
+  },
+
+  // -----------------------------------------------------------------------
+  // 105. docker-compose-passwords — YAML with hardcoded passwords
+  // -----------------------------------------------------------------------
+  {
+    name: 'docker-compose-passwords',
+    description: 'Docker compose YAML with POSTGRES_PASSWORD — excludeFiles suppresses on .yml',
+    file: {
+      path: 'docker-compose.yml',
+      content: `services:
+  db:
+    image: postgres:15
+    environment:
+      POSTGRES_PASSWORD: supersecretpassword
+      POSTGRES_DB: myapp`,
+      language: 'yaml',
+    },
+    expected: [
+      // docker-compose and .ya?ml$ are in excludeFiles for hardcoded-password and hardcoded-secret
+    ],
+  },
+
+  // -----------------------------------------------------------------------
+  // 106. github-actions-secrets — ${{ secrets.* }} vault refs (negative)
+  // -----------------------------------------------------------------------
+  {
+    name: 'github-actions-secrets',
+    description: 'GitHub Actions with ${{ secrets.* }} — vault references not hardcoded secrets',
+    file: {
+      path: '.github/workflows/deploy.yml',
+      content: `env:
+  API_KEY: \${{ secrets.API_KEY }}
+  DATABASE_URL: \${{ secrets.DATABASE_URL }}`,
+      language: 'yaml',
+    },
+    expected: [
+      // .ya?ml$ in excludeFiles + ${{ secrets.* }} are vault references, not hardcoded values
+    ],
+  },
 ]

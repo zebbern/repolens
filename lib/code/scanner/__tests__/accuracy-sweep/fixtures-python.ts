@@ -745,4 +745,54 @@ def process(data):
       { ruleId: 'python-assert-production', line: 5, verdict: 'tp' },
     ],
   },
+
+  // -----------------------------------------------------------------------
+  // 35. python-dataclass-secrets — Python dataclass with secret fields (negative)
+  // -----------------------------------------------------------------------
+  {
+    name: 'python-dataclass-secrets',
+    description: 'Python dataclass with password/secret/api_key fields — type annotations not secrets',
+    file: {
+      path: 'src/models/user.py',
+      content: `from dataclasses import dataclass
+
+@dataclass
+class UserCredentials:
+    username: str
+    password: str
+    api_key: str
+    auth_token: str`,
+      language: 'python',
+    },
+    expected: [
+      // @dataclass in excludePattern for hardcoded-secret and hardcoded-password
+      // TYPE_ANNOTATION_PATTERN also matches @dataclass
+    ],
+  },
+
+  // -----------------------------------------------------------------------
+  // 36. django-fully-secured — Django view with CSRF + auth (negative)
+  // -----------------------------------------------------------------------
+  {
+    name: 'django-fully-secured',
+    description: 'Django view with login_required + csrf_protect — should NOT fire composite rules',
+    file: {
+      path: 'views/protected.py',
+      content: `from django.contrib.auth.decorators import login_required
+from django.views.decorators.csrf import csrf_protect
+import json
+from django.http import JsonResponse
+
+@login_required
+@csrf_protect
+def update_profile(request):
+    if request.method == 'POST':
+        data = json.loads(request.body)
+        return JsonResponse({"status": "updated"})`,
+      language: 'python',
+    },
+    expected: [
+      // login_required + csrf_protect present → composite CSRF/auth rules should NOT fire
+    ],
+  },
 ]

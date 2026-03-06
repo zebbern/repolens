@@ -740,4 +740,35 @@ app.use(csrf({ cookie: true }))`,
       { ruleId: 'express-method-override-before-csrf', line: 5, verdict: 'tp' },
     ],
   },
+
+  // -----------------------------------------------------------------------
+  // 32. express-fully-secured — Express with ALL security middleware (negative)
+  // -----------------------------------------------------------------------
+  {
+    name: 'express-fully-secured',
+    description: 'Express app with helmet, rate-limit, cors, csrf — regex rule fires FP on express() line',
+    file: {
+      path: 'src/app.ts',
+      content: `import express from 'express'
+import helmet from 'helmet'
+import rateLimit from 'express-rate-limit'
+import cors from 'cors'
+import csrf from 'csurf'
+
+const app = express()
+app.use(helmet())
+app.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 100 }))
+app.use(cors({ origin: 'https://mysite.com' }))
+app.use(csrf())
+app.get('/api/users', (req, res) => { res.json([]) })
+export default app`,
+      language: 'typescript',
+    },
+    expected: [
+      // express-no-helmet regex rule matches express() on line 7,
+      // excludePattern checks per-line (line 7 has no 'helmet'), so it fires.
+      // Helmet IS used in the file — this is a FP of the per-line regex approach.
+      { ruleId: 'express-no-helmet', line: 7, verdict: 'fp' },
+    ],
+  },
 ]

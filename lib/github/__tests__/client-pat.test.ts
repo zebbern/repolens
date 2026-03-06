@@ -54,18 +54,23 @@ describe('PAT management', () => {
   })
 
   describe('proxyFetch header attachment', () => {
-    it('attaches X-GitHub-Token header when PAT is set', async () => {
+    it('uses Authorization Bearer when PAT is set (direct mode)', async () => {
       setGitHubPAT('ghp_test_token')
-      const repoData = { owner: 'test', name: 'repo' }
+      const repoData = {
+        owner: { login: 'test' }, name: 'repo', full_name: 'test/repo',
+        description: null, default_branch: 'main', stargazers_count: 0,
+        forks_count: 0, language: null, topics: [], private: false,
+        html_url: '', size: 0, open_issues_count: 0, pushed_at: '', license: null,
+      }
       mockFetch.mockResolvedValueOnce(mockOkResponse(repoData))
 
       await fetchRepoViaProxy('test', 'repo')
 
       expect(mockFetch).toHaveBeenCalledWith(
-        expect.any(String),
+        'https://api.github.com/repos/test/repo',
         expect.objectContaining({
           headers: expect.objectContaining({
-            'X-GitHub-Token': 'ghp_test_token',
+            'Authorization': 'Bearer ghp_test_token',
           }),
         }),
       )
@@ -84,20 +89,22 @@ describe('PAT management', () => {
   })
 
   describe('fetchBlameViaProxy header attachment', () => {
-    it('attaches X-GitHub-Token and Content-Type headers for blame POST', async () => {
+    it('uses Authorization Bearer for GraphQL blame when PAT is set', async () => {
       setGitHubPAT('ghp_blame_test')
-      const blameData = { ranges: [] }
+      const blameData = {
+        data: { repository: { object: { byteSize: 0, isTruncated: false, blame: { ranges: [] } } } },
+      }
       mockFetch.mockResolvedValueOnce(mockOkResponse(blameData))
 
       await fetchBlameViaProxy('owner', 'repo', 'main', 'src/index.ts')
 
       expect(mockFetch).toHaveBeenCalledWith(
-        '/api/github/blame',
+        'https://api.github.com/graphql',
         expect.objectContaining({
           method: 'POST',
           headers: expect.objectContaining({
             'Content-Type': 'application/json',
-            'X-GitHub-Token': 'ghp_blame_test',
+            'Authorization': 'Bearer ghp_blame_test',
           }),
         }),
       )

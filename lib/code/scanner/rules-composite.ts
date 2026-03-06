@@ -143,6 +143,60 @@ export const COMPOSITE_RULES: CompositeRule[] = [
   // -----------------------------------------------------------------------
   // CSRF (CWE-352)
   // -----------------------------------------------------------------------
+  // Rate Limiting (CWE-770)
+  // -----------------------------------------------------------------------
+
+  // Express app with route handlers but no rate limiting
+  {
+    id: 'express-no-rate-limit',
+    category: 'security',
+    severity: 'info',
+    title: 'Express App — Verify Rate Limiting',
+    description:
+      'Express application has route handlers but no rate-limiting middleware detected. Without rate limiting, APIs are vulnerable to brute-force attacks and resource exhaustion.',
+    suggestion:
+      'Add express-rate-limit middleware: app.use(rateLimit({ windowMs: 15*60*1000, max: 100 }))',
+    cwe: 'CWE-770',
+    owasp: 'A05:2021 Security Misconfiguration',
+    fileFilter: JS_TS,
+    requiredPatterns: [
+      /app\.(?:get|post|put|delete|patch)\s*\(/,
+      /express\s*\(\)/,
+    ],
+    sinkPattern: /app\.(?:get|post|put|delete|patch)\s*\(/,
+    mitigations: [/rateLimit|rate-limit|express-rate-limit|throttle|slowDown|express-slow-down|rate_limit/i],
+    confidence: 'medium',
+  },
+
+  // -----------------------------------------------------------------------
+  // Next.js API Auth (CWE-306)
+  // -----------------------------------------------------------------------
+
+  // Next.js API route without auth check
+  {
+    id: 'nextjs-api-no-auth',
+    category: 'security',
+    severity: 'info',
+    title: 'Next.js API Route — No Auth Check',
+    description:
+      'Next.js API route exports handler without authentication checks in the file. Any unauthenticated client can call this endpoint.',
+    suggestion:
+      'Add an auth check (e.g. getServerSession(), auth(), verifyToken()) at the top of the handler',
+    cwe: 'CWE-306',
+    owasp: 'A07:2021 Identification and Authentication Failures',
+    fileFilter: JS_TS,
+    requiredPatterns: [
+      /export\s+(?:async\s+)?function\s+(?:GET|POST|PUT|DELETE|PATCH)\s*\(/,
+    ],
+    sinkPattern: /export\s+(?:async\s+)?function\s+(?:GET|POST|PUT|DELETE|PATCH)\s*\(/,
+    mitigations: [/getServerSession|getSession|auth\s*\(|verifyToken|requireAuth|isAuthenticated|cookies\s*\(|headers\s*\(.*authorization|getToken|withAuth|authenticate/i],
+    mustNotContain: [/webhook|health|status|ping|public|cron|sitemap|robots|favicon|manifest|opengraph|og-image/i],
+    confidence: 'medium',
+  },
+
+  // -----------------------------------------------------------------------
+  // CSRF (CWE-352)
+  // -----------------------------------------------------------------------
 
   // Express POST/PUT/PATCH/DELETE without CSRF protection
   {
@@ -234,10 +288,10 @@ export const COMPOSITE_RULES: CompositeRule[] = [
     learnMoreUrl: 'https://cwe.mitre.org/data/definitions/434.html',
     fileFilter: JS_TS,
     requiredPatterns: [
-      /multer|formidable|busboy|upload|file\.(path|name|buffer|stream)/,
+      /multer|formidable|busboy/,
     ],
-    sinkPattern: /multer|formidable|busboy|upload|file\.(path|name|buffer|stream)/,
-    mitigations: [/\.(mimetype|ext|extension|size|limit|fileFilter|allowedTypes|validat|accept)/i],
+    sinkPattern: /multer|formidable|busboy/,
+    mitigations: [/\.(mimetype|ext|extension|size|limit|fileFilter|allowedTypes|validat|accept)|limits\s*:|ALLOWED_TYPES|allowedMimeTypes|contentType\s*===/i],
     mustNotContain: [/fileFilter|maxFileSize|accept|validateFile/i],
     confidence: 'medium',
   },

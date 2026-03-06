@@ -127,7 +127,7 @@ export default router`,
       // Path traversal mitigations present but taint tracker is conservative
       { ruleId: 'taint-path-traversal', line: 14, verdict: 'tp' },
       { ruleId: 'composite-missing-auth-express-route', line: 8, verdict: 'tp' },
-      { ruleId: 'composite-file-upload-no-validation', line: 5, verdict: 'fp' },
+      // composite-file-upload-no-validation no longer fires (tightened requiredPatterns: multer|formidable|busboy)
       { ruleId: 'composite-async-no-try-catch', line: 8, verdict: 'tp' },
     ],
   },

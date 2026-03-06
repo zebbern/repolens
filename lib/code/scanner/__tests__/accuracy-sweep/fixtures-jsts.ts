@@ -131,11 +131,8 @@ app.listen(3000)`,
     expected: [
       { ruleId: 'express-no-helmet', line: 4, verdict: 'tp' },
       { ruleId: 'express-no-rate-limit', line: 8, verdict: 'tp' },
-      { ruleId: 'express-no-rate-limit', line: 13, verdict: 'tp' },
       { ruleId: 'express-body-parser-no-limit', line: 6, verdict: 'tp' },
       { ruleId: 'composite-csrf-missing-express', line: 13, verdict: 'tp' },
-      { ruleId: 'express-no-rate-limit', line: 5, verdict: 'fp' },
-      { ruleId: 'express-no-rate-limit', line: 6, verdict: 'fp' },
       { ruleId: 'composite-async-no-try-catch', line: 8, verdict: 'tp' },
     ],
   },
@@ -161,8 +158,7 @@ export async function GET(request: Request) {
       language: 'typescript',
     },
     expected: [
-      // nextjs-api-no-auth fires because per-line regex can't see getServerSession on a different line
-      { ruleId: 'nextjs-api-no-auth', line: 4, verdict: 'fp' },
+      // nextjs-api-no-auth composite: getServerSession in file suppresses via mitigations
       { ruleId: 'composite-async-no-try-catch', line: 4, verdict: 'tp' },
     ],
   },
@@ -373,8 +369,6 @@ export default app`,
     expected: [
       { ruleId: 'express-body-parser-no-limit', line: 4, verdict: 'tp' },
       { ruleId: 'express-no-helmet', line: 3, verdict: 'tp' },
-      { ruleId: 'express-no-rate-limit', line: 4, verdict: 'fp' },
-      { ruleId: 'express-no-rate-limit', line: 5, verdict: 'fp' },
     ],
   },
 
@@ -420,7 +414,6 @@ export default app`,
     },
     expected: [
       { ruleId: 'express-no-helmet', line: 4, verdict: 'tp' },
-      { ruleId: 'express-no-rate-limit', line: 5, verdict: 'fp' },
     ],
   },
 
@@ -505,7 +498,7 @@ export async function getUser(name: string) {
       language: 'typescript',
     },
     expected: [
-      { ruleId: 'nextjs-api-no-auth', line: 1, verdict: 'fp' },
+      // nextjs-api-no-auth composite: mustNotContain matches 'status' in content
       { ruleId: 'composite-async-no-try-catch', line: 1, verdict: 'tp' },
     ],
   },

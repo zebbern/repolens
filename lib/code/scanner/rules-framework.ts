@@ -112,23 +112,7 @@ export const FRAMEWORK_RULES: ScanRule[] = [
     excludePattern: /rel\s*=.*noopener/i,
     confidence: 'medium',
   },
-  {
-    id: 'nextjs-api-no-auth',
-    category: 'security',
-    severity: 'info',
-    title: 'API Route Without Visible Auth Check',
-    description:
-      'Next.js API route handler exports a named HTTP method function without a visible authentication or authorization check. Any unauthenticated client can call this endpoint.',
-    suggestion:
-      'Add an auth check (e.g. getSession(), auth(), verifyToken()) at the top of the handler',
-    cwe: 'CWE-862',
-    owasp: 'A01:2021 Broken Access Control',
-    pattern: 'export\\s+(async\\s+)?function\\s+(GET|POST|PUT|DELETE|PATCH)\\s*\\(',
-    patternOptions: { regex: true },
-    fileFilter: JS_TS,
-    excludePattern: /auth|session|verifyToken|getServerSession|requireAuth|isAuthenticated|webhook|health|status|ping|public|cron|sitemap|robots|favicon|manifest/i,
-    confidence: 'low',
-  },
+
   {
     id: 'react-unsafe-lifecycle',
     category: 'security',
@@ -170,23 +154,7 @@ export const FRAMEWORK_RULES: ScanRule[] = [
     excludePattern: /helmet|require\(['"]helmet['"]\)/i,
     confidence: 'low',
   },
-  {
-    id: 'express-no-rate-limit',
-    category: 'security',
-    severity: 'info',
-    title: 'Express App — Verify Rate Limiting',
-    description:
-      'Express route handlers detected without visible rate limiting. Without rate limiting, APIs are vulnerable to brute-force attacks and resource exhaustion.',
-    suggestion:
-      'Add express-rate-limit middleware: app.use(rateLimit({ windowMs: 15*60*1000, max: 100 }))',
-    cwe: 'CWE-770',
-    owasp: 'A05:2021 Security Misconfiguration',
-    pattern: 'app\\.(?:get|post|put|delete|patch|use)\\s*\\(',
-    patternOptions: { regex: true },
-    fileFilter: JS_TS,
-    excludePattern: /rateLimit|rate-limit|express-rate-limit|throttle/i,
-    confidence: 'low',
-  },
+
   {
     id: 'express-cookie-not-signed',
     category: 'security',
@@ -481,7 +449,7 @@ export const FRAMEWORK_RULES: ScanRule[] = [
     patternOptions: { regex: true, caseSensitive: false },
     fileFilter: JS_TS,
     excludeFiles: /rules-security|rules-security-lang|rules-quality|rules-framework|rules-composite/i,
-    excludePattern: /['"]use client['"]|test|mock|fixture|example|static|\.json/i,
+    excludePattern: /['"]use client['"]|test|mock|fixture|example|static|\.json|allowlist|ALLOWED_HOSTS|ALLOWED_DOMAINS|whitelist|allowedOrigins|isValidUrl|validateUrl|new URL.*includes/i,
     confidence: 'medium',
   },
   // --- SRI Missing on CDN ---

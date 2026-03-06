@@ -67,23 +67,22 @@ describe('React / Next.js Framework Rules', () => {
     const hits = issuesForRule(result.issues, 'nextjs-api-no-auth')
     expect(hits.length).toBeGreaterThanOrEqual(1)
     expect(hits[0].severity).toBe('info')
-    expect(hits[0].cwe).toBe('CWE-862')
+    expect(hits[0].cwe).toBe('CWE-306')
   })
 
-  it('does not flag API route with auth check on same line', () => {
-    // excludePattern matches line content containing auth/session/verifyToken
-    const code = `export async function GET(request: Request) { const session = await auth(); return Response.json({ data: [] }); }`
+  it('does not flag API route with auth check in file', () => {
+    // Composite rule checks entire file for auth mitigations
+    const code = `import { getServerSession } from 'next-auth'\nexport async function GET(request: Request) {\n  const session = await getServerSession();\n  return Response.json({ data: [] });\n}`
     const result = scanCode('app/api/users/route.ts', code, 'typescript')
     const hits = issuesForRule(result.issues, 'nextjs-api-no-auth')
-    // The excludePattern tests each matched LINE — the export line has no auth keyword
-    // so it may still match. Verify the rule's actual intent:
-    // Actually, excludePattern applies to the matched line, not the file.
-    // The matched line is the `export async function GET(` line, which doesn't have auth.
-    // So we test that lines WITH auth keywords are excluded:
-    const code2 = `export async function GET(request: Request) { /* auth */ }`
-    const result2 = scanCode('app/api/users/route2.ts', code2, 'typescript')
-    const hits2 = issuesForRule(result2.issues, 'nextjs-api-no-auth')
-    expect(hits2).toHaveLength(0)
+    expect(hits).toHaveLength(0)
+  })
+
+  it('suppresses nextjs-api-no-auth for health/status routes', () => {
+    const code = `export async function GET() {\n  return Response.json({ status: 'ok' });\n}`
+    const result = scanCode('app/api/health/route.ts', code, 'typescript')
+    const hits = issuesForRule(result.issues, 'nextjs-api-no-auth')
+    expect(hits).toHaveLength(0)
   })
 
   it('detects UNSAFE_componentWillMount', () => {

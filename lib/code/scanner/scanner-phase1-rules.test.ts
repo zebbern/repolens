@@ -389,11 +389,11 @@ describe('Express.js', () => {
     expect(issuesForRule(r.issues, 'express-no-helmet')).toHaveLength(0)
   })
   it('flags route without rate limit', () => {
-    const r = scanCode('src/routes.ts', 'app.get("/api/users", handler)')
+    const r = scanCode('src/routes.ts', 'const app = express()\napp.get("/api/users", handler)')
     expect(issuesForRule(r.issues, 'express-no-rate-limit').length).toBeGreaterThanOrEqual(1)
   })
   it('FP: route with rateLimit', () => {
-    const r = scanCode('src/routes.ts', 'app.use(rateLimit({ windowMs: 900000, max: 100 }))')
+    const r = scanCode('src/routes.ts', 'const app = express()\napp.get("/api/users", handler)\napp.use(rateLimit({ windowMs: 900000, max: 100 }))')
     expect(issuesForRule(r.issues, 'express-no-rate-limit')).toHaveLength(0)
   })
   it('flags res.cookie without signed', () => {

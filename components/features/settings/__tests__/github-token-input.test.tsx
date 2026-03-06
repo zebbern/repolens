@@ -72,12 +72,13 @@ describe('GitHubTokenInput', () => {
     }
   })
 
-  it('calls setToken when a value is entered', async () => {
+  it('calls setToken when input is committed via blur', async () => {
     const user = userEvent.setup()
     render(<GitHubTokenInput />)
 
     const input = screen.getByPlaceholderText(/ghp_/)
     await user.type(input, 'ghp_test123')
+    await user.tab() // blur
 
     expect(mockSetToken).toHaveBeenCalled()
   })

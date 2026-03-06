@@ -24,15 +24,41 @@ const CACHE_TTL_BLAME         = 600_000  // 10 minutes
 const CACHE_TTL_COMMIT_DETAIL = 600_000  // 10 minutes
 
 // ---------------------------------------------------------------------------
+// PAT management — allows the React provider to inject a token
+// ---------------------------------------------------------------------------
+
+let _githubPAT: string | null = null
+
+export function setGitHubPAT(token: string | null): void {
+  _githubPAT = token
+}
+
+export function getGitHubPAT(): string | null {
+  return _githubPAT
+}
+
+// ---------------------------------------------------------------------------
 // Internal helpers
 // ---------------------------------------------------------------------------
+
+/** Build headers for proxy requests, attaching the PAT when available. */
+function buildProxyHeaders(): HeadersInit {
+  const headers: HeadersInit = {}
+  if (_githubPAT) {
+    headers['X-GitHub-Token'] = _githubPAT
+  }
+  return headers
+}
 
 /**
  * Client-side fetcher that calls proxy API routes instead of GitHub directly.
  * The proxy routes handle authentication — the access token never reaches the browser.
  */
 async function proxyFetch<T>(url: string): Promise<T> {
-  const response = await fetch(url)
+  if (!url.startsWith('/')) {
+    throw new Error('proxyFetch only accepts relative URLs')
+  }
+  const response = await fetch(url, { headers: buildProxyHeaders() })
 
   if (!response.ok) {
     const body = await response.json().catch(() => ({}))
@@ -258,9 +284,10 @@ async function fetchBlameFromApi(
   ref: string,
   path: string,
 ): Promise<BlameData> {
+  const headers: HeadersInit = { 'Content-Type': 'application/json', ...buildProxyHeaders() }
   const response = await fetch('/api/github/blame', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers,
     body: JSON.stringify({ owner, name, ref, path }),
   })
 

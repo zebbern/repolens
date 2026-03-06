@@ -45,7 +45,7 @@ describe('POST /api/github/validate-token', () => {
     const data = await response.json()
 
     expect(response.status).toBe(400)
-    expect(data.error.message).toContain('Missing X-GitHub-Token')
+    expect(data).toEqual({ valid: false, error: 'Missing X-GitHub-Token header' })
   })
 
   it('returns valid=true with login and scopes for a valid token', async () => {

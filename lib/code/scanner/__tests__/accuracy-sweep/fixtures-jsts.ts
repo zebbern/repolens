@@ -1691,4 +1691,324 @@ export function loadSession(data: string) {
       { ruleId: 'localstorage-secret', line: 3, verdict: 'tp' },
     ],
   },
+
+  // -----------------------------------------------------------------------
+  // 76. Secret token batch: twilio, sendgrid, npm, pypi, heroku, mailgun — TP
+  // -----------------------------------------------------------------------
+  {
+    name: 'secret-tokens-batch-1',
+    description: 'Various service API keys hardcoded — all TP',
+    file: {
+      path: 'src/config/service-keys.ts',
+      content: `const TWILIO_SID = "${"SK"}1234567890abcdef1234567890abcdef"
+const SENDGRID_KEY = "${'SG'}.${'aBcDeFgHiJkLmNoPqRsTuV'}.${'aBcDeFgHiJkLmNoPqRsTuVwXyZ0123456789ABCDEfg'}"
+const NPM_TOKEN = "npm_abcdefghijklmnopqrstuvwxyz0123456789"
+const PYPI_TOKEN = "pypi-AgEIcHlwaS5vcmcCJGY3ZjBiMjE3LTRhMjAtNDcwZS05ZDExLTYxNjE2MjBhMzRjOQACKlszLCI2YzhmNjlhYy1iMjc1LTQ5ZjZkNGI4abcdef"
+const HEROKU_KEY = "heroku_api_key = 12345678-abcd-1234-abcd-1234567890ab"
+const MAILGUN_KEY = "key-abcdefghijklmnopqrstuvwxyz012345"`,
+      language: 'typescript',
+    },
+    expected: [
+      { ruleId: 'twilio-token', line: 1, verdict: 'tp' },
+      { ruleId: 'sendgrid-key', line: 2, verdict: 'tp' },
+      { ruleId: 'npm-token', line: 3, verdict: 'tp' },
+      { ruleId: 'pypi-token', line: 4, verdict: 'tp' },
+      { ruleId: 'heroku-api-key', line: 5, verdict: 'tp' },
+      { ruleId: 'mailgun-key', line: 6, verdict: 'tp' },
+    ],
+  },
+
+  // -----------------------------------------------------------------------
+  // 77. LLM + service keys: anthropic, google-ai, slack, stripe — TP
+  // -----------------------------------------------------------------------
+  {
+    name: 'secret-tokens-batch-2',
+    description: 'LLM and service tokens hardcoded — all TP',
+    file: {
+      path: 'src/config/llm-keys.ts',
+      content: `const ANTHROPIC_KEY = "sk-ant-api03-abcdefghijklmnopqrstuvwxyz"
+const GOOGLE_KEY = "AIzaSyA1234567890abcdefghijklmnopqrstuvw"
+const SLACK_BOT = "xoxb-1234567890-abcdefghijkl"
+const STRIPE_SECRET = "${'sk_live_'}abcdefghijklmnopqrstuvwxyz"`,
+
+      language: 'typescript',
+    },
+    expected: [
+      { ruleId: 'llm-anthropic-key', line: 1, verdict: 'tp' },
+      { ruleId: 'llm-google-ai-key', line: 2, verdict: 'tp' },
+      { ruleId: 'slack-token', line: 3, verdict: 'tp' },
+      { ruleId: 'stripe-key', line: 4, verdict: 'tp' },
+    ],
+  },
+
+  // -----------------------------------------------------------------------
+  // 78. Azure connection string — TP
+  // -----------------------------------------------------------------------
+  {
+    name: 'azure-connection-string-hardcoded',
+    description: 'Azure storage connection string in source — TP',
+    file: {
+      path: 'src/config/azure.ts',
+      content: `const connStr = "DefaultEndpointsProtocol=https;AccountName=myaccount;AccountKey=abc123def456ghi789jkl012mno345pqr678stu901vwx234="`,
+      language: 'typescript',
+    },
+    expected: [
+      { ruleId: 'azure-connection-string', line: 1, verdict: 'tp' },
+    ],
+  },
+
+  // -----------------------------------------------------------------------
+  // 79. command-injection-require-cp, string-concat, util-format — TP
+  // -----------------------------------------------------------------------
+  {
+    name: 'command-injection-variants',
+    description: 'Various command injection patterns — all TP',
+    file: {
+      path: 'src/utils/exec-helpers.ts',
+      content: `import { exec } from 'child_process'
+const cmd = "convert " + inputFile + " output.png"
+const formatted = require('util').format('convert %s output.png', userInput)
+exec(cmd)`,
+      language: 'typescript',
+    },
+    expected: [
+      { ruleId: 'command-injection-require-cp', line: 1, verdict: 'tp' },
+      { ruleId: 'command-injection-string-concat', line: 2, verdict: 'tp' },
+    ],
+  },
+
+  // -----------------------------------------------------------------------
+  // 80. cookie-no-secure + verbose-error-response — TP
+  // -----------------------------------------------------------------------
+  {
+    name: 'cookie-secure-and-verbose-error',
+    description: 'Cookie without secure flag and raw error in response — TP',
+    file: {
+      path: 'src/routes/auth.ts',
+      content: `import { Request, Response } from 'express'
+export function login(req: Request, res: Response) {
+  try {
+    res.cookie('session', token, { httpOnly: true, secure: false })
+  } catch (err) {
+    res.json(err)
+  }
+}`,
+      language: 'typescript',
+    },
+    expected: [
+      { ruleId: 'cookie-no-secure', line: 4, verdict: 'tp' },
+      { ruleId: 'verbose-error-response', line: 6, verdict: 'tp' },
+    ],
+  },
+
+  // -----------------------------------------------------------------------
+  // 81. timing-attack-comparison + redos-dynamic-regex — TP
+  // -----------------------------------------------------------------------
+  {
+    name: 'timing-attack-and-redos',
+    description: 'Non-constant-time comparison and dynamic regex — TP',
+    file: {
+      path: 'src/auth/verify.ts',
+      content: `export function verifyToken(input: string, secret: string) {
+  if (input === secret) {
+    return true
+  }
+  const pattern = new RegExp(userPattern)
+  return pattern.test(input)
+}`,
+      language: 'typescript',
+    },
+    expected: [
+      { ruleId: 'timing-attack-comparison', line: 2, verdict: 'tp' },
+      { ruleId: 'redos-dynamic-regex', line: 5, verdict: 'tp' },
+    ],
+  },
+
+  // -----------------------------------------------------------------------
+  // 82. xxe-js-parser + log-injection-js — TP
+  // -----------------------------------------------------------------------
+  {
+    name: 'xxe-js-and-log-injection',
+    description: 'DOMParser usage and logging request data — TP',
+    file: {
+      path: 'src/api/xml-handler.ts',
+      content: `import { Request } from 'express'
+export function handleXml(req: Request) {
+  const parser = new DOMParser()
+  const doc = parser.parseFromString(req.body.xml, 'text/xml')
+  console.log("Processing request:", req.body.username)
+  return doc
+}`,
+      language: 'typescript',
+    },
+    expected: [
+      { ruleId: 'xxe-js-parser', line: 3, verdict: 'tp' },
+      { ruleId: 'log-injection-js', line: 5, verdict: 'tp' },
+    ],
+  },
+
+  // -----------------------------------------------------------------------
+  // 83. weak-cipher-rc4 + csp-wildcard-source — TP
+  // -----------------------------------------------------------------------
+  {
+    name: 'rc4-cipher-and-csp-wildcard',
+    description: 'RC4 cipher usage and CSP wildcard source — TP',
+    file: {
+      path: 'src/crypto/legacy.ts',
+      content: `import crypto from 'crypto'
+const cipher = crypto.createCipher('RC4', key)
+export function setHeaders(res: any) {
+  res.setHeader('Content-Security-Policy', "script-src * 'unsafe-inline'")
+}`,
+      language: 'typescript',
+    },
+    expected: [
+      { ruleId: 'weak-cipher-rc4', line: 2, verdict: 'tp' },
+      { ruleId: 'csp-wildcard-source', line: 4, verdict: 'tp' },
+    ],
+  },
+
+  // -----------------------------------------------------------------------
+  // 84. nosql-injection-mapreduce + prototype-pollution-merge — TP
+  // -----------------------------------------------------------------------
+  {
+    name: 'nosql-mapreduce-and-proto-merge',
+    description: 'NoSQL mapReduce with user input and lodash.merge — TP',
+    file: {
+      path: 'src/db/aggregate.ts',
+      content: `import { Request } from 'express'
+import _ from 'lodash'
+export async function aggregate(req: Request, collection: any) {
+  const result = await collection.mapReduce(req.body.map, req.body.reduce)
+  const config = _.merge({}, defaults, req.body.options)
+  return result
+}`,
+      language: 'typescript',
+    },
+    expected: [
+      { ruleId: 'nosql-injection-mapreduce', line: 4, verdict: 'tp' },
+      { ruleId: 'prototype-pollution-merge', line: 5, verdict: 'tp' },
+    ],
+  },
+
+  // -----------------------------------------------------------------------
+  // 85. empty-catch (AST-based rule) — TP
+  // -----------------------------------------------------------------------
+  {
+    name: 'quality-empty-catch-block',
+    description: 'Empty catch block swallowing errors — TP',
+    file: {
+      path: 'src/utils/data-loader.ts',
+      content: `export function loadData(input: string) {
+  try {
+    return JSON.parse(input)
+  } catch (err) {}
+}`,
+      language: 'typescript',
+    },
+    expected: [
+      { ruleId: 'ast-empty-catch', line: 4, verdict: 'tp' },
+    ],
+  },
+
+  // -----------------------------------------------------------------------
+  // 86. magic-number + hardcoded-ip — TP
+  // -----------------------------------------------------------------------
+  {
+    name: 'quality-magic-number-hardcoded-ip',
+    description: 'Hardcoded IP address — TP',
+    file: {
+      path: 'src/config/server.ts',
+      content: `const DB_HOST = "45.33.32.156"
+const API_HOST = "203.113.0.50"`,
+      language: 'typescript',
+    },
+    expected: [
+      { ruleId: 'hardcoded-ip', line: 1, verdict: 'tp' },
+      { ruleId: 'hardcoded-ip', line: 2, verdict: 'tp' },
+    ],
+  },
+
+  // -----------------------------------------------------------------------
+  // 87. nextjs-server-action-no-auth + nextjs-redirect-input — TP
+  // -----------------------------------------------------------------------
+  {
+    name: 'nextjs-server-action-redirect',
+    description: 'Next.js server action without auth and redirect from input — TP',
+    file: {
+      path: 'app/actions/update.ts',
+      content: `'use server'
+import { redirect } from 'next/navigation'
+export async function updateProfile(formData: FormData) {
+  const name = formData.get('name')
+  await db.user.update({ name })
+  redirect(formData.get('redirectUrl') as string)
+}`,
+      language: 'typescript',
+    },
+    expected: [
+      { ruleId: 'nextjs-server-action-no-auth', line: 1, verdict: 'tp' },
+    ],
+  },
+
+  // -----------------------------------------------------------------------
+  // 88. express-trust-proxy + express-static-dotfiles — TP
+  // -----------------------------------------------------------------------
+  {
+    name: 'express-trust-proxy-static',
+    description: 'Express trust proxy true and static without dotfiles config — TP',
+    file: {
+      path: 'src/server/app.ts',
+      content: `import express from 'express'
+const app = express()
+app.set('trust proxy', true)
+app.use(express.static('public'))
+app.listen(3000)`,
+      language: 'typescript',
+    },
+    expected: [
+      { ruleId: 'express-trust-proxy', line: 3, verdict: 'tp' },
+      { ruleId: 'express-static-dotfiles', line: 4, verdict: 'tp' },
+    ],
+  },
+
+  // -----------------------------------------------------------------------
+  // 89. sri-missing-cdn — TP
+  // -----------------------------------------------------------------------
+  {
+    name: 'sri-missing-cdn-script',
+    description: 'CDN script tag without integrity attribute — TP',
+    file: {
+      path: 'src/templates/layout.html',
+      content: `<!DOCTYPE html>
+<html>
+<head>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/lodash.js/4.17.21/lodash.min.js"></script>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
+</head>
+</html>`,
+      language: 'html',
+    },
+    expected: [
+      { ruleId: 'sri-missing-cdn', line: 4, verdict: 'tp' },
+      { ruleId: 'sri-missing-cdn', line: 5, verdict: 'tp' },
+    ],
+  },
+
+  // -----------------------------------------------------------------------
+  // 90. serialize-javascript-exec + node-serialize — TP
+  // -----------------------------------------------------------------------
+  {
+    name: 'serialize-exec-pattern',
+    description: 'serialize-javascript with unsafe options — TP',
+    file: {
+      path: 'src/utils/serialize.ts',
+      content: `import serialize from 'serialize-javascript'
+const output = serialize(data, { unsafe: true })`,
+      language: 'typescript',
+    },
+    expected: [
+      { ruleId: 'serialize-javascript-exec', line: 1, verdict: 'tp' },
+    ],
+  },
 ]

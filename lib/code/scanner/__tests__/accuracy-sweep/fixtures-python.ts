@@ -660,4 +660,89 @@ class PaymentView:
       // @csrf_protect present — composite-csrf-missing-django-view should NOT fire
     ],
   },
+
+  // -----------------------------------------------------------------------
+  // 31. log-injection-py — TP
+  // -----------------------------------------------------------------------
+  {
+    name: 'python-log-injection',
+    description: 'Logging unsanitized request data in Python — TP',
+    file: {
+      path: 'src/views/api.py',
+      content: `import logging
+from flask import request
+
+def handle_login():
+    logging.info("Login attempt from user: " + request.form.get('username'))
+    return {"status": "ok"}`,
+      language: 'python',
+    },
+    expected: [
+      { ruleId: 'log-injection-py', line: 5, verdict: 'tp' },
+    ],
+  },
+
+  // -----------------------------------------------------------------------
+  // 32. python-assert-security — TP
+  // -----------------------------------------------------------------------
+  {
+    name: 'python-assert-security',
+    description: 'Using assert for security/auth checks in Python — TP',
+    file: {
+      path: 'src/auth/permissions.py',
+      content: `def check_access(user, resource):
+    assert user.has_permission(resource), "Access denied"
+    assert user.token is not None, "Missing token"
+    return resource.data`,
+      language: 'python',
+    },
+    expected: [
+      { ruleId: 'python-assert-security', line: 2, verdict: 'tp' },
+      { ruleId: 'python-assert-security', line: 3, verdict: 'tp' },
+    ],
+  },
+
+  // -----------------------------------------------------------------------
+  // 33. python-shelve-open — TP
+  // -----------------------------------------------------------------------
+  {
+    name: 'python-shelve-open',
+    description: 'shelve.open with user-controlled path — TP',
+    file: {
+      path: 'src/cache/shelf_store.py',
+      content: `import shelve
+
+def load_cache(path):
+    db = shelve.open(path)
+    return dict(db)`,
+      language: 'python',
+    },
+    expected: [
+      { ruleId: 'python-shelve-open', line: 4, verdict: 'tp' },
+    ],
+  },
+
+  // -----------------------------------------------------------------------
+  // 34. python-star-import + python-assert-production — TP
+  // -----------------------------------------------------------------------
+  {
+    name: 'python-star-import-assert-prod',
+    description: 'Star import and assert in production code — TP',
+    file: {
+      path: 'src/services/handler.py',
+      content: `from os import *
+from sys import *
+
+def process(data):
+    assert len(data) > 0
+    result = path.join("/tmp", data[0])
+    return result`,
+      language: 'python',
+    },
+    expected: [
+      { ruleId: 'python-star-import', line: 1, verdict: 'tp' },
+      { ruleId: 'python-star-import', line: 2, verdict: 'tp' },
+      { ruleId: 'python-assert-production', line: 5, verdict: 'tp' },
+    ],
+  },
 ]

@@ -315,4 +315,57 @@ public class XmlParser {
       { ruleId: 'xxe-java', line: 7, verdict: 'tp' },
     ],
   },
+
+  // -----------------------------------------------------------------------
+  // 14. java-sql-concat — TP
+  // -----------------------------------------------------------------------
+  {
+    name: 'java-sql-concat',
+    description: 'Java SQL query built via string concatenation — TP',
+    file: {
+      path: 'src/main/java/com/app/UserDao.java',
+      content: `package com.app;
+import java.sql.*;
+public class UserDao {
+    public User findUser(Connection conn, String name) throws SQLException {
+        ResultSet rs = conn.createStatement().executeQuery("SELECT * FROM users WHERE name = '" + name + "'");
+        return mapUser(rs);
+    }
+}`,
+      language: 'java',
+    },
+    expected: [
+      { ruleId: 'java-sql-concat', line: 5, verdict: 'tp' },
+    ],
+  },
+
+  // -----------------------------------------------------------------------
+  // 15. spring-missing-valid + spring-permit-all — TP
+  // -----------------------------------------------------------------------
+  {
+    name: 'spring-missing-valid-permit-all',
+    description: 'Spring controller missing @Valid and permitAll — TP',
+    file: {
+      path: 'src/main/java/com/app/SecurityConfig.java',
+      content: `package com.app;
+import org.springframework.web.bind.annotation.*;
+import org.springframework.security.config.annotation.web.builders.HttpSecurity;
+@RestController
+public class UserController {
+    @PostMapping("/users") public User createUser(@RequestBody UserDto dto) {
+        return userService.create(dto);
+    }
+}
+class SecurityConfig {
+    protected void configure(HttpSecurity http) throws Exception {
+        http.authorizeRequests().anyRequest().permitAll();
+    }
+}`,
+      language: 'java',
+    },
+    expected: [
+      { ruleId: 'spring-missing-valid', line: 6, verdict: 'tp' },
+      { ruleId: 'spring-permit-all', line: 12, verdict: 'tp' },
+    ],
+  },
 ]

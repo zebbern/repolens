@@ -654,4 +654,90 @@ export async function writeConfig(path: string, data: string) {
       // No access/exists/stat check before writeFile — TOCTOU should NOT fire
     ],
   },
+
+  // -----------------------------------------------------------------------
+  // 28. nextjs-api-no-auth — TP
+  // -----------------------------------------------------------------------
+  {
+    name: 'composite-nextjs-api-no-auth',
+    description: 'Next.js API route without any auth check — TP',
+    file: {
+      path: 'app/api/admin/users/route.ts',
+      content: `import { NextResponse } from 'next/server'
+import { db } from '@/lib/db'
+
+export async function GET(request: Request) {
+  const users = await db.user.findMany()
+  return NextResponse.json(users)
+}`,
+      language: 'typescript',
+    },
+    expected: [
+      { ruleId: 'nextjs-api-no-auth', line: 4, verdict: 'tp' },
+    ],
+  },
+
+  // -----------------------------------------------------------------------
+  // 29. composite-file-upload-no-validation — TP
+  // -----------------------------------------------------------------------
+  {
+    name: 'composite-file-upload-no-validation',
+    description: 'Multer file upload without type/size validation — TP',
+    file: {
+      path: 'src/routes/file-upload.ts',
+      content: `import express from 'express'
+const multer = require('multer')
+const router = express.Router()
+const upload = multer({ dest: 'uploads/' })
+router.post('/upload', upload.single('doc'), (req, res) => {
+  res.json({ saved: true })
+})`,
+      language: 'typescript',
+    },
+    expected: [
+      { ruleId: 'composite-file-upload-no-validation', line: 2, verdict: 'tp' },
+    ],
+  },
+
+  // -----------------------------------------------------------------------
+  // 30. composite-mass-assignment-sequelize — TP
+  // -----------------------------------------------------------------------
+  {
+    name: 'composite-mass-assignment-sequelize',
+    description: 'Sequelize create with unsanitized req.body — TP',
+    file: {
+      path: 'src/routes/users.ts',
+      content: `import { User } from '../models/User'
+import { Request, Response } from 'express'
+export async function createUser(req: Request, res: Response) {
+  const user = await User.create(req.body)
+  res.json(user)
+}`,
+      language: 'typescript',
+    },
+    expected: [
+      { ruleId: 'composite-mass-assignment-sequelize', line: 4, verdict: 'tp' },
+    ],
+  },
+
+  // -----------------------------------------------------------------------
+  // 31. express-method-override-before-csrf — TP
+  // -----------------------------------------------------------------------
+  {
+    name: 'composite-method-override-before-csrf',
+    description: 'Express method-override loaded before CSRF middleware — TP',
+    file: {
+      path: 'src/server/middleware.ts',
+      content: `import express from 'express'
+import methodOverride from 'method-override'
+import csrf from 'csurf'
+const app = express()
+app.use(methodOverride('_method'))
+app.use(csrf({ cookie: true }))`,
+      language: 'typescript',
+    },
+    expected: [
+      { ruleId: 'express-method-override-before-csrf', line: 5, verdict: 'tp' },
+    ],
+  },
 ]

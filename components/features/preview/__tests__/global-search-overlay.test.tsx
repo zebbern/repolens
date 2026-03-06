@@ -859,71 +859,17 @@ describe('GlobalSearchOverlay', () => {
     })
   })
 
-  /* ── Tab / Shift+Tab cycling ──────────────────────────────────── */
+  /* ── Tab key (not intercepted) ─────────────────────────────────── */
 
-  describe('Tab cycling', () => {
-    it('Tab cycles files → code → symbols', async () => {
+  describe('Tab key behavior', () => {
+    it('does not intercept Tab for tab cycling — Tab moves focus naturally', async () => {
       const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
       renderOverlay()
 
-      // Start on Files tab
-      expect(
-        screen.getByPlaceholderText('Search files by name or path...'),
-      ).toBeInTheDocument()
-
-      await user.tab()
-      expect(
-        screen.getByPlaceholderText('Search in file contents...'),
-      ).toBeInTheDocument()
-
-      await user.tab()
-      expect(
-        screen.getByPlaceholderText('Search for symbols...'),
-      ).toBeInTheDocument()
-
-      // Wraps back to Files
+      // Tab should NOT switch to the Code tab — it stays on Files
       await user.tab()
       expect(
         screen.getByPlaceholderText('Search files by name or path...'),
-      ).toBeInTheDocument()
-    })
-
-    it('Shift+Tab cycles in reverse: files → symbols → code', async () => {
-      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
-      renderOverlay()
-
-      await user.tab({ shift: true })
-      expect(
-        screen.getByPlaceholderText('Search for symbols...'),
-      ).toBeInTheDocument()
-
-      await user.tab({ shift: true })
-      expect(
-        screen.getByPlaceholderText('Search in file contents...'),
-      ).toBeInTheDocument()
-
-      await user.tab({ shift: true })
-      expect(
-        screen.getByPlaceholderText('Search files by name or path...'),
-      ).toBeInTheDocument()
-    })
-
-    it('Tab is intercepted even when a non-input element has focus (focus trap)', async () => {
-      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
-      renderOverlay()
-
-      await user.type(
-        screen.getByPlaceholderText('Search files by name or path...'), 'ts',
-      )
-
-      // Move focus to a result button
-      const option = screen.getAllByRole('option')[0]
-      option.focus()
-
-      // Tab should still cycle tabs even from a result button (focus trap)
-      await user.tab()
-      expect(
-        screen.getByPlaceholderText('Search in file contents...'),
       ).toBeInTheDocument()
     })
   })

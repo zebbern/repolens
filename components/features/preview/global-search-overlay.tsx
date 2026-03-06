@@ -397,13 +397,7 @@ export function GlobalSearchOverlay({
       if (e.key === '2') { e.preventDefault(); setActiveTab('code') }
       if (e.key === '3') { e.preventDefault(); setActiveTab('symbols') }
     }
-    // Tab/Shift+Tab cycling — trap focus within the overlay
-    if (e.key === 'Tab') {
-      e.preventDefault()
-      const tabs: SearchTab[] = ['files', 'code', 'symbols']
-      const idx = tabs.indexOf(activeTab)
-      setActiveTab(tabs[(idx + (e.shiftKey ? tabs.length - 1 : 1)) % tabs.length])
-    }
+
   }, [onClose, itemCount, selectedIndex, selectItem, activeTab])
 
   // Scroll selected item into view
@@ -521,7 +515,7 @@ export function GlobalSearchOverlay({
             <CodeResultsList
               query={debouncedQuery}
               results={codeResults}
-              visibleItems={visibleCodeItems}
+              codeVisibleCount={visibleCodeItems.length}
               stats={codeResultStats}
               searchOptions={codeSearchOptions}
               selectedIndex={selectedIndex}
@@ -611,7 +605,7 @@ type CodeResultItem = { file: string; match: SearchMatch; language?: string }
 function CodeResultsList({
   query,
   results,
-  visibleItems,
+  codeVisibleCount,
   stats,
   searchOptions,
   selectedIndex,
@@ -624,7 +618,7 @@ function CodeResultsList({
 }: {
   query: string
   results: CodeResultItem[]
-  visibleItems: CodeResultItem[]
+  codeVisibleCount: number
   stats: { totalMatches: number; fileCount: number; visibleCount: number } | null
   searchOptions: { caseSensitive: boolean; regex: boolean; wholeWord: boolean }
   selectedIndex: number
@@ -674,9 +668,8 @@ function CodeResultsList({
     fileMatches.get(r.file)!.push(r)
   }
 
-  // Build a set of visible items for quick lookup
-  const visibleSet = new Set(visibleItems)
   let visibleIdx = 0
+  let visibleCount = 0
 
   return (
     <>
@@ -696,7 +689,8 @@ function CodeResultsList({
         const matchElements: React.JSX.Element[] = []
         if (!isCollapsed) {
           for (const r of matches) {
-            if (!visibleSet.has(r)) continue
+            if (visibleCount >= codeVisibleCount) break
+            visibleCount++
             const idx = visibleIdx++
             matchElements.push(
               <button

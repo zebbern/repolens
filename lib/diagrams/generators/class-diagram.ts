@@ -8,6 +8,13 @@ export function generateClassDiagram(analysis: FullAnalysis): MermaidDiagramResu
 
   // Sanitize a name so it's valid as a Mermaid class identifier
   const sanitizeName = (n: string) => n.replace(/[^a-zA-Z0-9_]/g, '_').replace(/_+/g, '_').replace(/^_|_$/g, '') || 'Unknown'
+
+  // Strip all leading TypeScript modifiers from a declaration string
+  const MOD_RE = /^(?:readonly|static|abstract|const|override|declare|public|private|protected)\s+/
+  function stripModifiers(s: string): string {
+    while (MOD_RE.test(s)) s = s.replace(MOD_RE, '')
+    return s
+  }
   // Sanitize property/method text for display inside a class block.
   // Extracts a clean "name : Type" format from raw TypeScript declarations.
   const sanitizeProp = (p: string): string => {
@@ -15,8 +22,7 @@ export function generateClassDiagram(analysis: FullAnalysis): MermaidDiagramResu
     if (!s) return ''
 
     // Strip leading TypeScript keywords that add noise
-    s = s.replace(/^(?:readonly|static|abstract|const|override|declare|public|private|protected)\s+/g, '')
-    s = s.replace(/^(?:readonly|static|abstract|const|override|declare|public|private|protected)\s+/g, '')
+    s = stripModifiers(s)
 
     // Try to extract  name: type  pattern — only when the part before ":"
     // is a simple identifier (not a complex expression with generics, parens, etc.)
@@ -132,9 +138,7 @@ export function generateClassDiagram(analysis: FullAnalysis): MermaidDiagramResu
   function isObjectLikeProperties(properties: string[]): boolean {
     if (properties.length === 0) return false
     const realPropCount = properties.filter(p => {
-      const trimmed = p.trim()
-        .replace(/^(?:readonly|static|abstract|const|override|declare|public|private|protected)\s+/g, '')
-        .replace(/^(?:readonly|static|abstract|const|override|declare|public|private|protected)\s+/g, '')
+      const trimmed = stripModifiers(p.trim())
       return PROPERTY_PATTERN.test(trimmed) || METHOD_PATTERN.test(trimmed)
     }).length
     // Consider it object-like if at least half the "properties" look like real declarations
@@ -176,9 +180,7 @@ export function generateClassDiagram(analysis: FullAnalysis): MermaidDiagramResu
     if (!trimmed) return false
     if (GARBAGE_LINE_PREFIXES.test(trimmed)) return false
 
-    let cleaned = trimmed
-    cleaned = cleaned.replace(/^(?:readonly|static|abstract|const|override|declare|public|private|protected)\s+/g, '')
-    cleaned = cleaned.replace(/^(?:readonly|static|abstract|const|override|declare|public|private|protected)\s+/g, '')
+    const cleaned = stripModifiers(trimmed)
 
     const propMatch = cleaned.match(/^([a-zA-Z_$][\w$]{0,29})\??\s*:/)
     if (propMatch) return !TS_DECLARATION_KEYWORDS.has(propMatch[1])
@@ -295,9 +297,7 @@ export function generateClassDiagram(analysis: FullAnalysis): MermaidDiagramResu
   ])
 
   function extractReferencedTypes(raw: string): string[] {
-    const trimmed = raw.trim()
-      .replace(/^(?:readonly|static|abstract|const|override|declare|public|private|protected)\s+/g, '')
-      .replace(/^(?:readonly|static|abstract|const|override|declare|public|private|protected)\s+/g, '')
+    const trimmed = stripModifiers(raw.trim())
     const colonIdx = trimmed.indexOf(':')
     if (colonIdx <= 0) return []
     const typePart = trimmed.slice(colonIdx + 1)
@@ -305,6 +305,8 @@ export function generateClassDiagram(analysis: FullAnalysis): MermaidDiagramResu
     const regex = /\b([A-Z][a-zA-Z0-9_]+)\b/g
     let match
     while ((match = regex.exec(typePart)) !== null) {
+      // Skip UPPER_SNAKE_CASE constants (e.g. MAX_LENGTH)
+      if (/^[A-Z][A-Z0-9_]+$/.test(match[1])) continue
       if (!BUILTIN_TYPES.has(match[1])) refs.push(match[1])
     }
     return refs

@@ -288,4 +288,31 @@ public class AuditController extends HttpServlet {
       { ruleId: 'java-system-exit', line: 4, verdict: 'tp' },
     ],
   },
+
+  // -----------------------------------------------------------------------
+  // 12. Java XXE via DocumentBuilderFactory → TP
+  // -----------------------------------------------------------------------
+  {
+    name: 'java-xxe-parser',
+    description: 'DocumentBuilderFactory.newInstance() without secure features — XXE',
+    file: {
+      path: 'src/main/java/com/app/xml/XmlParser.java',
+      content: `import javax.xml.parsers.*;
+import org.xml.sax.InputSource;
+import java.io.StringReader;
+
+public class XmlParser {
+    public Document parseXml(String userXml) throws Exception {
+        DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
+        DocumentBuilder builder = factory.newDocumentBuilder();
+        Document doc = builder.parse(new InputSource(new StringReader(userXml)));
+        return doc;
+    }
+}`,
+      language: 'java',
+    },
+    expected: [
+      { ruleId: 'xxe-java', line: 7, verdict: 'tp' },
+    ],
+  },
 ]

@@ -14,6 +14,9 @@ import { goFixtures } from './fixtures-go'
 import { rustFixtures } from './fixtures-rust'
 import { javaFixtures } from './fixtures-java'
 import { compositeFixtures } from './fixtures-composite'
+import { phpFixtures } from './fixtures-php'
+import { cFixtures } from './fixtures-c'
+import { rubyFixtures } from './fixtures-ruby'
 
 // ---------------------------------------------------------------------------
 // All fixtures combined
@@ -26,6 +29,9 @@ const ALL_FIXTURES: FixtureCase[] = [
   ...rustFixtures,
   ...javaFixtures,
   ...compositeFixtures,
+  ...phpFixtures,
+  ...cFixtures,
+  ...rubyFixtures,
 ]
 
 // ---------------------------------------------------------------------------
@@ -282,10 +288,10 @@ describe('Scanner Accuracy Sweep', () => {
     console.log('='.repeat(72))
 
     // Verify minimum fixture count
-    expect(summary.totalFixtures).toBeGreaterThanOrEqual(100)
+    expect(summary.totalFixtures).toBeGreaterThanOrEqual(120)
 
-    // Count total annotated expected findings (90+ required)
+    // Count total annotated expected findings (100+ required)
     const totalAnnotated = ALL_FIXTURES.reduce((sum, f) => sum + f.expected.length, 0)
-    expect(totalAnnotated).toBeGreaterThanOrEqual(90)
+    expect(totalAnnotated).toBeGreaterThanOrEqual(100)
   })
 })

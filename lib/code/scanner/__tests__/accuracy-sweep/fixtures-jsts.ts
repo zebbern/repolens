@@ -993,4 +993,143 @@ export default server`,
       { ruleId: 'graphql-introspection-enabled', line: 7, verdict: 'tp' },
     ],
   },
+
+  // -----------------------------------------------------------------------
+  // 42. Safe config lookup — NOT object injection (negative fixture)
+  // -----------------------------------------------------------------------
+  {
+    name: 'object-injection-bracket-safe',
+    description: 'Config lookup with key from known constant array — not object injection',
+    file: {
+      path: 'src/config/feature-flags.ts',
+      content: `const ALLOWED_FLAGS = ['darkMode', 'betaFeatures', 'newDashboard'] as const
+type FlagKey = typeof ALLOWED_FLAGS[number]
+
+const flagValues: Record<FlagKey, boolean> = {
+  darkMode: true,
+  betaFeatures: false,
+  newDashboard: true,
+}
+
+export function getFlag(key: FlagKey): boolean {
+  const val = flagValues[key]
+  return val ?? false
+}`,
+      language: 'typescript',
+    },
+    expected: [
+      // key is from a typed constant array — NOT request data. No object-injection-bracket.
+    ],
+  },
+
+  // -----------------------------------------------------------------------
+  // 43. Safe string comparison — NOT a timing attack (negative fixture)
+  // -----------------------------------------------------------------------
+  {
+    name: 'timing-attack-comparison-safe',
+    description: 'Normal role check with === — not a secret comparison',
+    file: {
+      path: 'src/middleware/role-check.ts',
+      content: `export function isAdmin(user: { role: string }): boolean {
+  if (user.role === 'admin') {
+    return true
+  }
+  return false
+}`,
+      language: 'typescript',
+    },
+    expected: [
+      // user.role is not a secret, password, token, etc. — safe comparison.
+    ],
+  },
+
+  // -----------------------------------------------------------------------
+  // 44. Safe localStorage — non-sensitive data (negative fixture)
+  // -----------------------------------------------------------------------
+  {
+    name: 'localstorage-safe',
+    description: 'localStorage.setItem for theme preference — not a secret',
+    file: {
+      path: 'src/utils/theme.ts',
+      content: `export function setTheme(theme: 'light' | 'dark') {
+  localStorage.setItem('theme', theme)
+}
+
+export function getTheme(): string {
+  return localStorage.getItem('theme') ?? 'light'
+}`,
+      language: 'typescript',
+    },
+    expected: [
+      // 'theme' key does not match secret/token/password/apiKey patterns.
+    ],
+  },
+
+  // -----------------------------------------------------------------------
+  // 45. Safe console.log — non-sensitive data (negative fixture)
+  // -----------------------------------------------------------------------
+  {
+    name: 'console-log-safe',
+    description: 'console.log for port info — not logging sensitive data',
+    file: {
+      path: 'src/server/startup.ts',
+      content: `const port = process.env.PORT || 3000
+
+export function startServer() {
+  console.log('Server started on port', port)
+  console.log('Environment:', process.env.NODE_ENV)
+}`,
+      language: 'typescript',
+    },
+    expected: [
+      // No password/secret/apiKey/credential in console.log args.
+    ],
+  },
+
+  // -----------------------------------------------------------------------
+  // 46. Safe error logging — server-side only (negative fixture)
+  // -----------------------------------------------------------------------
+  {
+    name: 'error-stack-safe',
+    description: 'logger.error with stack trace — server-side logging, not sent to client',
+    file: {
+      path: 'src/utils/error-logger.ts',
+      content: `import { logger } from './logger'
+
+export function handleError(err: Error, context: string) {
+  logger.error('Operation failed', { context, stack: err.stack })
+}`,
+      language: 'typescript',
+    },
+    expected: [
+      // logger.error is not res.json/res.send — stack not exposed to client.
+    ],
+  },
+
+  // -----------------------------------------------------------------------
+  // 47. Safe Object.assign — merging known objects (negative fixture)
+  // -----------------------------------------------------------------------
+  {
+    name: 'object-assign-safe',
+    description: 'Object.assign({}, defaults, options) — merging known objects, not request data',
+    file: {
+      path: 'src/config/merge.ts',
+      content: `interface AppConfig {
+  timeout: number
+  retries: number
+  debug: boolean
+}
+
+const defaults: AppConfig = { timeout: 5000, retries: 3, debug: false }
+
+export function createConfig(options: Partial<AppConfig>): AppConfig {
+  const merged = Object.assign({}, defaults, options)
+  return merged
+}`,
+      language: 'typescript',
+    },
+    expected: [
+      // First arg to Object.assign is {}, not req.body/params/query — safe.
+    ],
+  },
 ]

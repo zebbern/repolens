@@ -1516,4 +1516,179 @@ export default LegacyWidget`,
       { ruleId: 'react-unsafe-lifecycle', line: 4, verdict: 'tp' },
     ],
   },
+
+  // -----------------------------------------------------------------------
+  // 67. JWT signed with weak/short secret — TP
+  // -----------------------------------------------------------------------
+  {
+    name: 'jwt-weak-secret',
+    description: 'jwt.sign() with short secret string — weak JWT TP',
+    file: {
+      path: 'src/auth/tokens.ts',
+      content: `import jwt from 'jsonwebtoken'
+export function createToken(userId: string) {
+  return jwt.sign({ sub: userId }, 'weak')
+}`,
+      language: 'typescript',
+    },
+    expected: [
+      { ruleId: 'jwt-weak-secret', line: 3, verdict: 'tp' },
+    ],
+  },
+
+  // -----------------------------------------------------------------------
+  // 68. Prototype pollution via Object.assign(req.body) — TP
+  // -----------------------------------------------------------------------
+  {
+    name: 'prototype-pollution-assign',
+    description: 'Object.assign(req.body, defaults) — prototype pollution TP',
+    file: {
+      path: 'src/middleware/merge.ts',
+      content: `export function mergeDefaults(req: any) {
+  const result = Object.assign(req.body, { role: 'user' })
+  return result
+}`,
+      language: 'typescript',
+    },
+    expected: [
+      { ruleId: 'prototype-pollution-assign', line: 2, verdict: 'tp' },
+    ],
+  },
+
+  // -----------------------------------------------------------------------
+  // 69. GraphQL server without depth limiting — TP
+  // -----------------------------------------------------------------------
+  {
+    name: 'graphql-no-depth-limit',
+    description: 'ApolloServer without depthLimit validation rule — TP',
+    file: {
+      path: 'src/graphql/server.ts',
+      content: `import { ApolloServer } from '@apollo/server'
+const typeDefs = \`type Query { hello: String }\`
+const resolvers = { Query: { hello: () => 'world' } }
+const server = new ApolloServer({ typeDefs, resolvers })`,
+      language: 'typescript',
+    },
+    expected: [
+      { ruleId: 'graphql-no-depth-limit', line: 4, verdict: 'tp' },
+    ],
+  },
+
+  // -----------------------------------------------------------------------
+  // 70. Weak cipher mode: ECB — TP
+  // -----------------------------------------------------------------------
+  {
+    name: 'weak-cipher-ecb',
+    description: 'createCipheriv with aes-256-ecb — weak ECB mode TP',
+    file: {
+      path: 'src/crypto/encrypt.ts',
+      content: `import crypto from 'crypto'
+export function encrypt(data: string, key: Buffer) {
+  const cipher = crypto.createCipheriv('aes-256-ecb', key, null)
+  return cipher.update(data, 'utf8', 'hex') + cipher.final('hex')
+}`,
+      language: 'typescript',
+    },
+    expected: [
+      { ruleId: 'weak-cipher-ecb', line: 3, verdict: 'tp' },
+    ],
+  },
+
+  // -----------------------------------------------------------------------
+  // 71. Hardcoded salt in pbkdf2 — TP
+  // -----------------------------------------------------------------------
+  {
+    name: 'hardcoded-salt',
+    description: 'pbkdf2 with string literal salt — hardcoded salt TP',
+    file: {
+      path: 'src/crypto/derive.ts',
+      content: `import crypto from 'crypto'
+export function deriveKey(password: string, cb: Function) {
+  crypto.pbkdf2(password, 'fixed-salt-value', 100000, 32, 'sha256', cb)
+}`,
+      language: 'typescript',
+    },
+    expected: [
+      { ruleId: 'hardcoded-salt', line: 3, verdict: 'tp' },
+    ],
+  },
+
+  // -----------------------------------------------------------------------
+  // 72. Hardcoded HMAC secret — TP
+  // -----------------------------------------------------------------------
+  {
+    name: 'hardcoded-hmac-key',
+    description: 'createHmac with string literal secret — hardcoded HMAC TP',
+    file: {
+      path: 'src/crypto/sign.ts',
+      content: `import crypto from 'crypto'
+export function signPayload(data: string) {
+  return crypto.createHmac('sha256', 'my-hmac-secret-key').update(data).digest('hex')
+}`,
+      language: 'typescript',
+    },
+    expected: [
+      { ruleId: 'hardcoded-hmac-key', line: 3, verdict: 'tp' },
+    ],
+  },
+
+  // -----------------------------------------------------------------------
+  // 73. Worker with eval: true — TP
+  // -----------------------------------------------------------------------
+  {
+    name: 'worker-eval-true',
+    description: 'new Worker(code, { eval: true }) — eval-mode worker TP',
+    file: {
+      path: 'src/workers/runner.ts',
+      content: `import { Worker } from 'worker_threads'
+export function runCode(code: string) {
+  const worker = new Worker(code, { eval: true })
+  worker.on('message', (result) => console.log(result))
+}`,
+      language: 'typescript',
+    },
+    expected: [
+      { ruleId: 'worker-eval', line: 3, verdict: 'tp' },
+    ],
+  },
+
+  // -----------------------------------------------------------------------
+  // 74. node-serialize require + unserialize — TP
+  // -----------------------------------------------------------------------
+  {
+    name: 'node-serialize-unserialize',
+    description: 'require(node-serialize) + unserialize() — known RCE TP',
+    file: {
+      path: 'src/serialization/session.ts',
+      content: `const serialize = require('node-serialize')
+export function loadSession(data: string) {
+  return serialize.unserialize(data)
+}`,
+      language: 'typescript',
+    },
+    expected: [
+      { ruleId: 'node-serialize-unserialize', line: 1, verdict: 'tp' },
+      { ruleId: 'node-serialize-unserialize', line: 3, verdict: 'tp' },
+    ],
+  },
+
+  // -----------------------------------------------------------------------
+  // 75. localStorage.setItem with auth token — TP
+  // -----------------------------------------------------------------------
+  {
+    name: 'localstorage-secret-store',
+    description: 'localStorage/sessionStorage storing auth_token and api_key — TP',
+    file: {
+      path: 'src/services/auth-storage.ts',
+      content: `export function saveAuthToken(token: string) {
+  localStorage.setItem('auth_token', token)
+  sessionStorage.setItem('api_key', token)
+}`,
+      language: 'typescript',
+    },
+    expected: [
+      { ruleId: 'localstorage-secret', line: 2, verdict: 'tp' },
+      { ruleId: 'localstorage-secret', line: 3, verdict: 'tp' },
+    ],
+  },
 ]

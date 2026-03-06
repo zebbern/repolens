@@ -377,4 +377,281 @@ export function safeWrite(filePath: string, data: string) {
       { ruleId: 'composite-toctou-file-check', line: 5, verdict: 'tp' },
     ],
   },
+
+  // -----------------------------------------------------------------------
+  // 15. Command injection: exec() with variable — TP
+  // -----------------------------------------------------------------------
+  {
+    name: 'composite-cmd-injection-exec-var',
+    description: 'child_process import + exec(cmd) with variable — cmd injection TP',
+    file: {
+      path: 'src/utils/run-command.ts',
+      content: `import { exec } from 'child_process'
+export function runCommand(userCmd: string) {
+  const cmd = \`ls \${userCmd}\`
+  exec(cmd, (err, stdout) => console.log(stdout))
+}`,
+      language: 'typescript',
+    },
+    expected: [
+      { ruleId: 'composite-cmd-injection-exec-var', line: 4, verdict: 'tp' },
+    ],
+  },
+
+  // -----------------------------------------------------------------------
+  // 16. Command injection: exec() with util.format — TP
+  // -----------------------------------------------------------------------
+  {
+    name: 'composite-cmd-injection-format',
+    description: 'child_process import + util.format command string — cmd injection TP',
+    file: {
+      path: 'src/utils/pdf-convert.ts',
+      content: `import { exec } from 'child_process'
+import util from 'util'
+export function convertPdf(inputPath: string) {
+  const cmd = util.format('convert "%s" out.pdf', inputPath)
+  exec(cmd)
+}`,
+      language: 'typescript',
+    },
+    expected: [
+      { ruleId: 'composite-cmd-injection-format', line: 4, verdict: 'tp' },
+    ],
+  },
+
+  // -----------------------------------------------------------------------
+  // 17. Command injection: exec() with string concat — TP
+  // -----------------------------------------------------------------------
+  {
+    name: 'composite-cmd-injection-concat',
+    description: 'child_process import + command built via string concat — cmd injection TP',
+    file: {
+      path: 'src/deploy/runner.ts',
+      content: `import { exec } from 'child_process'
+export function deploy(branch: string) {
+  let command = 'git checkout ' + branch
+  command += ' && npm run build'
+  exec(command)
+}`,
+      language: 'typescript',
+    },
+    expected: [
+      { ruleId: 'composite-cmd-injection-concat', line: 3, verdict: 'tp' },
+    ],
+  },
+
+  // -----------------------------------------------------------------------
+  // 18. Path traversal: req.query flows into readFile — TP
+  // -----------------------------------------------------------------------
+  {
+    name: 'composite-path-traversal-req',
+    description: 'req.query.name passed into fs.readFile — path traversal TP',
+    file: {
+      path: 'src/routes/file-serve.ts',
+      content: `import { Router } from 'express'
+import fs from 'fs'
+const router = Router()
+router.get('/file', async (req, res) => {
+  const name = req.query.name as string
+  const data = await fs.promises.readFile('./uploads/' + name)
+  res.send(data)
+})`,
+      language: 'typescript',
+    },
+    expected: [
+      { ruleId: 'composite-path-traversal-req', line: 6, verdict: 'tp' },
+    ],
+  },
+
+  // -----------------------------------------------------------------------
+  // 19. SSRF: req.query.url flows into fetch — TP
+  // -----------------------------------------------------------------------
+  {
+    name: 'composite-ssrf',
+    description: 'req.query.url passed to fetch() — SSRF TP',
+    file: {
+      path: 'src/routes/proxy.ts',
+      content: `import { Router } from 'express'
+const router = Router()
+router.get('/proxy', async (req, res) => {
+  const url = req.query.url as string
+  const response = await fetch(url)
+  res.json(await response.json())
+})`,
+      language: 'typescript',
+    },
+    expected: [
+      { ruleId: 'composite-ssrf', line: 5, verdict: 'tp' },
+    ],
+  },
+
+  // -----------------------------------------------------------------------
+  // 20. Open redirect: res.redirect with req.query — TP
+  // -----------------------------------------------------------------------
+  {
+    name: 'composite-open-redirect-response',
+    description: 'res.redirect(req.query.returnTo) — open redirect TP',
+    file: {
+      path: 'src/routes/callback.ts',
+      content: `import { Router } from 'express'
+const router = Router()
+router.get('/callback', (req, res) => {
+  const returnUrl = req.query.returnTo as string
+  res.redirect(returnUrl)
+})`,
+      language: 'typescript',
+    },
+    expected: [
+      { ruleId: 'composite-open-redirect-response', line: 5, verdict: 'tp' },
+    ],
+  },
+
+  // -----------------------------------------------------------------------
+  // 21. Mass assignment: Model.create(req.body) — TP
+  // -----------------------------------------------------------------------
+  {
+    name: 'composite-mass-assignment-orm',
+    description: 'User.create(req.body) without field whitelist — mass assignment TP',
+    file: {
+      path: 'src/routes/users.ts',
+      content: `import { Router } from 'express'
+const router = Router()
+router.post('/users', async (req, res) => {
+  const user = await User.create(req.body)
+  res.json(user)
+})`,
+      language: 'typescript',
+    },
+    expected: [
+      { ruleId: 'composite-mass-assignment-orm', line: 4, verdict: 'tp' },
+    ],
+  },
+
+  // -----------------------------------------------------------------------
+  // 22. IDOR: findById(req.params.id) without auth — TP
+  // -----------------------------------------------------------------------
+  {
+    name: 'composite-idor-direct-lookup',
+    description: 'Order.findById(req.params.id) without ownership check — IDOR TP',
+    file: {
+      path: 'src/routes/orders.ts',
+      content: `import { Router } from 'express'
+const router = Router()
+router.get('/orders/:id', async (req, res) => {
+  const order = await Order.findById(req.params.id)
+  res.json(order)
+})`,
+      language: 'typescript',
+    },
+    expected: [
+      { ruleId: 'composite-idor-direct-lookup', line: 4, verdict: 'tp' },
+    ],
+  },
+
+  // -----------------------------------------------------------------------
+  // 23. TOCTOU: async access() + writeFile() race — TP
+  // -----------------------------------------------------------------------
+  {
+    name: 'composite-toctou-async-file',
+    description: 'fs.access() before fs.writeFile() — async TOCTOU race, TP',
+    file: {
+      path: 'src/utils/safe-write-async.ts',
+      content: `import fs from 'fs/promises'
+export async function writeIfMissing(path: string, data: string) {
+  const exists = await fs.access(path).then(() => true).catch(() => false)
+  if (!exists) {
+    await fs.writeFile(path, data)
+  }
+}`,
+      language: 'typescript',
+    },
+    expected: [
+      { ruleId: 'composite-toctou-async-file', line: 5, verdict: 'tp' },
+    ],
+  },
+
+  // -----------------------------------------------------------------------
+  // 24. NEGATIVE: execFile is safe — no composite cmd injection
+  // -----------------------------------------------------------------------
+  {
+    name: 'composite-cmd-safe-execfile',
+    description: 'execFile() with argument array — safe, no composite cmd injection',
+    file: {
+      path: 'src/utils/image-convert.ts',
+      content: `import { execFile } from 'child_process'
+export function convertImage(inputPath: string) {
+  execFile('convert', [inputPath, 'output.png'], (err) => {
+    if (err) console.error(err)
+  })
+}`,
+      language: 'typescript',
+    },
+    expected: [
+      // execFile is safe — composite cmd injection rules should NOT fire
+    ],
+  },
+
+  // -----------------------------------------------------------------------
+  // 25. NEGATIVE: static URL in fetch — no SSRF
+  // -----------------------------------------------------------------------
+  {
+    name: 'composite-ssrf-safe-static',
+    description: 'fetch() with hardcoded URL — no req.query, no SSRF',
+    file: {
+      path: 'src/services/weather.ts',
+      content: `export async function getWeather() {
+  const response = await fetch('https://api.weather.gov/forecast')
+  return response.json()
+}`,
+      language: 'typescript',
+    },
+    expected: [
+      // Static URL, no req.query — composite-ssrf should NOT fire
+    ],
+  },
+
+  // -----------------------------------------------------------------------
+  // 26. NEGATIVE: destructured req.body — no mass assignment
+  // -----------------------------------------------------------------------
+  {
+    name: 'composite-mass-assignment-safe',
+    description: 'Destructured req.body fields — mass assignment should NOT fire',
+    file: {
+      path: 'src/routes/users-safe.ts',
+      content: `import { Router } from 'express'
+const router = Router()
+router.post('/users', async (req, res) => {
+  const { name, email } = req.body
+  const user = await User.create({ name, email })
+  res.json(user)
+})`,
+      language: 'typescript',
+    },
+    expected: [
+      // Destructured fields — composite-mass-assignment-orm should NOT fire
+    ],
+  },
+
+  // -----------------------------------------------------------------------
+  // 27. NEGATIVE: writeFile without existence check — no TOCTOU
+  // -----------------------------------------------------------------------
+  {
+    name: 'composite-toctou-safe',
+    description: 'Direct writeFile without access/exists check — no TOCTOU',
+    file: {
+      path: 'src/utils/write-config.ts',
+      content: `import fs from 'fs/promises'
+export async function writeConfig(path: string, data: string) {
+  try {
+    await fs.writeFile(path, data)
+  } catch (err) {
+    console.error('Write failed', err)
+  }
+}`,
+      language: 'typescript',
+    },
+    expected: [
+      // No access/exists/stat check before writeFile — TOCTOU should NOT fire
+    ],
+  },
 ]

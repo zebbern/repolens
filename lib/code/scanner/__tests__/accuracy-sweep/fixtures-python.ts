@@ -596,4 +596,68 @@ def load_xml(path):
       { ruleId: 'timing-attack-py', line: 2, verdict: 'tp' },
     ],
   },
+
+  // -----------------------------------------------------------------------
+  // 28. Python os.system with f-string — composite cmd injection TP
+  // -----------------------------------------------------------------------
+  {
+    name: 'composite-python-os-cmd',
+    description: 'os.system(f"...") + os.popen("%s" %) — Python cmd injection TP',
+    file: {
+      path: 'src/ops/process_mgr.py',
+      content: `import os
+def kill_process(pid):
+    os.system(f"kill -9 {pid}")
+def list_files(directory):
+    os.popen("ls %s" % directory)`,
+      language: 'python',
+    },
+    expected: [
+      { ruleId: 'composite-python-os-cmd', line: 3, verdict: 'tp' },
+    ],
+  },
+
+  // -----------------------------------------------------------------------
+  // 29. Django view without CSRF protection — composite TP
+  // -----------------------------------------------------------------------
+  {
+    name: 'composite-csrf-missing-django-view',
+    description: 'Django class-based view post() without csrf_protect — CSRF TP',
+    file: {
+      path: 'src/views/orders.py',
+      content: `from django.http import JsonResponse
+import json
+class OrderView:
+    def post(self, request):
+        data = json.loads(request.body)
+        return JsonResponse({"status": "created"})`,
+      language: 'python',
+    },
+    expected: [
+      { ruleId: 'composite-csrf-missing-django-view', line: 4, verdict: 'tp' },
+    ],
+  },
+
+  // -----------------------------------------------------------------------
+  // 30. NEGATIVE: Django view WITH csrf_protect — safe
+  // -----------------------------------------------------------------------
+  {
+    name: 'composite-csrf-safe-django',
+    description: 'Django view with @csrf_protect — CSRF rule should NOT fire',
+    file: {
+      path: 'src/views/payments.py',
+      content: `from django.views.decorators.csrf import csrf_protect
+from django.http import JsonResponse
+import json
+class PaymentView:
+    @csrf_protect
+    def post(self, request):
+        data = json.loads(request.body)
+        return JsonResponse({"paid": True})`,
+      language: 'python',
+    },
+    expected: [
+      // @csrf_protect present — composite-csrf-missing-django-view should NOT fire
+    ],
+  },
 ]

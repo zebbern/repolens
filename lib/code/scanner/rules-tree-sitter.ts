@@ -20,6 +20,8 @@ export interface TreeSitterRule {
   languages: string[]
   /** Name of the capture to report (default: first capture) */
   captureName?: string
+  /** Regex to exclude files by path */
+  excludeFiles?: RegExp
   confidence?: 'high' | 'medium' | 'low'
 }
 
@@ -216,6 +218,7 @@ const SECURITY_RULES: TreeSitterRule[] = [
   (#match? @_name "^(password|secret|api_key|apikey|token|private_key|auth_token|access_key|PASSWORD|SECRET|API_KEY|APIKEY|TOKEN|PRIVATE_KEY|AUTH_TOKEN|ACCESS_KEY|Password|Secret|Api_Key|Token|Private_Key)$"))`,
     languages: ['python'],
     captureName: 'value',
+    excludeFiles: /test|fixture|__tests__|spec|mock/i,
     confidence: 'medium',
   },
   {

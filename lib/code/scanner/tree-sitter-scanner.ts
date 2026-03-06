@@ -83,6 +83,7 @@ export async function scanWithTreeSitter(
 
       try {
         for (const rule of rules) {
+          if (rule.excludeFiles && rule.excludeFiles.test(path)) continue
           const ruleIssues = await runRuleOnFileAsync(rule, tree, language, path, file)
           for (const issue of ruleIssues) {
             if (!seenIds.has(issue.id)) {

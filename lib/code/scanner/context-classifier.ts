@@ -14,7 +14,7 @@ export interface LineClassification {
 // Test / Generated file patterns
 // ---------------------------------------------------------------------------
 
-const TEST_FILE_PATTERN = /\.test\.|\.spec\.|__tests__[/\\]|[/\\]test[/\\]|__mocks__[/\\]|fixtures[/\\]/i
+const TEST_FILE_PATTERN = /\.test\.|\.spec\.|__tests__[\/\\]|[\/\\]test[\/\\]|__mocks__[\/\\]|fixtures[\/\\]|_test\.go$|_test\.rs$/i
 const GENERATED_FILE_PATTERN = /\.generated\.|\.g\.ts$|__generated__[/\\]|codegen[/\\]|\.d\.ts$|generated[/\\]/i
 const EXAMPLE_FILE_PATTERN = /[/\\](?:examples?|docs?|documentation|samples?|demo|tutorials?|playground|fixtures?|mocks?|__mocks__|__fixtures__|stories|\.storybook)[/\\]|\.stories\./i
 
@@ -32,7 +32,7 @@ const PY_TRIPLE_SINGLE = /'''/
 // Type annotation patterns
 // ---------------------------------------------------------------------------
 
-const TYPE_ANNOTATION_PATTERN = /^\s*(?:type\s+\w|interface\s+\w)|:\s*[A-Z]\w+|(?:\bas\b\s+[A-Z]\w+)|<[A-Z]\w+>/
+const TYPE_ANNOTATION_PATTERN = /^\s*(?:type\s+\w|interface\s+\w)|:\s*[A-Z]\w+|(?:\bas\b\s+[A-Z]\w+)|<[A-Z]\w+>|@dataclass|class\s+\w+.*:|def\s+\w+\(.*:\s*(?:str|int|bool)|(?:String|int|boolean)\s+\w+\)|type\s+\w+\s+struct/
 
 // ---------------------------------------------------------------------------
 // String literal heuristic

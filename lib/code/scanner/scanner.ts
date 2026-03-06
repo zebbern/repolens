@@ -62,7 +62,7 @@ export function computeScanSummary(issues: CodeIssue[]) {
 const SECRET_RULE_IDS = /secret|password/i
 
 // Rule IDs suppressed when match is inside a string literal
-const STRING_LITERAL_SUPPRESSED_IDS = new Set(['eval-usage', 'sql-injection'])
+const STRING_LITERAL_SUPPRESSED_IDS = new Set(['eval-usage', 'sql-injection', 'innerhtml-xss'])
 
 // Regex to extract a quoted value from a snippet like `key = "VALUE"` or `password: 'VALUE'`
 const EXTRACT_SECRET_VALUE = /[:=]\s*["'`]([^"'`]{4,})["'`]/

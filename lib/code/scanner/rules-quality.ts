@@ -119,7 +119,7 @@ export const BAD_PRACTICE_RULES: ScanRule[] = [
     pattern: '[^,]\\s*_\\s*(?::)?=\\s*\\S+\\(',
     patternOptions: { regex: true },
     fileFilter: GO,
-    excludePattern: /range|type assertion|ok.*:?=|defer/,
+    excludePattern: /range|type assertion|ok.*:?=|defer|Close|Fprintf|Write|Flush|Sync|Print|Log|Signal|Notify/,
     confidence: 'medium',
   },
   {
@@ -132,7 +132,8 @@ export const BAD_PRACTICE_RULES: ScanRule[] = [
     pattern: '\\.(?:unwrap|expect)\\s*\\(',
     patternOptions: { regex: true },
     fileFilter: RUST,
-    excludeFiles: /test|example|bench/i,
+    excludeFiles: /test|example|bench|_test\.rs$/i,
+    excludePattern: /#\[test\]|#\[cfg\(test\)\]/,
     confidence: 'low',
   },
   {

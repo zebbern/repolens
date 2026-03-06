@@ -126,7 +126,7 @@ export const FRAMEWORK_RULES: ScanRule[] = [
     pattern: 'export\\s+(async\\s+)?function\\s+(GET|POST|PUT|DELETE|PATCH)\\s*\\(',
     patternOptions: { regex: true },
     fileFilter: JS_TS,
-    excludePattern: /auth|session|verifyToken|getServerSession|requireAuth|isAuthenticated/i,
+    excludePattern: /auth|session|verifyToken|getServerSession|requireAuth|isAuthenticated|webhook|health|status|ping|public|cron|sitemap|robots|favicon|manifest/i,
     confidence: 'low',
   },
   {
@@ -327,7 +327,8 @@ export const FRAMEWORK_RULES: ScanRule[] = [
     pattern: '@csrf_exempt',
     patternOptions: { regex: false },
     fileFilter: PY,
-    confidence: 'high',
+    excludePattern: /webhook|stripe|github|twilio|paypal|callback|hook/i,
+    confidence: 'medium',
   },
   {
     id: 'django-mark-safe',
@@ -385,7 +386,7 @@ export const FRAMEWORK_RULES: ScanRule[] = [
     pattern: 'app\\.run\\s*\\([^)]*debug\\s*=\\s*True',
     patternOptions: { regex: true },
     fileFilter: PY,
-    excludePattern: /test|#.*debug/i,
+    excludePattern: /test|#.*debug|__main__|__name__/i,
     confidence: 'high',
   },
   {

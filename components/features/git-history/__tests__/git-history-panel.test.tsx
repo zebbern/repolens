@@ -91,4 +91,40 @@ describe('GitHistoryPanel', () => {
     expect(blameBtn).not.toBeDisabled()
     expect(fileHistoryBtn).not.toBeDisabled()
   })
+
+  it('shows cursor-not-allowed on disabled tabs', () => {
+    render(<GitHistoryPanel />)
+
+    const blameBtn = screen.getByRole('button', { name: /blame/i })
+    expect(blameBtn.className).toContain('cursor-not-allowed')
+  })
+
+  it('shows hint to select a file when on timeline with no file', () => {
+    render(<GitHistoryPanel />)
+
+    expect(
+      screen.getByText(/select a file in code tab to unlock file history and blame/i),
+    ).toBeInTheDocument()
+  })
+
+  it('hides hint when a file is selected', () => {
+    vi.mocked(useApp).mockReturnValue({
+      selectedFilePath: 'src/index.ts',
+      setSelectedFilePath: vi.fn(),
+    } as unknown as ReturnType<typeof useApp>)
+
+    render(<GitHistoryPanel />)
+
+    expect(
+      screen.queryByText(/select a file in code tab to unlock file history and blame/i),
+    ).not.toBeInTheDocument()
+  })
+
+  it('shows tooltip text for disabled tabs', () => {
+    render(<GitHistoryPanel />)
+
+    // Tooltip content is rendered (mocked as simple span)
+    const tooltipTexts = screen.getAllByText(/select a file in the code tab first/i)
+    expect(tooltipTexts.length).toBeGreaterThan(0)
+  })
 })

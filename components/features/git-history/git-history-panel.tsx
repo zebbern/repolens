@@ -1,13 +1,14 @@
 "use client"
 
 import { useEffect, useCallback, useState } from "react"
-import { GitCommitHorizontal, History, FileText, AlertCircle, X, RefreshCw, Loader2 } from "lucide-react"
+import { GitCommitHorizontal, History, FileText, AlertCircle, X, RefreshCw, Loader2, Info, Lock } from "lucide-react"
 import { useSession } from "next-auth/react"
 import { useApp, useRepository } from "@/providers"
 import { useGitHistory, type GitHistoryView } from "@/hooks/use-git-history"
 import { fetchFileViaProxy } from "@/lib/github/client"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
+import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "@/components/ui/tooltip"
 import { BlameView } from "./blame-view"
 import { CommitTimeline } from "./commit-timeline"
 import { FileHistoryList } from "./file-history-list"
@@ -175,28 +176,59 @@ export function GitHistoryPanel({ navigateToFile }: GitHistoryPanelProps) {
     <div className="flex h-full flex-col overflow-hidden">
       {/* View mode tabs — hide during commit detail */}
       {viewMode !== 'commit-detail' && (
-        <div className="flex items-center gap-1 border-b px-4 py-1.5 shrink-0">
-          {VIEW_TABS.map((tab) => {
-            const isDisabled = tab.requiresFile && !activeFile
-            return (
-              <Button
-                key={tab.id}
-                variant={viewMode === tab.id ? 'secondary' : 'ghost'}
-                size="sm"
-                className={cn('h-7 text-xs gap-1.5', isDisabled && 'opacity-50')}
-                disabled={isDisabled}
-                onClick={() => handleViewChange(tab.id)}
-              >
-                <tab.icon className="h-3.5 w-3.5" />
-                {tab.label}
-              </Button>
-            )
-          })}
+        <div className="flex flex-col border-b shrink-0">
+          <div className="flex items-center gap-1 px-4 py-1.5">
+            <TooltipProvider delayDuration={300}>
+              {VIEW_TABS.map((tab) => {
+                const isDisabled = tab.requiresFile && !activeFile
+                const button = (
+                  <Button
+                    key={tab.id}
+                    variant={viewMode === tab.id ? 'secondary' : 'ghost'}
+                    size="sm"
+                    className={cn(
+                      'h-7 text-xs gap-1.5',
+                      isDisabled && 'opacity-50 cursor-not-allowed',
+                    )}
+                    disabled={isDisabled}
+                    onClick={() => handleViewChange(tab.id)}
+                  >
+                    <tab.icon className="h-3.5 w-3.5" />
+                    {tab.label}
+                    {isDisabled && <Lock className="h-3 w-3 text-muted-foreground" />}
+                  </Button>
+                )
 
-          {activeFile && (
-            <span className="ml-auto text-xs text-muted-foreground truncate max-w-[200px]">
-              {activeFile}
-            </span>
+                if (isDisabled) {
+                  return (
+                    <Tooltip key={tab.id}>
+                      <TooltipTrigger asChild>
+                        <span tabIndex={0}>{button}</span>
+                      </TooltipTrigger>
+                      <TooltipContent side="bottom">
+                        <p className="text-xs">Select a file in the Code tab first</p>
+                      </TooltipContent>
+                    </Tooltip>
+                  )
+                }
+
+                return button
+              })}
+            </TooltipProvider>
+
+            {activeFile && (
+              <span className="ml-auto text-xs text-muted-foreground truncate max-w-[200px]">
+                {activeFile}
+              </span>
+            )}
+          </div>
+
+          {/* Hint when on timeline and no file selected */}
+          {viewMode === 'timeline' && !activeFile && (
+            <div className="flex items-center gap-1.5 px-4 pb-1.5 text-xs text-muted-foreground">
+              <Info className="h-3 w-3 shrink-0" />
+              <span>Select a file in Code tab to unlock File History and Blame</span>
+            </div>
           )}
         </div>
       )}
@@ -247,12 +279,21 @@ export function GitHistoryPanel({ navigateToFile }: GitHistoryPanelProps) {
             />
           ) : null
         ) : viewMode === 'file-history' ? (
-          <FileHistoryList
-            commits={fileCommits}
-            filePath={activeFile ?? ''}
-            onCommitClick={handleCommitClick}
-            isLoading={isLoading}
-          />
+          !activeFile ? (
+            <div className="flex flex-col items-center justify-center gap-3 py-16 text-center">
+              <GitCommitHorizontal className="h-10 w-10 text-muted-foreground/50" />
+              <p className="text-sm text-muted-foreground">
+                Select a file in the Code tab to view file history
+              </p>
+            </div>
+          ) : (
+            <FileHistoryList
+              commits={fileCommits}
+              filePath={activeFile}
+              onCommitClick={handleCommitClick}
+              isLoading={isLoading}
+            />
+          )
         ) : (
           /* timeline */
           <CommitTimeline

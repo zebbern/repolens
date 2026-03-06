@@ -25,6 +25,7 @@ if __name__ == '__main__':
     },
     expected: [
       { ruleId: 'flask-debug-mode', line: 10, verdict: 'tp' },
+      { ruleId: 'debug-mode-production', line: 10, verdict: 'tp' },
     ],
   },
 
@@ -284,6 +285,8 @@ DEBUG = True`,
     expected: [
       { ruleId: 'hardcoded-secret', line: 1, verdict: 'tp' },
       { ruleId: 'python-django-debug', line: 5, verdict: 'tp' },
+      { ruleId: 'flask-secret-key-hardcoded', line: 1, verdict: 'tp' },
+      { ruleId: 'debug-mode-production', line: 5, verdict: 'tp' },
     ],
   },
 ]

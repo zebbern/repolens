@@ -34,7 +34,7 @@ export const SECURITY_RULES: ScanRule[] = [
     cwe: 'CWE-798',
     owasp: 'A07:2021 Identification and Authentication Failures',
     learnMoreUrl: 'https://cwe.mitre.org/data/definitions/798.html',
-    pattern: '(?:api[_-]?key|api[_-]?secret|secret[_-]?key|access[_-]?token|auth[_-]?token|private[_-]?key|client[_-]?secret)\\s*[:=]\\s*["\'][^"\']{8,}["\']',
+    pattern: '(?:api[_-]?key|api[_-]?secret|secret[_-]?key|access[_-]?token|auth[_-]?token|private[_-]?key|client[_-]?secret|\\bsecret\\b)\\s*[:=]\\s*["\'][^"\']{8,}["\']',
     patternOptions: { regex: true, caseSensitive: false },
     excludePattern: /process\.env|import\.meta\.env|env\.|getenv|os\.environ|ENV\[|example|placeholder|your[_-]|xxx|changeme|TODO|test[_-]|fake[_-]|mock[_-]|sample[_-]|dummy|fixture|\.md["']|README|schema|zod|yup|type\b|interface\b|label|i18n|locale|translation|field|\bform\b|\binput\b|\bdisplay\b|message|dataclass|@dataclass/i,
     excludeFiles: /rules-security|rules-security-lang|rules-quality|rules-framework|rules-composite|\.test\.|_test\.\w+$|\.spec\.|__tests__|[/\\]tests?[/\\]|fixture|e2e|docker-compose|\.ya?ml$|\.toml$|\.env\.example|\.env\.template|\.env\.sample/i,

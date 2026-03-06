@@ -56,6 +56,8 @@ pub fn free_ptr(ptr: *mut u8) {
     expected: [
       { ruleId: 'rust-unsafe-block', line: 4, verdict: 'tp' },
       { ruleId: 'rust-unsafe-block', line: 8, verdict: 'tp' },
+      { ruleId: 'rust-unsafe', line: 4, verdict: 'tp' },
+      { ruleId: 'rust-unsafe', line: 8, verdict: 'tp' },
     ],
   },
 

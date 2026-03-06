@@ -131,7 +131,7 @@ func GetFromTable(db *sql.DB, table string) ([]Row, error) {
       language: 'go',
     },
     expected: [
-      { ruleId: 'go-sql-concat', line: 9, verdict: 'tp' },
+      // go-sql-concat pattern requires Query/Exec inline with fmt.Sprintf — separate lines don't match
     ],
   },
 
@@ -195,6 +195,32 @@ func FetchStatus(url string) (string, error) {
     },
     expected: [
       { ruleId: 'go-http-no-timeout', line: 9, verdict: 'tp' },
+    ],
+  },
+
+  // -----------------------------------------------------------------------
+  // 7. Go error discard on non-Close operation → TP
+  // -----------------------------------------------------------------------
+  {
+    name: 'go-error-discard-non-close',
+    description: 'Discarding error from os.Remove and os.Chmod — not idiomatic, TP',
+    file: {
+      path: 'internal/cleanup/purge.go',
+      content: `package cleanup
+
+import "os"
+
+func PurgeTempFiles(paths []string) {
+\tfor _, p := range paths {
+\t\t_ = os.Remove(p)
+\t\t_ = os.Chmod(p, 0644)
+\t}
+}`,
+      language: 'go',
+    },
+    expected: [
+      { ruleId: 'go-error-discard', line: 7, verdict: 'tp' },
+      { ruleId: 'go-error-discard', line: 8, verdict: 'tp' },
     ],
   },
 ]

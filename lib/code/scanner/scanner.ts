@@ -56,10 +56,15 @@ export function computeScanSummary(issues: CodeIssue[]) {
   }
 }
 
-// Rule IDs related to secrets/passwords (used for entropy & type-annotation suppression).
+// Rule IDs related to secrets/passwords (used for type-annotation suppression).
 // Only assignment-pattern rules — high-confidence pattern-specific rules (aws-key,
 // github-token) already have specific patterns that minimise FPs.
 const SECRET_RULE_IDS = /secret|password/i
+
+// Subset of secret rules that benefit from entropy filtering.
+// Password rules are excluded: passwords are inherently low-entropy
+// ("admin123", "password1") but still represent real security risks.
+const ENTROPY_CHECKED_RULE_IDS = /secret/i
 
 // Rule IDs suppressed when match is inside a string literal
 const STRING_LITERAL_SUPPRESSED_IDS = new Set(['eval-usage', 'sql-injection', 'innerhtml-xss'])
@@ -200,8 +205,8 @@ function runRegexRules(ctx: ScanContext): RegexRulesResult {
         // String literal suppression for eval/sql patterns
         if (ctx.isStringLiteral && STRING_LITERAL_SUPPRESSED_IDS.has(rule.id)) continue
 
-        // --- Entropy check for secret/password rules ---
-        if (SECRET_RULE_IDS.test(rule.id)) {
+        // --- Entropy check for secret rules (not password — passwords are inherently low-entropy) ---
+        if (ENTROPY_CHECKED_RULE_IDS.test(rule.id)) {
           const valueMatch = match.content.match(EXTRACT_SECRET_VALUE)
           if (valueMatch) {
             const secretValue = valueMatch[1]

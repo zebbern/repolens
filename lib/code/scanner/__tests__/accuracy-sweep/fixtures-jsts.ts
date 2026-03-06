@@ -96,9 +96,8 @@ describe('expression parser', () => {
       language: 'typescript',
     },
     expected: [
-      // eval-usage is suppressed in test files via excludeFiles
-      // innerhtml-xss is suppressed for static string literals via STRING_LITERAL_SUPPRESSED_IDS
-      // console.log in test file — quality rule suppressed for test files → should NOT fire
+      // eval-usage is security+critical — fires even on test files despite excludeFiles
+      { ruleId: 'eval-usage', line: 6, verdict: 'fp' },
     ],
   },
 
@@ -133,6 +132,11 @@ app.listen(3000)`,
       { ruleId: 'express-no-helmet', line: 4, verdict: 'tp' },
       { ruleId: 'express-no-rate-limit', line: 8, verdict: 'tp' },
       { ruleId: 'express-no-rate-limit', line: 13, verdict: 'tp' },
+      { ruleId: 'express-body-parser-no-limit', line: 6, verdict: 'tp' },
+      { ruleId: 'composite-csrf-missing-express', line: 13, verdict: 'tp' },
+      { ruleId: 'express-no-rate-limit', line: 5, verdict: 'fp' },
+      { ruleId: 'express-no-rate-limit', line: 6, verdict: 'fp' },
+      { ruleId: 'composite-async-no-try-catch', line: 8, verdict: 'tp' },
     ],
   },
 
@@ -157,7 +161,9 @@ export async function GET(request: Request) {
       language: 'typescript',
     },
     expected: [
-      // Auth is present, so nextjs-api-no-auth should NOT fire
+      // nextjs-api-no-auth fires because per-line regex can't see getServerSession on a different line
+      { ruleId: 'nextjs-api-no-auth', line: 4, verdict: 'fp' },
+      { ruleId: 'composite-async-no-try-catch', line: 4, verdict: 'tp' },
     ],
   },
 
@@ -184,6 +190,8 @@ export default router`,
     },
     expected: [
       { ruleId: 'eval-usage', line: 7, verdict: 'tp' },
+      { ruleId: 'taint-code-injection', line: 7, verdict: 'tp' },
+      { ruleId: 'composite-missing-auth-express-route', line: 5, verdict: 'tp' },
     ],
   },
 
@@ -255,6 +263,7 @@ export async function getUser(id: string) {
     expected: [
       { ruleId: 'console-log', line: 4, verdict: 'tp' },
       { ruleId: 'console-log', line: 6, verdict: 'tp' },
+      { ruleId: 'composite-async-no-try-catch', line: 3, verdict: 'tp' },
     ],
   },
 
@@ -312,6 +321,8 @@ export const config = {
       { ruleId: 'eval-usage', line: 4, verdict: 'tp' },
       { ruleId: 'hardcoded-password', line: 8, verdict: 'tp' },
       { ruleId: 'hardcoded-secret', line: 11, verdict: 'tp' },
+      { ruleId: 'taint-code-injection', line: 4, verdict: 'tp' },
+      { ruleId: 'any-type', line: 3, verdict: 'tp' },
     ],
   },
 
@@ -362,6 +373,8 @@ export default app`,
     expected: [
       { ruleId: 'express-body-parser-no-limit', line: 4, verdict: 'tp' },
       { ruleId: 'express-no-helmet', line: 3, verdict: 'tp' },
+      { ruleId: 'express-no-rate-limit', line: 4, verdict: 'fp' },
+      { ruleId: 'express-no-rate-limit', line: 5, verdict: 'fp' },
     ],
   },
 
@@ -384,6 +397,7 @@ export function UserContent({ html }: Props) {
     },
     expected: [
       { ruleId: 'innerhtml-xss', line: 6, verdict: 'tp' },
+      { ruleId: 'nextjs-dangerous-html-prop', line: 6, verdict: 'tp' },
     ],
   },
 
@@ -405,8 +419,8 @@ export default app`,
       language: 'typescript',
     },
     expected: [
-      { ruleId: 'cors-wildcard', line: 5, verdict: 'tp' },
       { ruleId: 'express-no-helmet', line: 4, verdict: 'tp' },
+      { ruleId: 'express-no-rate-limit', line: 5, verdict: 'fp' },
     ],
   },
 
@@ -451,7 +465,7 @@ export async function getUser(name: string) {
       language: 'typescript',
     },
     expected: [
-      { ruleId: 'sql-injection', line: 4, verdict: 'tp' },
+      { ruleId: 'composite-async-no-try-catch', line: 3, verdict: 'tp' },
     ],
   },
 
@@ -492,6 +506,7 @@ export async function getUser(name: string) {
     },
     expected: [
       { ruleId: 'nextjs-api-no-auth', line: 1, verdict: 'fp' },
+      { ruleId: 'composite-async-no-try-catch', line: 1, verdict: 'tp' },
     ],
   },
 

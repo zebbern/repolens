@@ -29,7 +29,7 @@ import {
   AccordionTrigger,
   AccordionContent,
 } from "@/components/ui/accordion"
-import { memo, useState, useRef, useEffect, useMemo } from "react"
+import { memo, useState, useMemo } from "react"
 import type { UIMessage, ToolUIPart as AiToolUIPart, DynamicToolUIPart } from "ai"
 import { isToolUIPart, getToolName } from "ai"
 
@@ -262,15 +262,6 @@ function ToolCallIndicator({
   const label = buildToolLabel(toolName, args)
   const hasResult = result !== undefined && result !== null
 
-  const startTimeRef = useRef(Date.now())
-  const [elapsed, setElapsed] = useState<number | null>(null)
-
-  useEffect(() => {
-    if (status !== "running" && elapsed === null) {
-      setElapsed((Date.now() - startTimeRef.current) / 1000)
-    }
-  }, [status, elapsed])
-
   const summary = hasResult ? buildToolSummary(toolName, result) : null
 
   return (
@@ -295,11 +286,6 @@ function ToolCallIndicator({
             {summary && (
               <Badge variant="outline" className="text-[10px] ml-1.5 px-1.5 py-0 shrink-0">
                 {summary}
-              </Badge>
-            )}
-            {elapsed !== null && (
-              <Badge variant="secondary" className="text-[10px] px-1.5 py-0 ml-auto shrink-0">
-                {elapsed.toFixed(1)}s
               </Badge>
             )}
           </button>

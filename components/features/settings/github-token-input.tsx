@@ -136,7 +136,8 @@ export function GitHubTokenInput() {
 
       {/* Help text */}
       <p className="text-xs text-text-muted">
-        Add a GitHub Personal Access Token for higher API rate limits and access to private repositories.
+        Your token is stored in your browser and sent directly to GitHub — it never touches our servers.
+        Enables access to private repositories and higher API rate limits.
         No scopes needed for public repos. Add the <code className="text-text-secondary">repo</code> scope for private repos.
       </p>
     </div>

@@ -5,7 +5,7 @@ export const PROVIDERS: Record<AIProvider, ProviderInfo> = {
   openai: {
     id: 'openai',
     name: 'OpenAI',
-    description: 'GPT-4, GPT-4o, GPT-3.5 Turbo',
+    description: 'GPT-5.4',
     docsUrl: 'https://platform.openai.com/api-keys',
     keyPrefix: 'sk-',
   },
@@ -19,7 +19,7 @@ export const PROVIDERS: Record<AIProvider, ProviderInfo> = {
   anthropic: {
     id: 'anthropic',
     name: 'Anthropic',
-    description: 'Claude 3.5, Claude 3 Opus',
+    description: 'Claude 4.6 Sonnet, Claude 4.6 Opus',
     docsUrl: 'https://console.anthropic.com/settings/keys',
     keyPrefix: 'sk-ant-',
   },

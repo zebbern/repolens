@@ -408,12 +408,12 @@ describe('DocViewer', () => {
       setupMocks({
         selectedModel: {
           id: 'claude-3',
-          name: 'Claude 3 Opus',
+          name: 'Claude 4.6 Opus',
           provider: 'anthropic',
         } as unknown as typeof defaultAPIKeysValue.selectedModel,
       })
       render(<DocViewer />)
-      expect(screen.getByText(/using claude 3 opus/i)).toBeInTheDocument()
+      expect(screen.getByText(/using claude 4\.6 opus/i)).toBeInTheDocument()
     })
   })
 

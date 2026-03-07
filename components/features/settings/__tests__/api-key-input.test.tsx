@@ -16,7 +16,7 @@ vi.mock('@/providers/api-keys-provider', () => ({
       openrouter: { key: 'sk-or-invalid', isValid: false },
     },
     models: [
-      { id: 'claude-3-opus', name: 'Claude 3 Opus', provider: 'anthropic', contextLength: 200000 },
+      { id: 'claude-3-opus', name: 'Claude 4.6 Opus', provider: 'anthropic', contextLength: 200000 },
       { id: 'claude-3-haiku', name: 'Claude 3 Haiku', provider: 'anthropic', contextLength: 200000 },
     ],
     setAPIKey: mockSetAPIKey,
@@ -24,9 +24,9 @@ vi.mock('@/providers/api-keys-provider', () => ({
     removeAPIKey: mockRemoveAPIKey,
   }),
   PROVIDERS: {
-    openai: { id: 'openai', name: 'OpenAI', description: 'GPT-4, GPT-4o', docsUrl: 'https://platform.openai.com/api-keys', keyPrefix: 'sk-' },
+    openai: { id: 'openai', name: 'OpenAI', description: 'GPT-5.4', docsUrl: 'https://platform.openai.com/api-keys', keyPrefix: 'sk-' },
     google: { id: 'google', name: 'Google', description: 'Gemini Pro', docsUrl: 'https://aistudio.google.com/apikey', keyPrefix: 'AI' },
-    anthropic: { id: 'anthropic', name: 'Anthropic', description: 'Claude 3.5', docsUrl: 'https://console.anthropic.com/settings/keys', keyPrefix: 'sk-ant-' },
+    anthropic: { id: 'anthropic', name: 'Anthropic', description: 'Claude 4.6 Sonnet, Claude 4.6 Opus', docsUrl: 'https://console.anthropic.com/settings/keys', keyPrefix: 'sk-ant-' },
     openrouter: { id: 'openrouter', name: 'OpenRouter', description: 'Multiple providers', docsUrl: 'https://openrouter.ai/keys', keyPrefix: 'sk-or-' },
   },
 }))
@@ -78,13 +78,13 @@ describe('APIKeyInput', () => {
   it('renders available models when key is valid', () => {
     render(<APIKeyInput provider="anthropic" />)
     expect(screen.getByText('Available Models')).toBeInTheDocument()
-    expect(screen.getByText('Claude 3 Opus')).toBeInTheDocument()
+    expect(screen.getByText('Claude 4.6 Opus')).toBeInTheDocument()
     expect(screen.getByText('Claude 3 Haiku')).toBeInTheDocument()
   })
 
   it('renders provider description', () => {
     render(<APIKeyInput provider="anthropic" />)
-    expect(screen.getByText('Claude 3.5')).toBeInTheDocument()
+    expect(screen.getByText('Claude 4.6 Sonnet, Claude 4.6 Opus')).toBeInTheDocument()
   })
 
   it('calls removeAPIKey when trash button is clicked', async () => {

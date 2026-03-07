@@ -17,9 +17,9 @@ vi.mock('@/providers/api-keys-provider', () => ({
     removeAPIKey: vi.fn(),
   }),
   PROVIDERS: {
-    openai: { id: 'openai', name: 'OpenAI', description: 'GPT-4, GPT-4o', docsUrl: 'https://platform.openai.com/api-keys', keyPrefix: 'sk-' },
+    openai: { id: 'openai', name: 'OpenAI', description: 'GPT-5.4', docsUrl: 'https://platform.openai.com/api-keys', keyPrefix: 'sk-' },
     google: { id: 'google', name: 'Google', description: 'Gemini Pro', docsUrl: 'https://aistudio.google.com/apikey', keyPrefix: 'AI' },
-    anthropic: { id: 'anthropic', name: 'Anthropic', description: 'Claude 3.5', docsUrl: 'https://console.anthropic.com/settings/keys', keyPrefix: 'sk-ant-' },
+    anthropic: { id: 'anthropic', name: 'Anthropic', description: 'Claude 4.6 Sonnet, Claude 4.6 Opus', docsUrl: 'https://console.anthropic.com/settings/keys', keyPrefix: 'sk-ant-' },
     openrouter: { id: 'openrouter', name: 'OpenRouter', description: 'Multiple providers', docsUrl: 'https://openrouter.ai/keys', keyPrefix: 'sk-or-' },
   },
 }))

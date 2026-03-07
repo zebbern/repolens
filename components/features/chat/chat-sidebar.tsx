@@ -52,6 +52,9 @@ export function ChatSidebar({ className }: { className?: string }) {
   const codeIndexRef = useRef<CodeIndex | null>(codeIndex)
   useEffect(() => { codeIndexRef.current = codeIndex }, [codeIndex])
 
+  const allFilePathsRef = useRef<string[]>(files.map(f => f.path))
+  useEffect(() => { allFilePathsRef.current = files.map(f => f.path) }, [files])
+
   const saveTourRef = useRef(saveTour)
   useEffect(() => { saveTourRef.current = saveTour }, [saveTour])
   const startTourRef = useRef(startTour)
@@ -59,13 +62,14 @@ export function ChatSidebar({ className }: { className?: string }) {
 
   // Wrap tool call handler to intercept generateTour results
   const handleToolCallWithTourCapture = useMemo(() => {
-    return (toolCall: ToolCallInfo, addOutput: AddToolOutputFn, indexRef: React.MutableRefObject<CodeIndex | null>) => {
+    return (toolCall: ToolCallInfo, addOutput: AddToolOutputFn, indexRef: React.MutableRefObject<CodeIndex | null>, filePathsRef: React.MutableRefObject<string[]>) => {
       if (toolCall.toolName === 'generateTour' && !toolCall.dynamic) {
         try {
           const resultStr = executeToolLocally(
             toolCall.toolName,
             toolCall.input as Record<string, unknown>,
             indexRef.current,
+            filePathsRef.current,
           )
           const parsed = JSON.parse(resultStr)
           if (parsed.tour && !parsed.error) {
@@ -89,7 +93,7 @@ export function ChatSidebar({ className }: { className?: string }) {
         }
         return
       }
-      handleToolCall(toolCall, addOutput, indexRef)
+      handleToolCall(toolCall, addOutput, indexRef, filePathsRef.current)
     }
   }, [])
 
@@ -104,7 +108,7 @@ export function ChatSidebar({ className }: { className?: string }) {
     transport,
     id: 'codedoc-chat',
 
-    onToolCall: async ({ toolCall }): Promise<void> => handleToolCallWithTourCapture(toolCall, addToolOutput, codeIndexRef),
+    onToolCall: async ({ toolCall }): Promise<void> => handleToolCallWithTourCapture(toolCall, addToolOutput, codeIndexRef, allFilePathsRef),
 
     sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithToolCalls,
   })

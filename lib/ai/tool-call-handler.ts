@@ -45,6 +45,7 @@ export function handleToolCall(
   toolCall: ToolCallInfo,
   addToolOutput: AddToolOutputFn,
   codeIndexRef: MutableRefObject<CodeIndex | null>,
+  allFilePaths?: string[],
 ): void {
   if (toolCall.dynamic) return
 
@@ -53,6 +54,7 @@ export function handleToolCall(
       toolCall.toolName,
       toolCall.input as Record<string, unknown>,
       codeIndexRef.current,
+      allFilePaths,
     )
     addToolOutput({
       // AI SDK expects a literal tool name type, but dynamic tool names require this cast

@@ -37,6 +37,7 @@ export function executeToolLocally(
   toolName: string,
   input: Record<string, unknown>,
   codeIndex: CodeIndex | null,
+  allFilePaths?: string[],
 ): string {
   if (!codeIndex?.files || codeIndex.files.size === 0) {
     return JSON.stringify({ error: 'No codebase loaded' })
@@ -61,7 +62,7 @@ export function executeToolLocally(
     case 'listDirectory': {
       const result = listDirectorySchema.safeParse(input)
       if (!result.success) return JSON.stringify({ error: formatZodError(result.error.issues) })
-      return JSON.stringify(executeListDirectory(result.data, codeIndex))
+      return JSON.stringify(executeListDirectory(result.data, codeIndex, allFilePaths))
     }
     case 'findSymbol': {
       const result = findSymbolSchema.safeParse(input)
@@ -258,10 +259,11 @@ function executeSearchFiles(
 function executeListDirectory(
   input: { path: string },
   codeIndex: CodeIndex,
+  allFilePaths?: string[],
 ): Record<string, unknown> {
   const prefix = input.path ? (input.path.endsWith('/') ? input.path : input.path + '/') : ''
   const entries = new Set<string>()
-  const paths = allPaths(codeIndex)
+  const paths = allFilePaths && allFilePaths.length > 0 ? allFilePaths : allPaths(codeIndex)
 
   for (const filePath of paths) {
     if (!filePath.startsWith(prefix)) continue

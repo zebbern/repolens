@@ -113,6 +113,9 @@ export function DocsProvider({ children }: { children: ReactNode }) {
   const repoContextRef = useRef(repoContext)
   const codeIndexRef = useRef<CodeIndex | null>(codeIndex)
 
+  const allFilePathsRef = useRef<string[]>(files.map(f => f.path))
+  useEffect(() => { allFilePathsRef.current = files.map(f => f.path) }, [files])
+
   useEffect(() => { selectedModelRef.current = selectedModel }, [selectedModel])
   useEffect(() => { hasValidKeyRef.current = hasValidKey }, [hasValidKey])
   useEffect(() => { apiKeysRef.current = apiKeys }, [apiKeys])
@@ -160,7 +163,7 @@ export function DocsProvider({ children }: { children: ReactNode }) {
     transport,
     id: 'docs-generator',
 
-    onToolCall: async ({ toolCall }): Promise<void> => handleToolCall(toolCall, addToolOutput, codeIndexRef),
+    onToolCall: async ({ toolCall }): Promise<void> => handleToolCall(toolCall, addToolOutput, codeIndexRef, allFilePathsRef.current),
 
     sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithToolCalls,
   })

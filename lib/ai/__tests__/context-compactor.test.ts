@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import type { ModelMessage, ToolModelMessage } from 'ai'
-import { createContextCompactor, summarizeCodeForCompaction } from '../context-compactor'
+import { createContextCompactor, summarizeCodeForCompaction, TOOL_RESULT_LIMITS } from '../context-compactor'
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -180,5 +180,17 @@ describe('summarizeCodeForCompaction', () => {
     const summary = summarizeCodeForCompaction(longContent, 'README.md')
     expect(summary.length).toBeLessThan(longContent.length)
     expect(summary).toContain('truncated')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// F13 — TOOL_RESULT_LIMITS includes generateTour
+// ---------------------------------------------------------------------------
+
+describe('F13: TOOL_RESULT_LIMITS includes generateTour', () => {
+  it('has a generateTour key with a numeric limit', () => {
+    expect(TOOL_RESULT_LIMITS).toHaveProperty('generateTour')
+    expect(typeof TOOL_RESULT_LIMITS.generateTour).toBe('number')
+    expect(TOOL_RESULT_LIMITS.generateTour).toBeGreaterThan(0)
   })
 })

@@ -16,7 +16,7 @@ const MIN_FULL_RESULT_STEPS = 8
 const DEFAULT_TOOL_RESULT_LENGTH = 6000
 
 /** Tool-specific limits for non-file-read tools during compaction. */
-const TOOL_RESULT_LIMITS: Record<string, number> = {
+export const TOOL_RESULT_LIMITS: Record<string, number> = {
   searchFiles: 6000,
   analyzeImports: 6000,
   listDirectory: 3000,
@@ -25,6 +25,7 @@ const TOOL_RESULT_LIMITS: Record<string, number> = {
   scanIssues: 6000,
   getProjectOverview: 0, // handled by PINNED_TOOLS (never truncated)
   generateDiagram: 1500,
+  generateTour: 3000,
 }
 
 /** Tools whose results must never be truncated — they provide critical structural context. */

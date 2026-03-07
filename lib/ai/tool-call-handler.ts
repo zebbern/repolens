@@ -1,6 +1,6 @@
 import type { MutableRefObject } from 'react'
 import type { CodeIndex } from '@/lib/code/code-index'
-import { executeToolLocally } from './client-tool-executor'
+import { executeToolLocally, type ToolExecutorOptions } from './client-tool-executor'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -46,6 +46,7 @@ export function handleToolCall(
   addToolOutput: AddToolOutputFn,
   codeIndexRef: MutableRefObject<CodeIndex | null>,
   allFilePaths?: string[],
+  options?: ToolExecutorOptions,
 ): void {
   if (toolCall.dynamic) return
 
@@ -55,6 +56,7 @@ export function handleToolCall(
       toolCall.input as Record<string, unknown>,
       codeIndexRef.current,
       allFilePaths,
+      options,
     )
     addToolOutput({
       // AI SDK expects a literal tool name type, but dynamic tool names require this cast

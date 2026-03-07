@@ -60,7 +60,7 @@ export const codeTools = {
   }),
   getProjectOverview: tool({
     description:
-      'Get a comprehensive overview of the project: file count, languages, folder structure, and key patterns.',
+      'Get a comprehensive overview of the project: file count, languages, folder structure, key patterns, and repository metadata (stars, forks, topics, license) when available.',
     inputSchema: getProjectOverviewSchema,
   }),
   generateTour: tool({

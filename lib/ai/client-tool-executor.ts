@@ -18,6 +18,25 @@ import { generateTourSchema } from '@/lib/ai/tour-schemas'
 import type { Tour, TourStop } from '@/types/tours'
 
 // ---------------------------------------------------------------------------
+// Types & Constants
+// ---------------------------------------------------------------------------
+
+/** Options for executeToolLocally to pass additional context without signature bloat. */
+export interface ToolExecutorOptions {
+  /** Repository metadata from GitHub API. */
+  repoMeta?: { stars?: number; forks?: number; description?: string; topics?: string[]; license?: string; language?: string }
+  /** Current indexing progress for incomplete-index warnings. */
+  indexingProgress?: { filesIndexed: number; totalFiles: number }
+  /** Optional codebase analysis context for scanIssues. */
+  codebaseAnalysis?: Record<string, unknown> | null
+  /** Validated repository name for tour generation. */
+  repoName?: string
+}
+
+/** Maximum characters returned for a full file read (F5). */
+const MAX_FILE_CONTENT_CHARS = 100_000
+
+// ---------------------------------------------------------------------------
 // Zod validation helper
 // ---------------------------------------------------------------------------
 
@@ -38,67 +57,97 @@ export function executeToolLocally(
   input: Record<string, unknown>,
   codeIndex: CodeIndex | null,
   allFilePaths?: string[],
+  options?: ToolExecutorOptions,
 ): string {
   if (!codeIndex?.files || codeIndex.files.size === 0) {
     return JSON.stringify({ error: 'No codebase loaded' })
   }
 
+  // F4: Detect incomplete indexing and prepare warning
+  let indexWarning: string | undefined
+  if (options?.indexingProgress) {
+    const { filesIndexed, totalFiles } = options.indexingProgress
+    if (totalFiles > 0 && filesIndexed < totalFiles) {
+      indexWarning = `Code index is incomplete (${filesIndexed}/${totalFiles} files). Results may be partial.`
+    }
+  }
+
+  let output: Record<string, unknown>
+
   switch (toolName) {
     case 'readFile': {
       const result = readFileSchema.safeParse(input)
-      if (!result.success) return JSON.stringify({ error: formatZodError(result.error.issues) })
-      return JSON.stringify(executeReadFile(result.data, codeIndex))
+      if (!result.success) { output = { error: formatZodError(result.error.issues) }; break }
+      output = executeReadFile(result.data, codeIndex)
+      break
     }
     case 'readFiles': {
       const result = readFilesSchema.safeParse(input)
-      if (!result.success) return JSON.stringify({ error: formatZodError(result.error.issues) })
-      return JSON.stringify(executeReadFiles(result.data, codeIndex))
+      if (!result.success) { output = { error: formatZodError(result.error.issues) }; break }
+      output = executeReadFiles(result.data, codeIndex)
+      break
     }
     case 'searchFiles': {
       const result = searchFilesSchema.safeParse(input)
-      if (!result.success) return JSON.stringify({ error: formatZodError(result.error.issues) })
-      return JSON.stringify(executeSearchFiles(result.data, codeIndex))
+      if (!result.success) { output = { error: formatZodError(result.error.issues) }; break }
+      output = executeSearchFiles(result.data, codeIndex, allFilePaths)
+      break
     }
     case 'listDirectory': {
       const result = listDirectorySchema.safeParse(input)
-      if (!result.success) return JSON.stringify({ error: formatZodError(result.error.issues) })
-      return JSON.stringify(executeListDirectory(result.data, codeIndex, allFilePaths))
+      if (!result.success) { output = { error: formatZodError(result.error.issues) }; break }
+      output = executeListDirectory(result.data, codeIndex, allFilePaths)
+      break
     }
     case 'findSymbol': {
       const result = findSymbolSchema.safeParse(input)
-      if (!result.success) return JSON.stringify({ error: formatZodError(result.error.issues) })
-      return JSON.stringify(executeFindSymbol(result.data, codeIndex))
+      if (!result.success) { output = { error: formatZodError(result.error.issues) }; break }
+      output = executeFindSymbol(result.data, codeIndex, allFilePaths)
+      break
     }
     case 'getFileStats': {
       const result = getFileStatsSchema.safeParse(input)
-      if (!result.success) return JSON.stringify({ error: formatZodError(result.error.issues) })
-      return JSON.stringify(executeGetFileStats(result.data, codeIndex))
+      if (!result.success) { output = { error: formatZodError(result.error.issues) }; break }
+      output = executeGetFileStats(result.data, codeIndex)
+      break
     }
     case 'analyzeImports': {
       const result = analyzeImportsSchema.safeParse(input)
-      if (!result.success) return JSON.stringify({ error: formatZodError(result.error.issues) })
-      return JSON.stringify(executeAnalyzeImports(result.data, codeIndex))
+      if (!result.success) { output = { error: formatZodError(result.error.issues) }; break }
+      output = executeAnalyzeImports(result.data, codeIndex)
+      break
     }
     case 'scanIssues': {
       const result = scanIssuesSchema.safeParse(input)
-      if (!result.success) return JSON.stringify({ error: formatZodError(result.error.issues) })
-      return JSON.stringify(executeScanIssues(result.data, codeIndex))
+      if (!result.success) { output = { error: formatZodError(result.error.issues) }; break }
+      output = executeScanIssues(result.data, codeIndex, options?.codebaseAnalysis ?? null)
+      break
     }
     case 'generateDiagram': {
       const result = generateDiagramSchema.safeParse(input)
-      if (!result.success) return JSON.stringify({ error: formatZodError(result.error.issues) })
-      return JSON.stringify(executeGenerateDiagram(result.data, codeIndex))
+      if (!result.success) { output = { error: formatZodError(result.error.issues) }; break }
+      output = executeGenerateDiagram(result.data, codeIndex)
+      break
     }
     case 'getProjectOverview':
-      return JSON.stringify(executeGetProjectOverview(codeIndex))
+      output = executeGetProjectOverview(codeIndex, options?.repoMeta, allFilePaths)
+      break
     case 'generateTour': {
       const result = generateTourSchema.safeParse(input)
-      if (!result.success) return JSON.stringify({ error: formatZodError(result.error.issues) })
-      return JSON.stringify(executeGenerateTour(result.data, codeIndex))
+      if (!result.success) { output = { error: formatZodError(result.error.issues) }; break }
+      output = executeGenerateTour(result.data, codeIndex, options?.repoName ? { name: options.repoName } : undefined)
+      break
     }
     default:
-      return JSON.stringify({ error: `Unknown tool: ${toolName}` })
+      output = { error: `Unknown tool: ${toolName}` }
   }
+
+  // F4: Attach indexing warning to successful results
+  if (indexWarning && !output.error) {
+    output.indexWarning = indexWarning
+  }
+
+  return JSON.stringify(output)
 }
 
 // ---------------------------------------------------------------------------
@@ -160,6 +209,17 @@ function executeReadFile(
     return { path: usedPath, content: sliced.join('\n'), startLine: start + 1, endLine: end, totalLines }
   }
 
+  // F5: Truncate large files when reading in full (no startLine/endLine)
+  if (content.length > MAX_FILE_CONTENT_CHARS) {
+    return {
+      path: usedPath,
+      content: content.slice(0, MAX_FILE_CONTENT_CHARS),
+      lineCount: totalLines,
+      totalLines,
+      warning: `File truncated from ${content.length} to ${MAX_FILE_CONTENT_CHARS} characters. Use startLine/endLine to read specific sections.`,
+    }
+  }
+
   return { path: usedPath, content, lineCount: totalLines, totalLines }
 }
 
@@ -174,9 +234,10 @@ function executeReadFiles(
 function executeSearchFiles(
   input: { query: string; maxResults?: number; isRegex?: boolean },
   codeIndex: CodeIndex,
+  allFilePaths?: string[],
 ): Record<string, unknown> {
   const limit = input.maxResults ?? 15
-  const paths = allPaths(codeIndex)
+  const paths = allFilePaths && allFilePaths.length > 0 ? allFilePaths : allPaths(codeIndex)
   const results: Array<{ path: string; matchType: 'path' | 'content'; matches?: Array<{ line: number; content: string; context?: string[] }>; totalMatches?: number }> = []
   let warning: string | undefined
 
@@ -297,6 +358,7 @@ const KIND_MAP: Record<string, string> = { fn: 'function', iface: 'interface' }
 function executeFindSymbol(
   input: { name: string; kind?: string },
   codeIndex: CodeIndex,
+  allFilePaths?: string[],
 ): Record<string, unknown> {
   const results: Array<{ path: string; line: number; kind: string; match: string }> = []
   // Derive patterns from the shared SYMBOL_PATTERNS, remapping kind labels and
@@ -324,7 +386,14 @@ function executeFindSymbol(
     if (results.length >= 20) break
   }
 
-  return { symbolName: input.name, matchCount: results.length, results: results.slice(0, 20) }
+  const output: Record<string, unknown> = { symbolName: input.name, matchCount: results.length, results: results.slice(0, 20) }
+
+  // F3: Warn when index is partial
+  if (allFilePaths && allFilePaths.length > 0 && codeIndex.files.size < allFilePaths.length) {
+    output.warning = `Index covers ${codeIndex.files.size}/${allFilePaths.length} files. Some symbols may be missing.`
+  }
+
+  return output
 }
 
 function executeGetFileStats(
@@ -489,6 +558,8 @@ function executeAnalyzeImports(
   // Python import patterns
   const PY_IMPORT_RE = /(?:from\s+(\S+)\s+import|import\s+(\S+))/g
 
+  // F6: The reverse-lookup loop below is O(N) per call where N = total files in the index.
+  // For repeated calls, caching the full reverse-import map per execution context would help.
   const importedBy: string[] = []
 
   for (const [filePath, otherFile] of codeIndex.files) {
@@ -552,6 +623,7 @@ function executeAnalyzeImports(
 function executeScanIssues(
   input: { path: string },
   codeIndex: CodeIndex,
+  codebaseAnalysis?: Record<string, unknown> | null,
 ): Record<string, unknown> {
   const file = findFile(codeIndex, input.path)
   if (!file) return { error: `File not found: ${input.path}` }
@@ -571,7 +643,12 @@ function executeScanIssues(
     fix: issue.fix,
   }))
 
-  return { path: file.path, issueCount: result.issues.length, issues }
+  return {
+    path: file.path,
+    issueCount: result.issues.length,
+    issues,
+    ...(codebaseAnalysis ? { codebaseContext: codebaseAnalysis } : {}),
+  }
 }
 
 /**
@@ -625,12 +702,13 @@ function executeGenerateDiagram(
       }
     }
 
-    const uniqueEdges = [...new Set(edges.map(e => `${e.from}|||${e.to}`))]
+    const allUniqueEdges = [...new Set(edges.map(e => `${e.from}|||${e.to}`))]
       .map(e => {
         const [from, to] = e.split('|||')
         return { from, to }
       })
-      .slice(0, 30)
+    const totalEdges = allUniqueEdges.length
+    const uniqueEdges = allUniqueEdges.slice(0, 30)
 
     let mermaid = 'graph LR\n'
     for (const edge of uniqueEdges) {
@@ -638,7 +716,7 @@ function executeGenerateDiagram(
       const toId = edge.to.replace(/[^a-zA-Z0-9]/g, '_')
       mermaid += `  ${fromId}["${edge.from}"] --> ${toId}["${edge.to}"]\n`
     }
-    return { type: input.type, mermaid, nodeCount: nodes.size, edgeCount: uniqueEdges.length }
+    return { type: input.type, mermaid, nodeCount: nodes.size, edgeCount: uniqueEdges.length, totalEdges }
   }
 
   return { error: `Unsupported diagram type: ${input.type}` }
@@ -646,8 +724,12 @@ function executeGenerateDiagram(
 
 function executeGetProjectOverview(
   codeIndex: CodeIndex,
+  repoMeta?: ToolExecutorOptions['repoMeta'],
+  allFilePaths?: string[],
 ): Record<string, unknown> {
   const paths = allPaths(codeIndex)
+  // F11: Use allFilePaths for pattern detection when available
+  const detectionPaths = allFilePaths && allFilePaths.length > 0 ? allFilePaths : paths
   const languages: Record<string, number> = {}
   const folders: Record<string, number> = {}
   let totalLines = 0
@@ -665,9 +747,10 @@ function executeGetProjectOverview(
     totalLines,
     languages: Object.entries(languages).sort((a, b) => b[1] - a[1]),
     topFolders: Object.entries(folders).sort((a, b) => b[1] - a[1]).slice(0, 15),
-    hasTests: paths.some(p => p.includes('.test.') || p.includes('.spec.') || p.includes('__tests__')),
-    hasConfig: paths.some(p => p.includes('tsconfig') || p.includes('package.json')),
+    hasTests: detectionPaths.some(p => p.includes('.test.') || p.includes('.spec.') || p.includes('__tests__')),
+    hasConfig: detectionPaths.some(p => p.includes('tsconfig') || p.includes('package.json')),
     entryPoints: paths.filter(p => p.match(/(index|main|app|page)\.(ts|tsx|js|jsx)$/)).slice(0, 10),
+    ...(repoMeta ? { repoMeta } : {}),
   }
 }
 
@@ -795,7 +878,10 @@ function generateAnnotation(path: string, lines: string[], title: string): strin
 function executeGenerateTour(
   input: { repoKey: string; theme?: string; maxStops?: number },
   codeIndex: CodeIndex,
+  repoContext?: { name: string },
 ): Record<string, unknown> {
+  // F12: Override repoKey with validated repo name when available
+  const repoKey = repoContext?.name || input.repoKey
   const maxStops = input.maxStops ?? 8
   const paths = allPaths(codeIndex)
 
@@ -883,7 +969,7 @@ function executeGenerateTour(
     id: crypto.randomUUID(),
     name: tourName,
     description: tourDescription,
-    repoKey: input.repoKey,
+    repoKey,
     stops,
     createdAt: now,
     updatedAt: now,

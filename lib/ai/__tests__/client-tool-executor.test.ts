@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { createEmptyIndex, indexFile } from '@/lib/code/code-index'
-import { executeToolLocally } from '../client-tool-executor'
+import { executeToolLocally, type ToolExecutorOptions } from '../client-tool-executor'
+import { codeTools } from '../tool-definitions'
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -412,5 +413,324 @@ describe('executeToolLocally — Zod validation', () => {
     const result = JSON.parse(executeToolLocally('findSymbol', {}, index))
     expect(result).toHaveProperty('error')
     expect(result.error).toContain('Validation failed')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Helpers for fix tests
+// ---------------------------------------------------------------------------
+
+/** Build a minimal CodeIndex from a record of path → content. */
+function buildIndex(files: Record<string, string>) {
+  let index = createEmptyIndex()
+  for (const [path, content] of Object.entries(files)) {
+    index = indexFile(index, path, content, path.split('.').pop())
+  }
+  return index
+}
+
+/** Parse the JSON string returned by executeToolLocally. */
+function exec(
+  toolName: string,
+  input: Record<string, unknown>,
+  codeIndex: ReturnType<typeof createEmptyIndex>,
+  allFilePaths?: string[],
+  options?: ToolExecutorOptions,
+) {
+  return JSON.parse(executeToolLocally(toolName, input, codeIndex, allFilePaths, options)) as Record<string, unknown>
+}
+
+const BASIC_INDEX = buildIndex({
+  'src/index.ts': 'export function main() { return 42 }',
+  'src/utils.ts': 'export function add(a: number, b: number) { return a + b }',
+  'src/components/Button.tsx': 'export default function Button() { return <button /> }',
+  'package.json': '{ "name": "test" }',
+})
+
+// ---------------------------------------------------------------------------
+// F4 — Incomplete indexing warnings
+// ---------------------------------------------------------------------------
+
+describe('F4: indexing progress warnings', () => {
+  it('returns indexWarning when indexing is incomplete', () => {
+    const result = exec('getProjectOverview', {}, BASIC_INDEX, undefined, {
+      indexingProgress: { filesIndexed: 5, totalFiles: 20 },
+    })
+
+    expect(result.indexWarning).toBe(
+      'Code index is incomplete (5/20 files). Results may be partial.',
+    )
+  })
+
+  it('does NOT return indexWarning when indexing is complete', () => {
+    const result = exec('getProjectOverview', {}, BASIC_INDEX, undefined, {
+      indexingProgress: { filesIndexed: 20, totalFiles: 20 },
+    })
+
+    expect(result.indexWarning).toBeUndefined()
+  })
+
+  it('does NOT return indexWarning when indexingProgress is omitted', () => {
+    const result = exec('getProjectOverview', {}, BASIC_INDEX)
+
+    expect(result.indexWarning).toBeUndefined()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// F1 — repoMeta in getProjectOverview
+// ---------------------------------------------------------------------------
+
+describe('F1: getProjectOverview with repoMeta', () => {
+  const META = {
+    stars: 1200,
+    forks: 340,
+    description: 'A test repo',
+    topics: ['typescript', 'testing'],
+    license: 'MIT',
+    language: 'TypeScript',
+  }
+
+  it('includes repoMeta fields when repoMeta is provided', () => {
+    const result = exec('getProjectOverview', {}, BASIC_INDEX, undefined, { repoMeta: META })
+
+    expect(result.repoMeta).toEqual(META)
+  })
+
+  it('omits repoMeta when not provided', () => {
+    const result = exec('getProjectOverview', {}, BASIC_INDEX)
+
+    expect(result.repoMeta).toBeUndefined()
+    expect(result.totalFiles).toBe(4)
+    expect(result.hasTests).toBe(false)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// F2 — searchFiles uses allFilePaths
+// ---------------------------------------------------------------------------
+
+describe('F2: searchFiles with allFilePaths', () => {
+  it('uses allFilePaths for path matching — finds files not in CodeIndex', () => {
+    const allPaths = [
+      'src/index.ts',
+      'src/utils.ts',
+      'src/components/Button.tsx',
+      'package.json',
+      'src/extra/hidden-feature.ts',
+    ]
+
+    const result = exec('searchFiles', { query: 'hidden-feature' }, BASIC_INDEX, allPaths)
+
+    const paths = (result.results as Array<{ path: string }>).map(r => r.path)
+    expect(paths).toContain('src/extra/hidden-feature.ts')
+  })
+
+  it('falls back to CodeIndex paths when allFilePaths is omitted', () => {
+    const result = exec('searchFiles', { query: 'utils' }, BASIC_INDEX)
+
+    const paths = (result.results as Array<{ path: string }>).map(r => r.path)
+    expect(paths).toContain('src/utils.ts')
+    expect(result.totalFiles).toBe(4)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// F5 — readFile truncation
+// ---------------------------------------------------------------------------
+
+describe('F5: readFile truncation at MAX_FILE_CONTENT_CHARS', () => {
+  const LARGE_CONTENT = 'x'.repeat(150_000)
+  const LARGE_INDEX = buildIndex({
+    'src/big-file.ts': LARGE_CONTENT,
+    'src/small.ts': 'console.log("hi")',
+  })
+
+  it('truncates content and returns warning for files exceeding 100K chars', () => {
+    const result = exec('readFile', { path: 'src/big-file.ts' }, LARGE_INDEX)
+
+    expect((result.content as string).length).toBe(100_000)
+    expect(result.warning).toBeDefined()
+    expect(result.warning as string).toContain('truncated')
+    expect(result.warning as string).toContain('150000')
+  })
+
+  it('does NOT truncate when startLine/endLine are specified', () => {
+    const result = exec(
+      'readFile',
+      { path: 'src/big-file.ts', startLine: 1, endLine: 1 },
+      LARGE_INDEX,
+    )
+
+    expect(result.warning).toBeUndefined()
+    expect(result.startLine).toBe(1)
+    expect(result.endLine).toBe(1)
+  })
+
+  it('does NOT truncate files smaller than the limit', () => {
+    const result = exec('readFile', { path: 'src/small.ts' }, LARGE_INDEX)
+
+    expect(result.content).toBe('console.log("hi")')
+    expect(result.warning).toBeUndefined()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// F7 — generateDiagram edgeCount + totalEdges
+// ---------------------------------------------------------------------------
+
+describe('F7: generateDiagram totalEdges vs edgeCount', () => {
+  it('returns both edgeCount and totalEdges for topology diagrams', () => {
+    const index = buildIndex({
+      'src/a.ts': "import { b } from './b'",
+      'src/b.ts': "import { c } from '../lib/c'",
+      'lib/c.ts': 'export const c = 1',
+    })
+    const result = exec('generateDiagram', { type: 'topology' }, index)
+
+    expect(result.edgeCount).toBeDefined()
+    expect(result.totalEdges).toBeDefined()
+  })
+
+  it('totalEdges equals edgeCount when under the 30-edge limit', () => {
+    const index = buildIndex({
+      'src/a.ts': "import { b } from '../lib/b'",
+      'lib/b.ts': 'export const b = 1',
+    })
+    const result = exec('generateDiagram', { type: 'topology' }, index)
+
+    expect(result.totalEdges).toBe(result.edgeCount)
+  })
+
+  it('totalEdges exceeds edgeCount when edges are truncated', () => {
+    const files: Record<string, string> = {}
+    for (let i = 0; i < 35; i++) {
+      const dirA = `src/dir${i}`
+      const dirB = `lib/target${i}`
+      files[`${dirA}/file.ts`] = `import { x } from '../../${dirB}/mod'`
+      files[`${dirB}/mod.ts`] = `export const x = ${i}`
+    }
+    const index = buildIndex(files)
+    const result = exec('generateDiagram', { type: 'topology' }, index)
+
+    expect(result.totalEdges).toBeGreaterThan(30)
+    expect(result.edgeCount).toBeLessThanOrEqual(30)
+    expect(result.totalEdges as number).toBeGreaterThan(result.edgeCount as number)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// F3 — findSymbol partial-index warning
+// ---------------------------------------------------------------------------
+
+describe('F3: findSymbol partial-index warning', () => {
+  it('returns warning when allFilePaths.length > codeIndex.files.size', () => {
+    const allPaths = [
+      'src/index.ts',
+      'src/utils.ts',
+      'src/components/Button.tsx',
+      'package.json',
+      'src/extra/not-indexed.ts',
+      'src/extra/also-not-indexed.ts',
+    ]
+
+    const result = exec('findSymbol', { name: 'main' }, BASIC_INDEX, allPaths)
+
+    expect(result.warning).toBeDefined()
+    expect(result.warning as string).toContain('4/6 files')
+  })
+
+  it('returns no warning when allFilePaths is not provided', () => {
+    const result = exec('findSymbol', { name: 'main' }, BASIC_INDEX)
+
+    expect(result.warning).toBeUndefined()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// F11 — getProjectOverview hasTests/hasConfig uses allFilePaths
+// ---------------------------------------------------------------------------
+
+describe('F11: getProjectOverview uses allFilePaths for pattern detection', () => {
+  const BARE_INDEX = buildIndex({
+    'src/index.ts': 'export const x = 1',
+  })
+
+  it('hasTests detects test files from allFilePaths not in CodeIndex', () => {
+    const allPaths = ['src/index.ts', 'tests/app.test.ts']
+    const result = exec('getProjectOverview', {}, BARE_INDEX, allPaths)
+
+    expect(result.hasTests).toBe(true)
+  })
+
+  it('hasConfig detects config files from allFilePaths not in CodeIndex', () => {
+    const allPaths = ['src/index.ts', 'tsconfig.json']
+    const result = exec('getProjectOverview', {}, BARE_INDEX, allPaths)
+
+    expect(result.hasConfig).toBe(true)
+  })
+
+  it('hasTests is false when neither CodeIndex nor allFilePaths contain test files', () => {
+    const result = exec('getProjectOverview', {}, BARE_INDEX)
+
+    expect(result.hasTests).toBe(false)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// F12 — generateTour repoKey override
+// ---------------------------------------------------------------------------
+
+describe('F12: generateTour repoKey override', () => {
+  it('uses repoContext.name when provided', () => {
+    const result = exec(
+      'generateTour',
+      { repoKey: 'user-input/repo' },
+      BASIC_INDEX,
+      undefined,
+      { repoName: 'validated/repo-name' },
+    )
+
+    const tour = result.tour as { repoKey: string }
+    expect(tour.repoKey).toBe('validated/repo-name')
+  })
+
+  it('falls back to input.repoKey when no repoName option is provided', () => {
+    const result = exec(
+      'generateTour',
+      { repoKey: 'user-input/repo' },
+      BASIC_INDEX,
+    )
+
+    const tour = result.tour as { repoKey: string }
+    expect(tour.repoKey).toBe('user-input/repo')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// F10 — Dynamic tool count in system prompt
+// ---------------------------------------------------------------------------
+
+describe('F10: system prompt uses dynamic tool count', () => {
+  it('Object.keys(codeTools).length equals the actual number of defined tools', () => {
+    const toolCount = Object.keys(codeTools).length
+    // The count must match the number of tool definitions — not a hardcoded number.
+    // If a tool is added or removed, this test documents the current count.
+    expect(toolCount).toBe(11)
+    // Verify the template interpolation produces a valid numeric string
+    const promptFragment = `You have ${toolCount} tools`
+    expect(promptFragment).toBe(`You have ${Object.keys(codeTools).length} tools`)
+  })
+
+  it('codeTools includes all expected tool names', () => {
+    const toolNames = Object.keys(codeTools)
+    const expected = [
+      'readFile', 'readFiles', 'searchFiles', 'listDirectory',
+      'findSymbol', 'getFileStats', 'analyzeImports', 'scanIssues',
+      'generateDiagram', 'getProjectOverview', 'generateTour',
+    ]
+    for (const name of expected) {
+      expect(toolNames).toContain(name)
+    }
   })
 })

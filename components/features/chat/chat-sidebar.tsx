@@ -20,10 +20,14 @@ import { downloadFile } from "@/lib/export"
 import { buildStructuralIndex } from "@/lib/ai/structural-index"
 import { getMaxIndexBytesForModel } from "@/lib/ai/providers"
 import { handleToolCall } from "@/lib/ai/tool-call-handler"
-import { executeToolLocally } from "@/lib/ai/client-tool-executor"
+import { executeToolLocally, type ToolExecutorOptions } from "@/lib/ai/client-tool-executor"
 import type { ToolCallInfo, AddToolOutputFn } from "@/lib/ai/tool-call-handler"
 import type { CodeIndex } from "@/lib/code/code-index"
 import type { Tour } from "@/types/tours"
+
+// TODO(F8): Wire docs/changelog/comparison providers into chat context for richer tool responses.
+// These providers are not currently accessible in the chat sidebar and should be added
+// in a future iteration as a separate feature.
 
 export function ChatSidebar({ className }: { className?: string }) {
   const { selectedModel, apiKeys, getValidProviders } = useAPIKeys()
@@ -60,9 +64,32 @@ export function ChatSidebar({ className }: { className?: string }) {
   const startTourRef = useRef(startTour)
   useEffect(() => { startTourRef.current = startTour }, [startTour])
 
+  const repoRef = useRef(repo)
+  useEffect(() => { repoRef.current = repo }, [repo])
+
   // Wrap tool call handler to intercept generateTour results
   const handleToolCallWithTourCapture = useMemo(() => {
     return (toolCall: ToolCallInfo, addOutput: AddToolOutputFn, indexRef: React.MutableRefObject<CodeIndex | null>, filePathsRef: React.MutableRefObject<string[]>) => {
+      // Construct tool executor options from current refs
+      const currentRepo = repoRef.current
+      const toolOptions: ToolExecutorOptions = {
+        indexingProgress: {
+          filesIndexed: indexRef.current?.files.size ?? 0,
+          totalFiles: filePathsRef.current.length,
+        },
+        ...(currentRepo ? {
+          repoMeta: {
+            stars: currentRepo.stars,
+            forks: currentRepo.forks,
+            description: currentRepo.description ?? undefined,
+            topics: currentRepo.topics,
+            license: currentRepo.license ?? undefined,
+            language: currentRepo.language ?? undefined,
+          },
+          repoName: currentRepo.fullName,
+        } : {}),
+      }
+
       if (toolCall.toolName === 'generateTour' && !toolCall.dynamic) {
         try {
           const resultStr = executeToolLocally(
@@ -70,6 +97,7 @@ export function ChatSidebar({ className }: { className?: string }) {
             toolCall.input as Record<string, unknown>,
             indexRef.current,
             filePathsRef.current,
+            toolOptions,
           )
           const parsed = JSON.parse(resultStr)
           if (parsed.tour && !parsed.error) {
@@ -93,7 +121,7 @@ export function ChatSidebar({ className }: { className?: string }) {
         }
         return
       }
-      handleToolCall(toolCall, addOutput, indexRef, filePathsRef.current)
+      handleToolCall(toolCall, addOutput, indexRef, filePathsRef.current, toolOptions)
     }
   }, [])
 

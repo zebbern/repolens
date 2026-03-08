@@ -34,7 +34,7 @@ export function PreviewTabBar({
 
   return (
     <div className="flex h-11 items-center justify-between border-b border-foreground/[0.06] px-4 bg-card">
-      <div className="flex items-center h-full gap-0.5" role="tablist" aria-label="Preview tabs">
+      <div className="flex items-center h-full gap-0.5 overflow-x-auto scrollbar-hide min-w-0" role="tablist" aria-label="Preview tabs">
         {tabs.map((tab) => {
           const Icon = tab.icon
           const isActive = activeTab === tab.id
@@ -47,7 +47,7 @@ export function PreviewTabBar({
               aria-label={tab.label}
               onClick={() => onTabChange(tab.id)}
               className={cn(
-                "relative flex items-center gap-1.5 h-full px-3 text-xs font-medium",
+                "relative flex items-center gap-1.5 h-full px-3 text-xs font-medium flex-shrink-0 whitespace-nowrap",
                 "transition-colors duration-150",
                 "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1",
                 isActive

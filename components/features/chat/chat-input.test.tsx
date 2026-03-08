@@ -131,4 +131,15 @@ describe('ChatInput', () => {
 
     expect(screen.getByTestId('model-selector')).toBeInTheDocument()
   })
+
+  it('renders the skillPicker slot when provided', () => {
+    render(
+      <ChatInput
+        {...defaultProps}
+        skillPicker={<button data-testid="skill-picker">Skills</button>}
+      />,
+    )
+
+    expect(screen.getByTestId('skill-picker')).toBeInTheDocument()
+  })
 })

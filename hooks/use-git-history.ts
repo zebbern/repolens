@@ -16,7 +16,7 @@ import {
   type BlameAuthorStats,
 } from "@/lib/git-history"
 
-export type GitHistoryView = 'timeline' | 'blame' | 'file-history' | 'commit-detail'
+export type GitHistoryView = 'timeline' | 'blame' | 'file-history' | 'commit-detail' | 'insights'
 
 const PER_PAGE = 30
 

@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useCallback, useState } from "react"
-import { GitCommitHorizontal, History, FileText, AlertCircle, X, RefreshCw, Loader2, Info, Lock } from "lucide-react"
+import { GitCommitHorizontal, History, FileText, AlertCircle, X, RefreshCw, Loader2, Info, Lock, BarChart3 } from "lucide-react"
 import { useSession } from "next-auth/react"
 import { useApp, useRepository } from "@/providers"
 import { useGitHistory, type GitHistoryView } from "@/hooks/use-git-history"
@@ -13,6 +13,7 @@ import { BlameView } from "./blame-view"
 import { CommitTimeline } from "./commit-timeline"
 import { FileHistoryList } from "./file-history-list"
 import { CommitDetailView } from "./commit-detail-view"
+import { InsightsView } from "./insights-view"
 import { LoginRequiredNotice } from "./git-history-helpers"
 
 // ---------------------------------------------------------------------------
@@ -31,6 +32,7 @@ const VIEW_TABS: Array<{ id: GitHistoryView; label: string; icon: typeof History
   { id: 'timeline', label: 'Timeline', icon: History },
   { id: 'blame', label: 'Blame', icon: FileText, requiresFile: true },
   { id: 'file-history', label: 'File History', icon: GitCommitHorizontal, requiresFile: true },
+  { id: 'insights', label: 'Insights', icon: BarChart3 },
 ]
 
 // ---------------------------------------------------------------------------
@@ -83,7 +85,7 @@ export function GitHistoryPanel({ navigateToFile }: GitHistoryPanelProps) {
   useEffect(() => {
     let cancelled = false
     if (!owner || !name) return
-    if (viewMode === 'timeline' && commits.length === 0 && !isLoading) {
+    if ((viewMode === 'timeline' || viewMode === 'insights') && commits.length === 0 && !isLoading) {
       fetchCommits(owner, name).then(() => {
         if (cancelled) return
       })
@@ -294,6 +296,8 @@ export function GitHistoryPanel({ navigateToFile }: GitHistoryPanelProps) {
               isLoading={isLoading}
             />
           )
+        ) : viewMode === 'insights' ? (
+          <InsightsView commits={commits} />
         ) : (
           /* timeline */
           <CommitTimeline

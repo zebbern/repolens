@@ -35,6 +35,11 @@ vi.mock('sonner', () => ({
   toast: { error: vi.fn(), success: vi.fn(), info: vi.fn() },
 }))
 
+// Mock the GitHub token provider
+vi.mock('@/providers/github-token-provider', () => ({
+  useGitHubToken: vi.fn(() => ({ token: null })),
+}))
+
 import { RepositoryProvider, useRepository } from '../repository-provider'
 import { fetchFileContent } from '@/lib/github/fetcher'
 

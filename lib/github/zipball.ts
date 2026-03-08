@@ -30,6 +30,7 @@ export function isFileIndexable(name: string, size: number): boolean {
 
 interface ZipballOptions {
   signal?: AbortSignal
+  token?: string
 }
 
 /**
@@ -49,9 +50,14 @@ export async function fetchRepoZipball(
 ): Promise<Map<string, string>> {
   // Proxy through our own API route to avoid CORS issues.
   // The proxy extracts the auth token from the session cookie server-side.
+  const headers: HeadersInit = { 'Content-Type': 'application/json' }
+  if (options.token) {
+    headers['X-GitHub-Token'] = options.token
+  }
+
   const response = await fetch('/api/github/zipball', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers,
     body: JSON.stringify({ owner, repo, ref }),
     signal: options.signal,
   })

@@ -38,6 +38,7 @@ export async function startIndexing(
   treeSha: string,
   signal: AbortSignal,
   callbacks: IndexingCallbacks,
+  options: { token?: string } = {},
 ): Promise<void> {
   const { setIndexingProgress, setLoadingStage, setCodeIndex, setFailedFiles } = callbacks
 
@@ -66,7 +67,7 @@ export async function startIndexing(
         repoData.owner,
         repoData.name,
         repoData.defaultBranch,
-        { signal },
+        { signal, token: options.token },
       )
 
       if (signal.aborted) return
@@ -106,6 +107,7 @@ export async function startIndexing(
             repoData.name,
             repoData.defaultBranch,
             file.path,
+            { token: options.token },
           )
 
           if (signal.aborted) return

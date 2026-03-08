@@ -11,6 +11,7 @@ import { createEmptyIndex, batchIndexFiles } from '@/lib/code/code-index'
 import { getCachedRepo } from "@/lib/cache/repo-cache"
 import { analyzeCodebase, type FullAnalysis } from "@/lib/code/import-parser"
 import { startIndexing as runIndexingPipeline } from "@/lib/github/indexing-pipeline"
+import { useGitHubToken } from "@/providers/github-token-provider"
 import {
   DEFAULT_SEARCH_STATE,
   DEFAULT_INDEXING_PROGRESS,
@@ -86,6 +87,8 @@ export function RepositoryProvider({ children }: { children: ReactNode }) {
   const [loadingStage, setLoadingStage] = useState<LoadingStage>('idle')
   const [pinnedFiles, setPinnedFiles] = useState<Map<string, PinnedFile>>(new Map())
 
+  const { token: githubToken } = useGitHubToken()
+
   // Helper: get file content from modifiedContents first, then codeIndex
   const getFileContent = useCallback((path: string): string | null => {
     if (modifiedContents.has(path)) return modifiedContents.get(path)!
@@ -99,13 +102,14 @@ export function RepositoryProvider({ children }: { children: ReactNode }) {
     fileTree: FileNode[],
     treeSha: string,
     signal: AbortSignal,
+    options: { token?: string } = {},
   ) => {
     return runIndexingPipeline(repoData, fileTree, treeSha, signal, {
       setIndexingProgress,
       setLoadingStage,
       setCodeIndex,
       setFailedFiles,
-    })
+    }, options)
   }, [])
 
   const connectRepository = useCallback(async (url: string): Promise<boolean> => {
@@ -133,12 +137,13 @@ export function RepositoryProvider({ children }: { children: ReactNode }) {
       const { owner, repo: repoName } = parsed
 
       // Fetch repository metadata
-      const repoData = await fetchRepoMetadata(owner, repoName)
+      const tokenOpts = githubToken ? { token: githubToken } : {}
+      const repoData = await fetchRepoMetadata(owner, repoName, tokenOpts)
       setRepo(repoData)
 
       // Fetch file tree
       setLoadingStage('tree')
-      const tree = await fetchRepoTree(owner, repoName, repoData.defaultBranch)
+      const tree = await fetchRepoTree(owner, repoName, repoData.defaultBranch, tokenOpts)
       const fileTree = buildFileTree(tree)
       setFiles(fileTree)
 
@@ -163,7 +168,7 @@ export function RepositoryProvider({ children }: { children: ReactNode }) {
       // Start indexing immediately in background
       const abortController = new AbortController()
       indexingAbortRef.current = abortController
-      startIndexing(repoData, fileTree, tree.sha, abortController.signal)
+      startIndexing(repoData, fileTree, tree.sha, abortController.signal, { token: githubToken ?? undefined })
       
       return true
     } catch (err) {
@@ -173,7 +178,7 @@ export function RepositoryProvider({ children }: { children: ReactNode }) {
       setLoadingStage('idle')
       return false
     }
-  }, [startIndexing])
+  }, [startIndexing, githubToken])
 
   const disconnectRepository = useCallback(() => {
     // Abort any ongoing indexing

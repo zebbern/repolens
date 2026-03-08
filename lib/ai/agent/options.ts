@@ -1,4 +1,5 @@
 import * as z from 'zod'
+import { SKILL_ID_SCHEMA } from '@/lib/ai/skills/types'
 
 const providerSchema = z.enum(['openai', 'google', 'anthropic', 'openrouter'])
 
@@ -22,6 +23,7 @@ const chatOptionsSchema = z.object({
   structuralIndex: z.string().max(500_000).optional(),
   pinnedContext: z.string().max(200_000).optional(),
   maxSteps: z.number().int().min(10).max(100).optional(),
+  activeSkills: z.array(SKILL_ID_SCHEMA).max(10).optional(),
 })
 
 const docsOptionsSchema = z.object({

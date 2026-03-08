@@ -82,7 +82,13 @@ ${structuralIndex || 'Not available'}`
 /**
  * Skill discovery instructions, informing the agent about available skills.
  */
-export function skillDiscoverySection(): string {
-  return `## Skill System
+export function skillDiscoverySection(activeSkills?: string[]): string {
+  let section = `## Skill System
 You can call \`discoverSkills\` to see available specialized methodologies, then \`loadSkill\` to load one. Only load skills when you need expert guidance for a specific task type (e.g., security auditing, architecture analysis). Skills provide structured step-by-step methodologies that improve the quality of complex analysis tasks.`
+
+  if (activeSkills && activeSkills.length > 0) {
+    section += `\n\nThe user has activated these skills: ${activeSkills.join(', ')}. Use the loadSkill tool to load each of them at the start of your response before performing the task.`
+  }
+
+  return section
 }

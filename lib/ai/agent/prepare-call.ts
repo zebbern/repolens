@@ -94,6 +94,7 @@ export function buildPrepareCall() {
             contextWindow,
             toolCount,
             model,
+            activeSkills: callOptions.activeSkills,
           }),
           stopWhen: stepCountIs(stepBudget),
           ...(compactionEnabled && provider === 'anthropic' && {

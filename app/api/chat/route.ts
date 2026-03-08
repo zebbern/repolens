@@ -1,6 +1,7 @@
 import { createAgentUIStreamResponse, consumeStream, smoothStream, type UIMessage } from 'ai'
 import * as z from 'zod'
 import { repoLensAgent } from '@/lib/ai/agent'
+import { SKILL_ID_SCHEMA } from '@/lib/ai/skills/types'
 import { apiError } from '@/lib/api/error'
 import { applyRateLimit } from '@/lib/api/rate-limit'
 import type { NextRequest } from 'next/server'
@@ -26,6 +27,7 @@ const chatRequestSchema = z.object({
   pinnedContext: z.string().max(200_000).optional(),
   maxSteps: z.number().int().min(10).max(100).optional(),
   compactionEnabled: z.boolean().optional(),
+  activeSkills: z.array(SKILL_ID_SCHEMA).max(10).optional(),
 })
 
 export async function POST(req: NextRequest) {

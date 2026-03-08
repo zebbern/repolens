@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useMemo, useCallback } from 'react'
 import type { CodeIndex } from '@/lib/code/code-index'
-import { parseDependencies, queryOSV } from '@/lib/code/scanner/cve-lookup'
+import { parseDependencies } from '@/lib/code/scanner/cve-lookup'
 import type { CveResult, PackageDependency } from '@/lib/code/scanner/cve-lookup'
 import { fetchDependencyMeta } from '@/lib/deps/npm-client'
 import { computeDependencyHealth } from '@/lib/deps/health-scorer'
@@ -53,11 +53,18 @@ export function DepsPanel({ codeIndex }: DepsPanelProps) {
       const packageNames = parsed.map(p => p.name)
       const metaMap = await fetchDependencyMeta(packageNames)
 
-      // Step 3: Query OSV for CVEs
+      // Step 3: Query OSV for CVEs via server-side proxy
       let cves: CveResult[] = []
       try {
-        const osvResult = await queryOSV(parsed)
-        cves = osvResult.results
+        const cveResponse = await fetch('/api/deps/cve', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ packages: parsed }),
+        })
+        if (cveResponse.ok) {
+          const osvResult = (await cveResponse.json()) as { results: CveResult[]; errors: string[] }
+          cves = osvResult.results
+        }
       } catch {
         // CVE lookup failure is non-fatal — continue without CVE data
         console.warn('[deps-panel] CVE lookup failed, continuing without vulnerability data')

@@ -113,13 +113,15 @@ test.describe('Git history tool integration', () => {
     const chatInput = page.getByPlaceholder(/Add API key to chat|Ask about the codebase/i)
     await expect(chatInput).toBeVisible({ timeout: 30_000 })
 
-    // Switch through a couple of tabs to trigger lazy chunk loading
+    // Switch through a couple of tabs to trigger lazy chunk loading.
+    // On cold dev server, lazy chunk compilation may trigger a Fast Refresh
+    // full reload, resetting the page back to the Repo tab. Use .or() to
+    // handle both outcomes: Issues content loaded OR page reloaded.
     await page.getByRole('tab', { name: 'Issues', exact: true }).click()
-    await page.waitForLoadState('networkidle')
-    await page.waitForFunction(
-      () => (document.body.textContent ?? '').includes('No repository'),
-      { timeout: 120_000 },
-    )
+    await expect(
+      page.getByText('No repository loaded')
+        .or(page.getByRole('heading', { name: /Understand Any GitHub/i })),
+    ).toBeVisible({ timeout: 120_000 })
 
     await page.getByRole('tab', { name: 'Repo', exact: true }).click()
     await waitForBodyText(page, 'Understand Any GitHub', 30_000)

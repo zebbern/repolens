@@ -1,6 +1,7 @@
 import { createAgentUIStreamResponse, consumeStream, smoothStream, type UIMessage } from 'ai'
 import * as z from 'zod'
 import { repoLensAgent } from '@/lib/ai/agent'
+import { SKILL_ID_SCHEMA } from '@/lib/ai/skills/types'
 import { apiError } from '@/lib/api/error'
 import { applyRateLimit } from '@/lib/api/rate-limit'
 import type { NextRequest } from 'next/server'
@@ -27,7 +28,7 @@ const docsRequestSchema = z.object({
   targetFile: z.string().nullish(),
   maxSteps: z.number().int().min(10).max(80).optional(),
   compactionEnabled: z.boolean().optional(),
-  activeSkills: z.array(z.string().regex(/^[a-z0-9-]+$/).max(50)).max(10).optional(),
+  activeSkills: z.array(SKILL_ID_SCHEMA).max(10).optional(),
 })
 
 export async function POST(req: NextRequest) {

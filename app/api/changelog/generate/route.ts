@@ -3,6 +3,7 @@ import * as z from 'zod'
 import { apiError } from '@/lib/api/error'
 import { applyRateLimit } from '@/lib/api/rate-limit'
 import { repoLensAgent } from '@/lib/ai/agent'
+import { SKILL_ID_SCHEMA } from '@/lib/ai/skills/types'
 import type { NextRequest } from 'next/server'
 
 export const maxDuration = 120
@@ -29,7 +30,7 @@ const changelogRequestSchema = z.object({
   commitData: z.string().max(500_000),
   maxSteps: z.number().int().min(10).max(80).optional(),
   compactionEnabled: z.boolean().optional(),
-  activeSkills: z.array(z.string().regex(/^[a-z0-9-]+$/).max(50)).max(10).optional(),
+  activeSkills: z.array(SKILL_ID_SCHEMA).max(10).optional(),
 })
 
 export async function POST(req: NextRequest) {

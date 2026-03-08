@@ -2,7 +2,7 @@ import { useState, useMemo, useCallback, useRef, useEffect } from "react"
 import type { FileNode } from "@/types/repository"
 import type { CodeIndex } from "@/lib/code/code-index"
 import { flattenFiles } from "@/lib/code/code-index"
-import { fetchFileContent } from "@/lib/github/fetcher"
+import { fetchFileViaProxy } from "@/lib/github/client"
 import type { OpenTab } from "../types"
 
 interface UseFileOperationsOptions {
@@ -75,7 +75,7 @@ export function useFileOperations({
             t.path === file.path ? { ...t, content: indexed.content, originalContent: indexed.content, isLoading: false } : t
           ))
         } else {
-          const content = await fetchFileContent(repo.owner, repo.name, repo.defaultBranch, file.path)
+          const content = await fetchFileViaProxy(repo.owner, repo.name, repo.defaultBranch, file.path)
           setOpenTabs(prev => prev.map(t =>
             t.path === file.path ? { ...t, content, originalContent: content, isLoading: false } : t
           ))

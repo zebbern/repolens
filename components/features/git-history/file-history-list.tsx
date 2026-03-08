@@ -49,7 +49,7 @@ export function FileHistoryList({
   }
 
   return (
-    <div className="flex flex-col gap-1 overflow-auto p-4">
+    <div className="h-full flex flex-col gap-1 overflow-auto p-4">
       {/* File header */}
       <div className="flex items-center gap-2 mb-3 px-1">
         <FileText className="h-4 w-4 text-muted-foreground shrink-0" />

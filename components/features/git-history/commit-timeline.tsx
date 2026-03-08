@@ -38,7 +38,7 @@ export function CommitTimeline({
   }
 
   return (
-    <div className="flex flex-col gap-1 overflow-auto p-4">
+    <div className="h-full flex flex-col gap-1 overflow-auto p-4">
       {commitGroups.map((group) => (
         <div key={group.dateKey} className="mb-3">
           {/* Date header */}

@@ -28,7 +28,7 @@ export function InsightsView({ commits }: InsightsViewProps) {
   }
 
   return (
-    <div className="space-y-6 overflow-y-auto p-4">
+    <div className="h-full space-y-6 overflow-y-auto p-4">
       <InsightsPulseCards estimates={estimates} />
       <InsightsHoursChart estimates={estimates} />
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">

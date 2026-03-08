@@ -9,7 +9,16 @@ import { SkillRegistry } from '../registry'
 
 const DEFINITIONS_DIR = path.join(process.cwd(), 'lib', 'ai', 'skills', 'definitions')
 
-const KNOWN_SKILL_IDS = ['architecture-analysis', 'git-analysis', 'security-audit', 'tour-creation']
+const KNOWN_SKILL_IDS = [
+  'api-design-review',
+  'architecture-analysis',
+  'code-complexity',
+  'git-analysis',
+  'performance-analysis',
+  'security-audit',
+  'testing-quality',
+  'tour-creation',
+]
 
 // ---------------------------------------------------------------------------
 // SkillRegistry — listSkills
@@ -22,9 +31,9 @@ describe('SkillRegistry — listSkills', () => {
     registry = new SkillRegistry()
   })
 
-  it('returns all 4 skill summaries', () => {
+  it('returns all 8 skill summaries', () => {
     const skills = registry.listSkills()
-    expect(skills).toHaveLength(4)
+    expect(skills).toHaveLength(8)
   })
 
   it('returns correct IDs for all skills', () => {
@@ -95,6 +104,34 @@ describe('SkillRegistry — getSkill', () => {
     expect(skill).not.toBeNull()
     expect(skill!.id).toBe('tour-creation')
     expect(skill!.name).toBe('Tour Creation')
+  })
+
+  it('returns full definition for performance-analysis', () => {
+    const skill = registry.getSkill('performance-analysis')
+    expect(skill).not.toBeNull()
+    expect(skill!.id).toBe('performance-analysis')
+    expect(skill!.name).toBe('Performance Analysis')
+  })
+
+  it('returns full definition for code-complexity', () => {
+    const skill = registry.getSkill('code-complexity')
+    expect(skill).not.toBeNull()
+    expect(skill!.id).toBe('code-complexity')
+    expect(skill!.name).toBe('Code Complexity')
+  })
+
+  it('returns full definition for testing-quality', () => {
+    const skill = registry.getSkill('testing-quality')
+    expect(skill).not.toBeNull()
+    expect(skill!.id).toBe('testing-quality')
+    expect(skill!.name).toBe('Testing Quality')
+  })
+
+  it('returns full definition for api-design-review', () => {
+    const skill = registry.getSkill('api-design-review')
+    expect(skill).not.toBeNull()
+    expect(skill!.id).toBe('api-design-review')
+    expect(skill!.name).toBe('API Design Review')
   })
 
   it('returns null for nonexistent skill', () => {
@@ -195,9 +232,9 @@ describe('SkillRegistry — lazy loading', () => {
 // ---------------------------------------------------------------------------
 
 describe('SkillRegistry — skill definition frontmatter', () => {
-  it('all 4 definition files exist on disk', () => {
+  it('all 8 definition files exist on disk', () => {
     const files = fs.readdirSync(DEFINITIONS_DIR).filter((f) => f.endsWith('.md'))
-    expect(files).toHaveLength(4)
+    expect(files).toHaveLength(8)
   })
 
   it('all definitions have valid parseable frontmatter', () => {
@@ -205,8 +242,8 @@ describe('SkillRegistry — skill definition frontmatter', () => {
     const skills = registry.listSkills()
 
     // If frontmatter were invalid, the skill would be skipped.
-    // We verify all 4 are loaded.
-    expect(skills).toHaveLength(4)
+    // We verify all 8 are loaded.
+    expect(skills).toHaveLength(8)
     for (const skill of skills) {
       expect(skill.id).toMatch(/^[a-z0-9-]+$/)
       expect(skill.name.length).toBeLessThanOrEqual(200)

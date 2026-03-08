@@ -12,3 +12,14 @@ export type {
 export { expandBlameRanges, computeBlameStats, getBlameForLine } from './blame-utils'
 export { groupCommitsByDate, groupCommitsByAuthor, computeFileChangeStats } from './commit-utils'
 export { parsePatch } from './diff-utils'
+export {
+  estimateHours,
+  computePunchcardData,
+  computeHoursOverTime,
+  DEFAULT_CONFIG,
+} from './hours-estimation'
+export type {
+  HoursEstimateConfig,
+  CodingSession,
+  AuthorHoursEstimate,
+} from './hours-estimation'

@@ -26,7 +26,6 @@ const chatRequestSchema = z.object({
   structuralIndex: z.string().max(500_000).optional(),
   pinnedContext: z.string().max(200_000).optional(),
   maxSteps: z.number().int().min(10).max(100).optional(),
-  compactionEnabled: z.boolean().optional(),
   activeSkills: z.array(SKILL_ID_SCHEMA).max(10).optional(),
 })
 

@@ -38,7 +38,6 @@ export interface ChangelogEngineReturn {
     customPrompt: string,
     commitData?: string,
     maxSteps?: number,
-    compactionEnabled?: boolean,
     activeSkills?: string[],
   ) => void
   /**
@@ -167,7 +166,6 @@ export function useChangelogEngine(): ChangelogEngineReturn {
         customPrompt: ctx.customPrompt || undefined,
         commitData: ctx.commitData,
         maxSteps: ctx.maxSteps,
-        compactionEnabled: ctx.compactionEnabled,
         activeSkills: ctx.activeSkills,
       }
 
@@ -191,7 +189,6 @@ export function useChangelogEngine(): ChangelogEngineReturn {
     customPrompt: string,
     commitData?: string,
     maxSteps?: number,
-    compactionEnabled?: boolean,
     activeSkills?: string[],
   ) => {
     const ctx: ChangelogGenContext = {
@@ -201,7 +198,6 @@ export function useChangelogEngine(): ChangelogEngineReturn {
       customPrompt,
       commitData,
       maxSteps,
-      compactionEnabled: compactionEnabled ?? false,
       ...(activeSkills && activeSkills.length > 0 ? { activeSkills } : {}),
     }
     genContextRef.current = ctx
@@ -229,11 +225,10 @@ export function useChangelogEngine(): ChangelogEngineReturn {
     customPrompt,
     commitData,
     maxSteps,
-    compactionEnabled,
     activeSkills,
   ) => {
     if (isGenerating || isSubmittingRef.current) return
-    dispatchGeneration(preset, fromRef, toRef, customPrompt, commitData, maxSteps, compactionEnabled, activeSkills)
+    dispatchGeneration(preset, fromRef, toRef, customPrompt, commitData, maxSteps, activeSkills)
   }
 
   const handleRegenerate: ChangelogEngineReturn['handleRegenerate'] = (changelog) => {
@@ -251,7 +246,6 @@ export function useChangelogEngine(): ChangelogEngineReturn {
       changelog.customPrompt || '',
       changelog.commitData,
       changelog.maxSteps,
-      changelog.compactionEnabled,
       changelog.activeSkills,
     )
   }

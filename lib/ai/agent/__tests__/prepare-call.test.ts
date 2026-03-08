@@ -120,7 +120,6 @@ describe('buildPrepareCall', () => {
       const prepareCall = buildPrepareCall()
       const result = prepareCall({ options: BASE_CHAT })
       expect(result.experimental_context).toEqual({
-        compactionEnabled: false,
         maxSteps: 50,
         model: 'gpt-4o',
         provider: 'openai',
@@ -170,22 +169,22 @@ describe('buildPrepareCall', () => {
   })
 
   describe('Anthropic provider options', () => {
-    it('includes providerOptions when compactionEnabled and provider is anthropic', () => {
+    it('includes providerOptions when provider is anthropic', () => {
       const prepareCall = buildPrepareCall()
       const result = prepareCall({
-        options: { ...BASE_DOCS, compactionEnabled: true },
+        options: { ...BASE_DOCS },
       })
       expect(result.providerOptions).toBeDefined()
       expect(result.providerOptions?.anthropic).toBeDefined()
-      expect(result.providerOptions.anthropic.contextManagement).toBeDefined()
+      expect(result.providerOptions!.anthropic.contextManagement).toBeDefined()
     })
 
     it('providerOptions includes clear_tool_uses and compact edits', () => {
       const prepareCall = buildPrepareCall()
       const result = prepareCall({
-        options: { ...BASE_DOCS, compactionEnabled: true },
+        options: { ...BASE_DOCS },
       })
-      const edits = result.providerOptions.anthropic.contextManagement.edits
+      const edits = result.providerOptions!.anthropic.contextManagement.edits
       expect(edits).toHaveLength(2)
       expect(edits[0].type).toBe('clear_tool_uses_20250919')
       expect(edits[1].type).toBe('compact_20260112')
@@ -194,23 +193,7 @@ describe('buildPrepareCall', () => {
     it('does NOT include providerOptions for non-Anthropic providers', () => {
       const prepareCall = buildPrepareCall()
       const result = prepareCall({
-        options: { ...BASE_CHAT, compactionEnabled: true, provider: 'openai' },
-      })
-      expect(result.providerOptions).toBeUndefined()
-    })
-
-    it('does NOT include providerOptions when compactionEnabled is false', () => {
-      const prepareCall = buildPrepareCall()
-      const result = prepareCall({
-        options: { ...BASE_DOCS, compactionEnabled: false },
-      })
-      expect(result.providerOptions).toBeUndefined()
-    })
-
-    it('does NOT include providerOptions when compactionEnabled is undefined', () => {
-      const prepareCall = buildPrepareCall()
-      const result = prepareCall({
-        options: BASE_DOCS,
+        options: { ...BASE_CHAT, provider: 'openai' },
       })
       expect(result.providerOptions).toBeUndefined()
     })
@@ -218,7 +201,7 @@ describe('buildPrepareCall', () => {
     it('includes providerOptions for anthropic in chat mode', () => {
       const prepareCall = buildPrepareCall()
       const result = prepareCall({
-        options: { ...BASE_CHAT, provider: 'anthropic', compactionEnabled: true },
+        options: { ...BASE_CHAT, provider: 'anthropic' },
       })
       expect(result.providerOptions).toBeDefined()
     })
@@ -226,23 +209,23 @@ describe('buildPrepareCall', () => {
     it('includes providerOptions for anthropic in changelog mode', () => {
       const prepareCall = buildPrepareCall()
       const result = prepareCall({
-        options: { ...BASE_CHANGELOG, provider: 'anthropic', compactionEnabled: true },
+        options: { ...BASE_CHANGELOG, provider: 'anthropic' },
       })
       expect(result.providerOptions).toBeDefined()
     })
 
-    it('google provider has no providerOptions even with compaction', () => {
+    it('google provider has no providerOptions', () => {
       const prepareCall = buildPrepareCall()
       const result = prepareCall({
-        options: { ...BASE_CHANGELOG, compactionEnabled: true },
+        options: { ...BASE_CHANGELOG },
       })
       expect(result.providerOptions).toBeUndefined()
     })
 
-    it('openrouter provider has no providerOptions even with compaction', () => {
+    it('openrouter provider has no providerOptions', () => {
       const prepareCall = buildPrepareCall()
       const result = prepareCall({
-        options: { ...BASE_CHAT, provider: 'openrouter', compactionEnabled: true },
+        options: { ...BASE_CHAT, provider: 'openrouter' },
       })
       expect(result.providerOptions).toBeUndefined()
     })

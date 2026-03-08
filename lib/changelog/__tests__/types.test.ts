@@ -113,7 +113,6 @@ describe('ChangelogGenContext', () => {
       customPrompt: '',
       commitData: 'abc123 feat: add feature',
       maxSteps: 40,
-      compactionEnabled: true,
     }
 
     expect(ctx.changelogType).toBe('conventional')
@@ -122,7 +121,6 @@ describe('ChangelogGenContext', () => {
     expect(ctx.customPrompt).toBe('')
     expect(ctx.commitData).toContain('abc123')
     expect(ctx.maxSteps).toBe(40)
-    expect(ctx.compactionEnabled).toBe(true)
   })
 
   it('works without optional fields', () => {
@@ -135,6 +133,5 @@ describe('ChangelogGenContext', () => {
 
     expect(ctx.commitData).toBeUndefined()
     expect(ctx.maxSteps).toBeUndefined()
-    expect(ctx.compactionEnabled).toBeUndefined()
   })
 })

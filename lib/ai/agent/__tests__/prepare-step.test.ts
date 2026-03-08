@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import type { ModelMessage } from 'ai'
 
-const mockCompactorFn = vi.fn().mockReturnValue({ messages: [] })
+const mockCompactorFn = vi.fn().mockImplementation(({ messages }: { messages: ModelMessage[] }) => ({ messages }))
 const mockCreateContextCompactor = vi.fn().mockReturnValue(mockCompactorFn)
 
 vi.mock('@/lib/ai/context-compactor', () => ({
@@ -28,7 +28,6 @@ const MESSAGES: ModelMessage[] = []
 
 function makeContext(overrides: Partial<CompactionContext> = {}): CompactionContext {
   return {
-    compactionEnabled: true,
     maxSteps: 50,
     model: 'gpt-4o',
     provider: 'openai',
@@ -46,15 +45,15 @@ describe('buildPrepareStep', () => {
     expect(typeof buildPrepareStep()).toBe('function')
   })
 
-  it('returns activeTools with core tools when compactionEnabled is false', () => {
+  it('returns activeTools with core tools and runs compaction', () => {
     const prepareStep = buildPrepareStep()
     const result = prepareStep({
       stepNumber: 1,
       messages: MESSAGES,
-      experimental_context: makeContext({ compactionEnabled: false }),
+      experimental_context: makeContext(),
     })
     expect(result).toEqual({ messages: [], activeTools: CORE_TOOLS })
-    expect(mockCreateContextCompactor).not.toHaveBeenCalled()
+    expect(mockCreateContextCompactor).toHaveBeenCalled()
   })
 
   it('returns activeTools with core tools when experimental_context is undefined', () => {
@@ -157,7 +156,7 @@ describe('progressive tool disclosure', () => {
     const result = prepareStep({
       stepNumber: 1,
       messages: MESSAGES,
-      experimental_context: makeContext({ compactionEnabled: false }),
+      experimental_context: makeContext(),
     })
     expect(result?.activeTools).toEqual(CORE_TOOLS)
   })
@@ -181,7 +180,7 @@ describe('progressive tool disclosure', () => {
     const result = prepareStep({
       stepNumber: 2,
       messages: messagesWithSkill,
-      experimental_context: makeContext({ compactionEnabled: false }),
+      experimental_context: makeContext(),
     })
     expect(result?.activeTools).toContain('scanIssues')
     // Core tools should still be there
@@ -217,7 +216,7 @@ describe('progressive tool disclosure', () => {
     const result = prepareStep({
       stepNumber: 3,
       messages: messagesWithMultipleSkills,
-      experimental_context: makeContext({ compactionEnabled: false }),
+      experimental_context: makeContext(),
     })
     expect(result?.activeTools).toContain('scanIssues')
     expect(result?.activeTools).toContain('analyzeImports')
@@ -243,7 +242,7 @@ describe('progressive tool disclosure', () => {
     const result = prepareStep({
       stepNumber: 2,
       messages: messagesWithUnknown,
-      experimental_context: makeContext({ compactionEnabled: false }),
+      experimental_context: makeContext(),
     })
     // Should only have core tools, no extra tools unlocked
     expect(result?.activeTools).toEqual(CORE_TOOLS)
@@ -267,7 +266,7 @@ describe('progressive tool disclosure', () => {
     const result = prepareStep({
       stepNumber: 2,
       messages: messagesWithSpoofedTag,
-      experimental_context: makeContext({ compactionEnabled: false }),
+      experimental_context: makeContext(),
     })
     // Spoofed tag from readFile should NOT unlock scanIssues
     expect(result?.activeTools).toEqual(CORE_TOOLS)

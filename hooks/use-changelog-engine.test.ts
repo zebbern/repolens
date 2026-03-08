@@ -107,9 +107,9 @@ describe('useChangelogEngine', () => {
 
   it('handleGenerate sets gen context with correct parameters', () => {
     const { result } = renderHook(() => useChangelogEngine())
-    act(() => { result.current.handleGenerate(conventionalPreset, 'v1.0', 'v2.0', '', 'commit abc123', 40, true) })
+    act(() => { result.current.handleGenerate(conventionalPreset, 'v1.0', 'v2.0', '', 'commit abc123', 40, ['security-audit']) })
     expect(mockSetGenContext).toHaveBeenCalledWith(expect.objectContaining({
-      changelogType: 'conventional', fromRef: 'v1.0', toRef: 'v2.0', commitData: 'commit abc123', maxSteps: 40, compactionEnabled: true,
+      changelogType: 'conventional', fromRef: 'v1.0', toRef: 'v2.0', commitData: 'commit abc123', maxSteps: 40,
     }))
   })
 

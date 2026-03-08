@@ -27,7 +27,6 @@ const docsRequestSchema = z.object({
   structuralIndex: z.string().max(500_000).optional(),
   targetFile: z.string().nullish(),
   maxSteps: z.number().int().min(10).max(80).optional(),
-  compactionEnabled: z.boolean().optional(),
 })
 
 const validBase = {

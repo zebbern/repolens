@@ -11,7 +11,6 @@ import type { CallOptions } from './options'
  * Context passed through `experimental_context` for use in `prepareStep`.
  */
 export interface CompactionContext {
-  compactionEnabled: boolean
   maxSteps: number
   model: string
   provider: string
@@ -62,7 +61,7 @@ const loggingMiddleware = createLoggingMiddleware()
 export function buildPrepareCall() {
   return (baseCallArgs: { options: CallOptions } & Record<string, unknown>) => {
     const { options: callOptions } = baseCallArgs
-    const { provider, model, apiKey, compactionEnabled } = callOptions
+    const { provider, model, apiKey } = callOptions
     const contextWindow = getModelContextWindow(model)
     const toolCount = Object.keys(codeTools).length
     const wrappedModel = wrapLanguageModel({
@@ -71,7 +70,6 @@ export function buildPrepareCall() {
     })
 
     const compactionContext: CompactionContext = {
-      compactionEnabled: compactionEnabled ?? false,
       maxSteps: 50,
       model,
       provider,
@@ -97,7 +95,7 @@ export function buildPrepareCall() {
             activeSkills: callOptions.activeSkills,
           }),
           stopWhen: stepCountIs(stepBudget),
-          ...(compactionEnabled && provider === 'anthropic' && {
+          ...(provider === 'anthropic' && {
             providerOptions: buildAnthropicProviderOptions('chat'),
           }),
           experimental_context: compactionContext,
@@ -121,7 +119,7 @@ export function buildPrepareCall() {
             activeSkills: callOptions.activeSkills,
           }),
           stopWhen: stepCountIs(stepBudget),
-          ...(compactionEnabled && provider === 'anthropic' && {
+          ...(provider === 'anthropic' && {
             providerOptions: buildAnthropicProviderOptions('docs'),
           }),
           experimental_context: compactionContext,
@@ -147,7 +145,7 @@ export function buildPrepareCall() {
             activeSkills: callOptions.activeSkills,
           }),
           stopWhen: stepCountIs(stepBudget),
-          ...(compactionEnabled && provider === 'anthropic' && {
+          ...(provider === 'anthropic' && {
             providerOptions: buildAnthropicProviderOptions('changelog'),
           }),
           experimental_context: compactionContext,

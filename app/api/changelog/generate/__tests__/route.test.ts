@@ -214,16 +214,6 @@ describe('POST /api/changelog/generate', () => {
     expect(callArgs.options.maxSteps).toBe(60)
   })
 
-  it('accepts optional compactionEnabled param', async () => {
-    const req = makeRequest(validBody({ compactionEnabled: true }))
-
-    const res = await POST(req)
-    expect(res.status).toBe(200)
-
-    const callArgs = mockCreateAgentUIStreamResponse.mock.calls[0][0]
-    expect(callArgs.options.compactionEnabled).toBe(true)
-  })
-
   it('accepts optional structuralIndex param', async () => {
     const req = makeRequest(validBody({ structuralIndex: '{"files": []}' }))
 

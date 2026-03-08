@@ -9,8 +9,6 @@ import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Sheet, SheetContent, SheetTrigger, SheetHeader, SheetTitle } from '@/components/ui/sheet'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Switch } from '@/components/ui/switch'
-import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip'
 import type { UIMessage } from 'ai'
 import { CHANGELOG_PRESETS, type ChangelogType } from '@/providers/changelog-provider'
 import type { GitHubTag, GitHubBranch } from '@/types/repository'
@@ -45,8 +43,6 @@ interface NewChangelogViewProps {
   setToRef: (ref: string) => void
   qualityLevel: QualityLevel
   setQualityLevel: (level: QualityLevel) => void
-  compactionEnabled: boolean
-  setCompactionEnabled: (enabled: boolean) => void
   activeSkills: Set<string>
   onSkillToggle: (skillId: string) => void
   commitFetchError: string | null
@@ -64,7 +60,7 @@ export function NewChangelogView(props: NewChangelogViewProps) {
     isGenerating, isFetchingCommits, messages, stop, selectedModel,
     refSource, setRefSource, tags, branches, refsLoading, refsError, refOptions,
     fromRef, setFromRef, toRef, setToRef,
-    qualityLevel, setQualityLevel, compactionEnabled, setCompactionEnabled,
+    qualityLevel, setQualityLevel,
     activeSkills, onSkillToggle,
     commitFetchError, error, selectedPreset, setSelectedPreset,
     customPrompt, setCustomPrompt, onGenerate,
@@ -116,7 +112,6 @@ export function NewChangelogView(props: NewChangelogViewProps) {
               refsLoading={refsLoading} refsError={refsError} refOptions={refOptions}
               fromRef={fromRef} setFromRef={setFromRef} toRef={toRef} setToRef={setToRef} />
             <QualitySelector qualityLevel={qualityLevel} setQualityLevel={setQualityLevel}
-              compactionEnabled={compactionEnabled} setCompactionEnabled={setCompactionEnabled}
               activeSkills={activeSkills} onSkillToggle={onSkillToggle} />
             <ErrorDisplays commitFetchError={commitFetchError} error={error}
               isGenerating={isGenerating} selectedPreset={selectedPreset} onGenerate={onGenerate} />
@@ -181,9 +176,8 @@ function RefRangeSelector({ refSource, setRefSource, tags, branches, refsLoading
   )
 }
 
-function QualitySelector({ qualityLevel, setQualityLevel, compactionEnabled, setCompactionEnabled, activeSkills, onSkillToggle }: {
+function QualitySelector({ qualityLevel, setQualityLevel, activeSkills, onSkillToggle }: {
   qualityLevel: QualityLevel; setQualityLevel: (l: QualityLevel) => void
-  compactionEnabled: boolean; setCompactionEnabled: (e: boolean) => void
   activeSkills: Set<string>; onSkillToggle: (skillId: string) => void
 }) {
   return (
@@ -199,18 +193,6 @@ function QualitySelector({ qualityLevel, setQualityLevel, compactionEnabled, set
           </SelectContent>
         </Select>
       </div>
-      <TooltipProvider>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <div className="flex items-center gap-1.5">
-              <Switch id="changelog-compaction-toggle" checked={compactionEnabled} onCheckedChange={setCompactionEnabled}
-                className="h-4 w-7 data-[state=checked]:bg-accent-primary data-[state=unchecked]:bg-foreground/10 [&_span]:h-3 [&_span]:w-3" />
-              <label htmlFor="changelog-compaction-toggle" className="text-xs text-text-muted cursor-pointer select-none">Compact</label>
-            </div>
-          </TooltipTrigger>
-          <TooltipContent side="bottom" className="max-w-[200px]"><p className="text-xs">Compacts old tool results to save context window space.</p></TooltipContent>
-        </Tooltip>
-      </TooltipProvider>
       <SkillSelector activeSkills={activeSkills} onToggle={onSkillToggle} />
     </div>
   )

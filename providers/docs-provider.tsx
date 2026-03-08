@@ -150,7 +150,6 @@ export function DocsProvider({ children }: { children: ReactNode }) {
               structuralIndex,
               targetFile: ctx.targetFile,
               maxSteps: ctx.maxSteps,
-              compactionEnabled: ctx.compactionEnabled ?? false,
               ...(ctx.activeSkills && ctx.activeSkills.length > 0 ? { activeSkills: ctx.activeSkills } : {}),
             },
           }

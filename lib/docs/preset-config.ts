@@ -73,8 +73,6 @@ export interface GenContext {
   customPrompt: string
   /** Max tool-call steps allowed. */
   maxSteps?: number
-  /** Whether context compaction is enabled for this generation. */
-  compactionEnabled?: boolean
   /** Active skill IDs to include in the generation request. */
   activeSkills?: string[]
 }

@@ -35,7 +35,6 @@ describe('callOptionsSchema — chat mode', () => {
       structuralIndex: '{}',
       pinnedContext: 'some pinned content',
       maxSteps: 50,
-      compactionEnabled: true,
     })
     expect(result.success).toBe(true)
   })

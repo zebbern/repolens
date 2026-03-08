@@ -29,7 +29,6 @@ const changelogRequestSchema = z.object({
   toRef: z.string().min(1),
   commitData: z.string().max(500_000),
   maxSteps: z.number().int().min(10).max(80).optional(),
-  compactionEnabled: z.boolean().optional(),
   activeSkills: z.array(SKILL_ID_SCHEMA).max(10).optional(),
 })
 

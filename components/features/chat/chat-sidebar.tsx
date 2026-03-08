@@ -12,8 +12,6 @@ import { SkillSelector } from "./skill-selector"
 import { TokenUsageFooter } from "./token-usage-footer"
 import { Bot, AlertCircle, Download } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { Switch } from "@/components/ui/switch"
-import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "@/components/ui/tooltip"
 import { useAPIKeys, useRepository, useTours, useGitHubToken } from "@/providers"
 import { toast } from "sonner"
 import { buildFileTreeString } from "@/lib/github/fetcher"
@@ -36,7 +34,6 @@ export function ChatSidebar({ className }: { className?: string }) {
   const { saveTour, startTour } = useTours()
   const { token: githubToken } = useGitHubToken()
   const [input, setInput] = useState("")
-  const [compactionEnabled, setCompactionEnabled] = useState(false)
   const [activeSkills, setActiveSkills] = useState<Set<string>>(new Set())
 
   const handleSkillToggle = useCallback((skillId: string) => {
@@ -198,7 +195,6 @@ export function ChatSidebar({ className }: { className?: string }) {
           structuralIndex,
           pinnedContext: pinnedResult.content || undefined,
           maxSteps: 50,
-          compactionEnabled,
           ...(activeSkills.size > 0 ? { activeSkills: Array.from(activeSkills) } : {}),
         },
       },
@@ -211,26 +207,6 @@ export function ChatSidebar({ className }: { className?: string }) {
       <div className="flex h-11 items-center justify-between border-b border-foreground/[0.06] px-4">
         <span className="text-sm font-medium text-text-primary">Chat</span>
         <div className="flex items-center gap-1">
-          <TooltipProvider>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <div className="flex items-center gap-1.5">
-                  <Switch
-                    id="compaction-toggle"
-                    checked={compactionEnabled}
-                    onCheckedChange={setCompactionEnabled}
-                    className="h-4 w-7 data-[state=checked]:bg-accent-primary data-[state=unchecked]:bg-foreground/10 [&_span]:h-3 [&_span]:w-3"
-                  />
-                  <label htmlFor="compaction-toggle" className="text-xs text-text-muted cursor-pointer select-none">
-                    Compact
-                  </label>
-                </div>
-              </TooltipTrigger>
-              <TooltipContent side="bottom" className="max-w-[200px]">
-                <p className="text-xs">Compacts old tool results to save context window space. Off by default — most models have enough context.</p>
-              </TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
           {messages.length > 0 && (
             <Button
               variant="ghost"

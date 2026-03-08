@@ -5,8 +5,7 @@ import type { CompactionContext } from './prepare-call'
 /**
  * ADR-6: prepareStep vs Anthropic contextManagement interaction
  *
- * RepoLens uses two complementary compaction mechanisms when `compactionEnabled`
- * is true for Anthropic models:
+ * RepoLens uses two complementary compaction mechanisms for Anthropic models:
  *
  * 1. **prepareStep (content-level compaction)** — implemented by
  *    `createContextCompactor`. Runs before each LLM call. Truncates old
@@ -28,7 +27,7 @@ import type { CompactionContext } from './prepare-call'
  *   truncation alone cannot solve (e.g., many small tool calls, large system
  *   prompts, accumulated assistant reasoning).
  *
- * Both should remain active when `compactionEnabled` is true for Anthropic.
+ * Both are always active for Anthropic.
  * For non-Anthropic providers, only `prepareStep` runs.
  */
 
@@ -105,7 +104,7 @@ const compactorCache = new Map<string, (params: { stepNumber: number; messages: 
  *
  * Responsibilities:
  * 1. Message pruning via `pruneMessages` — removes stale reasoning before the last message
- * 2. Content-level compaction via `createContextCompactor` (when `compactionEnabled`)
+ * 2. Content-level compaction via `createContextCompactor` (always active)
  * 3. Progressive tool disclosure via `activeTools` — only core tools available
  *    until skills are loaded, which unlock additional tools
  */
@@ -119,8 +118,8 @@ export function buildPrepareStep() {
       reasoning: 'before-last-message',
     })
 
-    // 2. Content-level compaction (when enabled)
-    if (ctx?.compactionEnabled) {
+    // 2. Content-level compaction (always enabled)
+    if (ctx) {
       const cacheKey = `${ctx.maxSteps}-${ctx.model}`
       let compactor = compactorCache.get(cacheKey)
       if (!compactor) {

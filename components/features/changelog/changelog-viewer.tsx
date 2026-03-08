@@ -57,7 +57,6 @@ export function ChangelogViewer({ className }: ChangelogViewerProps) {
   const [copied, setCopied] = useState(false)
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [qualityLevel, setQualityLevel] = useState<QualityLevel>('balanced')
-  const [compactionEnabled, setCompactionEnabled] = useState(false)
   const [activeSkills, setActiveSkills] = useState<Set<string>>(new Set())
 
   const handleSkillToggle = useCallback((skillId: string) => {
@@ -160,7 +159,7 @@ export function ChangelogViewer({ className }: ChangelogViewerProps) {
         comparison.files.map(f => `- ${f.status} ${f.filename} (+${f.additions} -${f.deletions})`).join('\n'),
       ].join('\n')
       setIsFetchingCommits(false)
-      handleGenerate(preset, fromRef, toRef, customPrompt, commitData, QUALITY_STEPS[qualityLevel], compactionEnabled, Array.from(activeSkills))
+      handleGenerate(preset, fromRef, toRef, customPrompt, commitData, QUALITY_STEPS[qualityLevel], Array.from(activeSkills))
     } catch (err) {
       setIsFetchingCommits(false)
       setCommitFetchError(err instanceof Error ? err.message : 'Failed to fetch commit data for the selected range.')
@@ -291,7 +290,6 @@ export function ChangelogViewer({ className }: ChangelogViewerProps) {
             refsLoading={refsLoading} refsError={refsError} refOptions={refOptions}
             fromRef={fromRef} setFromRef={setFromRef} toRef={toRef} setToRef={setToRef}
             qualityLevel={qualityLevel} setQualityLevel={setQualityLevel}
-            compactionEnabled={compactionEnabled} setCompactionEnabled={setCompactionEnabled}
             activeSkills={activeSkills} onSkillToggle={handleSkillToggle}
             commitFetchError={commitFetchError} error={error}
             selectedPreset={selectedPreset} setSelectedPreset={setSelectedPreset}

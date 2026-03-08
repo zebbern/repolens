@@ -13,7 +13,6 @@ const baseFields = {
   provider: providerSchema,
   model: z.string().min(1).max(100).regex(/^[a-zA-Z0-9][a-zA-Z0-9_.:\/-]*$/),
   apiKey: z.string().min(1).max(500),
-  compactionEnabled: z.boolean().optional(),
 }
 
 const chatOptionsSchema = z.object({

@@ -37,7 +37,6 @@ export interface DocsEngineReturn {
     targetFile: string | null,
     customPrompt: string,
     maxSteps?: number,
-    compactionEnabled?: boolean,
     activeSkills?: string[],
   ) => void
   /**
@@ -184,7 +183,6 @@ export function useDocsEngine(): DocsEngineReturn {
     targetFile: string | null,
     customPrompt: string,
     maxSteps?: number,
-    compactionEnabled?: boolean,
     activeSkills?: string[],
   ) => {
     const ctx: GenContext = {
@@ -192,7 +190,6 @@ export function useDocsEngine(): DocsEngineReturn {
       targetFile,
       customPrompt,
       maxSteps,
-      compactionEnabled: compactionEnabled ?? false,
       ...(activeSkills && activeSkills.length > 0 ? { activeSkills } : {}),
     }
     genContextRef.current = ctx
@@ -218,11 +215,10 @@ export function useDocsEngine(): DocsEngineReturn {
     targetFile,
     customPrompt,
     maxSteps,
-    compactionEnabled,
     activeSkills,
   ) => {
     if (isGenerating || isSubmittingRef.current) return
-    dispatchGeneration(preset, targetFile, customPrompt, maxSteps, compactionEnabled, activeSkills)
+    dispatchGeneration(preset, targetFile, customPrompt, maxSteps, activeSkills)
   }
 
   const handleRegenerate: DocsEngineReturn['handleRegenerate'] = (doc) => {
@@ -238,7 +234,6 @@ export function useDocsEngine(): DocsEngineReturn {
       doc.targetFile || null,
       doc.customPrompt || '',
       doc.maxSteps,
-      undefined,
       doc.activeSkills,
     )
   }

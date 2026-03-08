@@ -16,8 +16,6 @@ import {
 } from '@/components/ui/alert-dialog'
 import { Sheet, SheetContent, SheetTrigger, SheetHeader, SheetTitle } from '@/components/ui/sheet'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Switch } from '@/components/ui/switch'
-import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip'
 import { useIsMobile } from '@/hooks/use-mobile'
 import { useAPIKeys, useRepository, useDocs } from '@/providers'
 import type { UIMessage } from 'ai'
@@ -86,7 +84,6 @@ export function DocViewer({ className }: DocViewerProps) {
   const [copied, setCopied] = useState(false)
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [qualityLevel, setQualityLevel] = useState<QualityLevel>('balanced')
-  const [compactionEnabled, setCompactionEnabled] = useState(false)
   const [activeSkills, setActiveSkills] = useState<Set<string>>(new Set())
 
   const handleSkillToggle = useCallback((skillId: string) => {
@@ -143,7 +140,7 @@ export function DocViewer({ className }: DocViewerProps) {
     }
 
     setSelectedPreset(preset.id)
-    handleGenerate(preset, targetFile, customPrompt, QUALITY_STEPS[qualityLevel], compactionEnabled, Array.from(activeSkills))
+    handleGenerate(preset, targetFile, customPrompt, QUALITY_STEPS[qualityLevel], Array.from(activeSkills))
   }
 
   const onRegenerate = (doc: GeneratedDoc) => {
@@ -392,26 +389,6 @@ export function DocViewer({ className }: DocViewerProps) {
                       </SelectContent>
                     </Select>
                     </div>
-                    <TooltipProvider>
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <div className="flex items-center gap-1.5">
-                            <Switch
-                              id="docs-compaction-toggle"
-                              checked={compactionEnabled}
-                              onCheckedChange={setCompactionEnabled}
-                              className="h-4 w-7 data-[state=checked]:bg-accent-primary data-[state=unchecked]:bg-foreground/10 [&_span]:h-3 [&_span]:w-3"
-                            />
-                            <label htmlFor="docs-compaction-toggle" className="text-xs text-text-muted cursor-pointer select-none">
-                              Compact
-                            </label>
-                          </div>
-                        </TooltipTrigger>
-                        <TooltipContent side="bottom" className="max-w-[200px]">
-                          <p className="text-xs">Compacts old tool results to save context window space. Off by default — most models have enough context.</p>
-                        </TooltipContent>
-                      </Tooltip>
-                    </TooltipProvider>
                     <SkillSelector activeSkills={activeSkills} onToggle={handleSkillToggle} />
                   </div>
 

@@ -56,8 +56,6 @@ export interface GeneratedChangelog {
   commitData?: string
   /** Max tool-call steps used for this generation. */
   maxSteps?: number
-  /** Whether context compaction was enabled. */
-  compactionEnabled?: boolean
   /** Active skill IDs used during generation. */
   activeSkills?: string[]
 }
@@ -81,8 +79,6 @@ export interface ChangelogGenContext {
   commitData?: string
   /** Max tool-call steps allowed. */
   maxSteps?: number
-  /** Whether context compaction is enabled for this generation. */
-  compactionEnabled?: boolean
   /** Active skill IDs to include in the generation request. */
   activeSkills?: string[]
 }

@@ -91,7 +91,6 @@ export function CodeBrowser({ navigateToFile, navigateToLine, onNavigateComplete
   // Sync activeTabPath to app-level selectedFilePath for Git History tab
   useEffect(() => {
     setSelectedFilePath(activeTabPath)
-    return () => setSelectedFilePath(null)
   }, [activeTabPath, setSelectedFilePath])
 
   const {

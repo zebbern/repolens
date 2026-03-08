@@ -38,6 +38,7 @@ export interface DocsEngineReturn {
     customPrompt: string,
     maxSteps?: number,
     compactionEnabled?: boolean,
+    activeSkills?: string[],
   ) => void
   /**
    * Regenerate documentation from an existing {@link GeneratedDoc}.
@@ -162,6 +163,7 @@ export function useDocsEngine(): DocsEngineReturn {
         targetFile: ctx.targetFile || undefined,
         customPrompt: ctx.customPrompt || undefined,
         maxSteps: ctx.maxSteps,
+        activeSkills: ctx.activeSkills,
       }
 
       setGeneratedDocs(prev => [newDoc, ...prev])
@@ -183,6 +185,7 @@ export function useDocsEngine(): DocsEngineReturn {
     customPrompt: string,
     maxSteps?: number,
     compactionEnabled?: boolean,
+    activeSkills?: string[],
   ) => {
     const ctx: GenContext = {
       docType: preset.id,
@@ -190,6 +193,7 @@ export function useDocsEngine(): DocsEngineReturn {
       customPrompt,
       maxSteps,
       compactionEnabled: compactionEnabled ?? false,
+      ...(activeSkills && activeSkills.length > 0 ? { activeSkills } : {}),
     }
     genContextRef.current = ctx
     setGenContext(ctx)
@@ -215,9 +219,10 @@ export function useDocsEngine(): DocsEngineReturn {
     customPrompt,
     maxSteps,
     compactionEnabled,
+    activeSkills,
   ) => {
     if (isGenerating || isSubmittingRef.current) return
-    dispatchGeneration(preset, targetFile, customPrompt, maxSteps, compactionEnabled)
+    dispatchGeneration(preset, targetFile, customPrompt, maxSteps, compactionEnabled, activeSkills)
   }
 
   const handleRegenerate: DocsEngineReturn['handleRegenerate'] = (doc) => {
@@ -233,6 +238,8 @@ export function useDocsEngine(): DocsEngineReturn {
       doc.targetFile || null,
       doc.customPrompt || '',
       doc.maxSteps,
+      undefined,
+      doc.activeSkills,
     )
   }
 

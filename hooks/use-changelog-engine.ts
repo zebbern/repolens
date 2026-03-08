@@ -39,6 +39,7 @@ export interface ChangelogEngineReturn {
     commitData?: string,
     maxSteps?: number,
     compactionEnabled?: boolean,
+    activeSkills?: string[],
   ) => void
   /**
    * Regenerate a changelog from an existing {@link GeneratedChangelog}.
@@ -167,6 +168,7 @@ export function useChangelogEngine(): ChangelogEngineReturn {
         commitData: ctx.commitData,
         maxSteps: ctx.maxSteps,
         compactionEnabled: ctx.compactionEnabled,
+        activeSkills: ctx.activeSkills,
       }
 
       setGeneratedChangelogs(prev => [newChangelog, ...prev])
@@ -190,6 +192,7 @@ export function useChangelogEngine(): ChangelogEngineReturn {
     commitData?: string,
     maxSteps?: number,
     compactionEnabled?: boolean,
+    activeSkills?: string[],
   ) => {
     const ctx: ChangelogGenContext = {
       changelogType: preset.id,
@@ -199,6 +202,7 @@ export function useChangelogEngine(): ChangelogEngineReturn {
       commitData,
       maxSteps,
       compactionEnabled: compactionEnabled ?? false,
+      ...(activeSkills && activeSkills.length > 0 ? { activeSkills } : {}),
     }
     genContextRef.current = ctx
     setGenContext(ctx)
@@ -226,9 +230,10 @@ export function useChangelogEngine(): ChangelogEngineReturn {
     commitData,
     maxSteps,
     compactionEnabled,
+    activeSkills,
   ) => {
     if (isGenerating || isSubmittingRef.current) return
-    dispatchGeneration(preset, fromRef, toRef, customPrompt, commitData, maxSteps, compactionEnabled)
+    dispatchGeneration(preset, fromRef, toRef, customPrompt, commitData, maxSteps, compactionEnabled, activeSkills)
   }
 
   const handleRegenerate: ChangelogEngineReturn['handleRegenerate'] = (changelog) => {
@@ -247,6 +252,7 @@ export function useChangelogEngine(): ChangelogEngineReturn {
       changelog.commitData,
       changelog.maxSteps,
       changelog.compactionEnabled,
+      changelog.activeSkills,
     )
   }
 

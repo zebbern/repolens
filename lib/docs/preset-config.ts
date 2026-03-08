@@ -54,6 +54,8 @@ export interface GeneratedDoc {
   customPrompt?: string
   /** Max tool-call steps used during generation. */
   maxSteps?: number
+  /** Active skill IDs used during generation. */
+  activeSkills?: string[]
 }
 
 /**
@@ -73,6 +75,8 @@ export interface GenContext {
   maxSteps?: number
   /** Whether context compaction is enabled for this generation. */
   compactionEnabled?: boolean
+  /** Active skill IDs to include in the generation request. */
+  activeSkills?: string[]
 }
 
 // ---------------------------------------------------------------------------

@@ -58,6 +58,8 @@ export interface GeneratedChangelog {
   maxSteps?: number
   /** Whether context compaction was enabled. */
   compactionEnabled?: boolean
+  /** Active skill IDs used during generation. */
+  activeSkills?: string[]
 }
 
 /**
@@ -81,4 +83,6 @@ export interface ChangelogGenContext {
   maxSteps?: number
   /** Whether context compaction is enabled for this generation. */
   compactionEnabled?: boolean
+  /** Active skill IDs to include in the generation request. */
+  activeSkills?: string[]
 }

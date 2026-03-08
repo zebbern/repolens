@@ -106,10 +106,10 @@ export function PreviewPanel({ className }: { className?: string }) {
   useEffect(() => {
     if (repo) {
       updateUrlState({ repoUrl: repo.url, view: activeTab as 'repo' | 'issues' | 'docs' | 'diagram' | 'code' | 'deps' | 'changelog' | 'git-history' | 'tours' })
-    } else if (!isConnecting) {
+    } else if (!isConnecting && isTokenHydrated) {
       clearUrlState()
     }
-  }, [repo, activeTab, isConnecting])
+  }, [repo, activeTab, isConnecting, isTokenHydrated])
 
 
   const handleConnect = async () => {

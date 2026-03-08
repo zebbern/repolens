@@ -178,6 +178,7 @@ async function directFetch(url: string, pat: string): Promise<unknown> {
       'Accept': 'application/vnd.github.v3+json',
       'Authorization': `Bearer ${pat}`,
     },
+    redirect: 'error',
   })
 
   if (!response.ok) {
@@ -208,6 +209,7 @@ async function directFetch(url: string, pat: string): Promise<unknown> {
 async function directFetchRawFile(url: string, pat: string): Promise<{ content: string }> {
   const response = await fetch(url, {
     headers: { 'Authorization': `Bearer ${pat}` },
+    redirect: 'error',
   })
 
   if (!response.ok) {
@@ -762,6 +764,7 @@ async function fetchBlameFromApi(
     const expression = `${ref}:${path}`
     const response = await fetch(GITHUB_GRAPHQL_ENDPOINT, {
       method: 'POST',
+      redirect: 'error',
       headers: {
         'Authorization': `Bearer ${pat}`,
         'Content-Type': 'application/json',

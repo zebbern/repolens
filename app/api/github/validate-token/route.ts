@@ -19,7 +19,7 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    if (token.length > 255 || !/^[\w]+$/.test(token)) {
+    if (token.length > 255 || !/^(ghp_|github_pat_|gho_|ghs_|ghr_)[a-zA-Z0-9_]+$/.test(token)) {
       return NextResponse.json(
         { valid: false, error: "Invalid token format" },
         { status: 400 }

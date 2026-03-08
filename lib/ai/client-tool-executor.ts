@@ -31,10 +31,12 @@ export interface ToolExecutorOptions {
   codebaseAnalysis?: Record<string, unknown> | null
   /** Validated repository name for tour generation. */
   repoName?: string
+  /** Repository info for GitHub fetch fallback when files are missing from the index. */
+  repoInfo?: { owner: string; name: string; defaultBranch: string; token?: string }
 }
 
 /** Maximum characters returned for a full file read (F5). */
-const MAX_FILE_CONTENT_CHARS = 100_000
+export const MAX_FILE_CONTENT_CHARS = 100_000
 
 // ---------------------------------------------------------------------------
 // Zod validation helper

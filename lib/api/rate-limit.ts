@@ -82,8 +82,9 @@ export function rateLimit(
 
 /**
  * Extract client IP from request headers.
- * Uses first non-private IP from x-forwarded-for, falls back to x-real-ip,
+ * Uses first IP from x-forwarded-for header, falls back to x-real-ip,
  * then to 127.0.0.1.
+ * Note: Sufficient when deployed behind a trusted reverse proxy (Vercel, Cloudflare).
  */
 export function getClientIp(request: NextRequest): string {
   const forwarded = request.headers.get('x-forwarded-for')

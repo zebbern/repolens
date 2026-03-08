@@ -13,7 +13,7 @@ import { Bot, AlertCircle, Download } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Switch } from "@/components/ui/switch"
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "@/components/ui/tooltip"
-import { useAPIKeys, useRepository, useTours } from "@/providers"
+import { useAPIKeys, useRepository, useTours, useGitHubToken } from "@/providers"
 import { toast } from "sonner"
 import { buildFileTreeString } from "@/lib/github/fetcher"
 import { downloadFile } from "@/lib/export"
@@ -33,6 +33,7 @@ export function ChatSidebar({ className }: { className?: string }) {
   const { selectedModel, apiKeys, getValidProviders } = useAPIKeys()
   const { repo, files, codeIndex, pinnedFiles, pinFile, unpinFile, clearPins, getPinnedContents } = useRepository()
   const { saveTour, startTour } = useTours()
+  const { token: githubToken } = useGitHubToken()
   const [input, setInput] = useState("")
   const [compactionEnabled, setCompactionEnabled] = useState(false)
 
@@ -67,9 +68,12 @@ export function ChatSidebar({ className }: { className?: string }) {
   const repoRef = useRef(repo)
   useEffect(() => { repoRef.current = repo }, [repo])
 
+  const githubTokenRef = useRef(githubToken)
+  useEffect(() => { githubTokenRef.current = githubToken }, [githubToken])
+
   // Wrap tool call handler to intercept generateTour results
   const handleToolCallWithTourCapture = useMemo(() => {
-    return (toolCall: ToolCallInfo, addOutput: AddToolOutputFn, indexRef: React.MutableRefObject<CodeIndex | null>, filePathsRef: React.MutableRefObject<string[]>) => {
+    return async (toolCall: ToolCallInfo, addOutput: AddToolOutputFn, indexRef: React.MutableRefObject<CodeIndex | null>, filePathsRef: React.MutableRefObject<string[]>) => {
       // Construct tool executor options from current refs
       const currentRepo = repoRef.current
       const toolOptions: ToolExecutorOptions = {
@@ -87,6 +91,12 @@ export function ChatSidebar({ className }: { className?: string }) {
             language: currentRepo.language ?? undefined,
           },
           repoName: currentRepo.fullName,
+          repoInfo: {
+            owner: currentRepo.owner,
+            name: currentRepo.name,
+            defaultBranch: currentRepo.defaultBranch,
+            token: githubTokenRef.current ?? undefined,
+          },
         } : {}),
       }
 
@@ -121,7 +131,7 @@ export function ChatSidebar({ className }: { className?: string }) {
         }
         return
       }
-      handleToolCall(toolCall, addOutput, indexRef, filePathsRef.current, toolOptions)
+      await handleToolCall(toolCall, addOutput, indexRef, filePathsRef.current, toolOptions)
     }
   }, [])
 

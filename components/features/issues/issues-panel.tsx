@@ -23,6 +23,7 @@ import { isSupplyChainIssue, isStructuralIssue } from './issue-types'
 import { IssueSummary } from './issue-summary'
 import { IssueFilters } from './issue-filters'
 import { IssueList } from './issue-list'
+import { IssuesTabSkeleton } from '@/components/features/loading/tab-skeleton'
 
 interface IssuesPanelProps {
   codeIndex: CodeIndex
@@ -204,13 +205,11 @@ export function IssuesPanel({ codeIndex, onNavigateToFile }: IssuesPanelProps) {
   if (!results) {
     if (scanLoading) {
       return (
-        <div className="flex items-center justify-center h-full">
-          <div className="flex flex-col items-center gap-4 text-text-muted animate-in fade-in duration-300">
-            <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-foreground/[0.04] border border-foreground/[0.06]">
-              <Shield className="h-6 w-6 text-text-secondary animate-pulse" />
-            </div>
-            <p className="text-sm font-medium text-text-secondary">Scanning for issues…</p>
+        <div className="flex flex-col flex-1 animate-in fade-in duration-300" role="status" aria-label="Scanning for issues">
+          <div className="flex-1 min-h-0 overflow-hidden">
+            <IssuesTabSkeleton />
           </div>
+          <p className="text-sm font-medium text-text-secondary text-center pb-4">Scanning for issues…</p>
         </div>
       )
     }

@@ -46,19 +46,19 @@ graph LR
 
 ## Provider Architecture
 
-The app uses nine nested React Context providers. The nesting order determines dependency availability — inner providers can consume outer providers via hooks.
+The app uses eight nested React Context providers. The nesting order determines dependency availability — inner providers can consume outer providers via hooks.
 
 ```mermaid
 graph TD
   A["SessionProvider"] --> B["ThemeProvider"]
   B --> C["APIKeysProvider"]
-  C --> D["RepositoryProvider"]
+  C --> C2["GitHubTokenProvider"]
+  C2 --> D["RepositoryProvider"]
   D --> E["ToursProvider"]
   E --> F["DocsProvider"]
   F --> G["ChangelogProvider"]
   G --> H["AppProvider"]
-  H --> I["ComparisonProvider"]
-  I --> J["App children"]
+  H --> I["App children"]
 ```
 
 | Provider | Purpose | Key State |
@@ -71,7 +71,8 @@ graph TD
 | **ToursProvider** | Manages repo tours: CRUD, playback state, active tour/stop tracking. Persists tours in IndexedDB via `tour-cache.ts`. Split contexts (state + playback) | Tours list, active tour, current stop index, playback state |
 | **ChangelogProvider** | Hosts `useChat` for changelog generation. Split contexts like DocsProvider (State + Chat) | Generated changelogs, active ID, chat streaming state |
 | **AppProvider** | Lightweight global UI state. Tracks selected file path for cross-feature coordination (e.g., blame view) | Preview URL, generating flag, sidebar width, selected file path |
-| **ComparisonProvider** | Wraps children at end of provider chain. On `/compare` route manages side-by-side repo comparison: fetching metrics, dependencies, and file trees for up to 4 repos | Comparison repos, metrics, loading state |
+
+`ComparisonProvider` is used locally on the `/compare` page, not in the global provider tree.
 
 ## AI Chat System
 

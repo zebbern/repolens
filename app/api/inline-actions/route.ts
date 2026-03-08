@@ -44,15 +44,15 @@ Use markdown formatting. Be precise and reference specific lines or expressions 
 }
 
 export async function POST(req: NextRequest) {
+  const rateLimited = applyRateLimit(req)
+  if (rateLimited) return rateLimited
+
   let raw: unknown
   try {
     raw = await req.json()
   } catch {
     return apiError('INVALID_JSON', 'Invalid JSON in request body', 400)
   }
-
-  const rateLimited = applyRateLimit(req)
-  if (rateLimited) return rateLimited
 
   try {
     const parsed = inlineActionSchema.safeParse(raw)

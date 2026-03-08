@@ -293,10 +293,10 @@ Users provide their own API keys for AI providers (OpenAI, Anthropic, Google, Op
 ### Provider Nesting Order
 
 ```text
-SessionProvider → ThemeProvider → APIKeysProvider → GitHubTokenProvider → RepositoryProvider → ToursProvider → DocsProvider → ChangelogProvider → AppProvider → ComparisonProvider
+SessionProvider → ThemeProvider → APIKeysProvider → GitHubTokenProvider → RepositoryProvider → ToursProvider → DocsProvider → ChangelogProvider → AppProvider
 ```
 
-Each provider has a clear dependency chain. `RepositoryProvider` depends on no AI state; `ToursProvider` depends on repository context for file lookups; `DocsProvider` and `ChangelogProvider` depend on repository context; `AppProvider` provides global UI state; `ComparisonProvider` wraps children at the end of the chain.
+Each provider has a clear dependency chain. `RepositoryProvider` depends on no AI state; `ToursProvider` depends on repository context for file lookups; `DocsProvider` and `ChangelogProvider` depend on repository context; `AppProvider` provides global UI state. `ComparisonProvider` is used locally on the `/compare` page, not in the global tree.
 
 ### Repository Loading Pipeline
 

@@ -34,6 +34,7 @@ const docsOptionsSchema = z.object({
   structuralIndex: z.string().max(500_000).optional(),
   targetFile: z.string().nullish(),
   maxSteps: z.number().int().min(10).max(80).optional(),
+  activeSkills: z.array(SKILL_ID_SCHEMA).max(10).optional(),
 })
 
 const changelogOptionsSchema = z.object({
@@ -46,6 +47,7 @@ const changelogOptionsSchema = z.object({
   toRef: z.string().min(1),
   commitData: z.string().max(500_000),
   maxSteps: z.number().int().min(10).max(80).optional(),
+  activeSkills: z.array(SKILL_ID_SCHEMA).max(10).optional(),
 })
 
 export const callOptionsSchema = z.discriminatedUnion('mode', [

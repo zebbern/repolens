@@ -40,15 +40,15 @@ const validateRequestSchema = z.object({
 })
 
 export async function POST(req: NextRequest) {
+  const rateLimited = applyRateLimit(req)
+  if (rateLimited) return rateLimited
+
   let raw: unknown
   try {
     raw = await req.json()
   } catch {
     return apiError('INVALID_JSON', 'Invalid JSON body', 400)
   }
-
-  const rateLimited = applyRateLimit(req)
-  if (rateLimited) return rateLimited
 
   const parsed = validateRequestSchema.safeParse(raw)
   if (!parsed.success) {

@@ -68,7 +68,7 @@ describe('callOptionsSchema — activeSkills in chat mode', () => {
     expect(result.success).toBe(false)
   })
 
-  it('does not accept activeSkills in docs mode', () => {
+  it('accepts activeSkills in docs mode', () => {
     const result = callOptionsSchema.safeParse({
       mode: 'docs',
       provider: 'openai',
@@ -78,10 +78,28 @@ describe('callOptionsSchema — activeSkills in chat mode', () => {
       repoContext: { name: 'repo', description: 'desc', structure: 'src/' },
       activeSkills: ['security-audit'],
     })
-    // In a discriminated union, extra fields on the wrong variant are stripped,
-    // so this should still parse but activeSkills won't be in the result
+    expect(result.success).toBe(true)
     if (result.success) {
-      expect('activeSkills' in result.data).toBe(false)
+      expect(result.data.activeSkills).toEqual(['security-audit'])
+    }
+  })
+
+  it('accepts activeSkills in changelog mode', () => {
+    const result = callOptionsSchema.safeParse({
+      mode: 'changelog',
+      provider: 'openai',
+      model: 'gpt-4o',
+      apiKey: 'sk-test-key',
+      changelogType: 'conventional',
+      repoContext: { name: 'repo', description: 'desc', structure: 'src/' },
+      fromRef: 'v1.0.0',
+      toRef: 'v1.1.0',
+      commitData: 'feat: new feature',
+      activeSkills: ['security-audit'],
+    })
+    expect(result.success).toBe(true)
+    if (result.success) {
+      expect(result.data.activeSkills).toEqual(['security-audit'])
     }
   })
 })

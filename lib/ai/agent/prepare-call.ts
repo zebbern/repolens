@@ -118,6 +118,7 @@ export function buildPrepareCall() {
             targetFile: callOptions.targetFile,
             stepBudget,
             model,
+            activeSkills: callOptions.activeSkills,
           }),
           stopWhen: stepCountIs(stepBudget),
           ...(compactionEnabled && provider === 'anthropic' && {
@@ -143,6 +144,7 @@ export function buildPrepareCall() {
             commitData: callOptions.commitData,
             stepBudget,
             model,
+            activeSkills: callOptions.activeSkills,
           }),
           stopWhen: stepCountIs(stepBudget),
           ...(compactionEnabled && provider === 'anthropic' && {

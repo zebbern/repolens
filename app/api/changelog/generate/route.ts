@@ -29,6 +29,7 @@ const changelogRequestSchema = z.object({
   commitData: z.string().max(500_000),
   maxSteps: z.number().int().min(10).max(80).optional(),
   compactionEnabled: z.boolean().optional(),
+  activeSkills: z.array(z.string().regex(/^[a-z0-9-]+$/).max(50)).max(10).optional(),
 })
 
 export async function POST(req: NextRequest) {

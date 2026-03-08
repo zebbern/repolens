@@ -12,6 +12,8 @@ lastReviewed: "2026-03-08"
 reviewCycleDays: 180
 ---
 
+# Code Complexity
+
 ## Purpose
 
 Performs a systematic tech debt and complexity assessment of the codebase by measuring function size, nesting depth, module coupling, code duplication, and dead code. The analysis applies quantitative thresholds to classify findings by severity — distinguishing genuine maintainability risks from acceptable complexity. The user receives a prioritized list of refactoring candidates with exact locations, measured metrics, and concrete refactoring strategies.
@@ -44,10 +46,10 @@ Follow this structured approach for complexity analysis. Complete each phase in 
    - **Return complexity**: Count distinct return statements and return types
 3. Identify god functions — functions that handle multiple unrelated responsibilities
 
-**Quantitative Thresholds**
+#### Function Complexity Thresholds
 
 | Metric | Threshold | Classification |
-|--------|-----------|---------------|
+| -------- | ----------- | --------------- |
 | Function length | > 150 lines | God function — split immediately |
 | Function length | 80-150 lines | Complex — refactoring candidate |
 | Function length | 40-80 lines | Monitor for growth |
@@ -72,10 +74,10 @@ Follow this structured approach for complexity analysis. Complete each phase in 
 3. Identify circular dependencies by tracing import chains
 4. Look for modules that import from too many unrelated sources (high fan-out = fragile)
 
-**Quantitative Thresholds**
+#### Module Coupling Thresholds
 
 | Metric | Threshold | Classification |
-|--------|-----------|---------------|
+| -------- | ----------- | --------------- |
 | Direct imports from a file | > 15 | High coupling — refactoring candidate |
 | Direct imports from a file | 10-15 | Elevated — monitor |
 | Direct imports from a file | < 10 | Healthy |
@@ -111,6 +113,7 @@ Follow this structured approach for complexity analysis. Complete each phase in 
 4. Search for TODO/FIXME/HACK comments that indicate acknowledged debt
 
 **Verification**: Before flagging a dead export, confirm it's not:
+
 - Used dynamically (e.g., `require(variable)`, route-based loading)
 - Part of a public API consumed by external packages
 - Referenced in test files (test utilities are valid consumers)
@@ -118,6 +121,7 @@ Follow this structured approach for complexity analysis. Complete each phase in 
 ### Phase 6: Report
 
 For each finding, report:
+
 1. **Severity**: Critical / High / Medium / Low / Informational (use severity table below)
 2. **Category**: Function Complexity, Coupling, Duplication, or Dead Code
 3. **Location**: Exact file path and line reference
@@ -127,6 +131,7 @@ For each finding, report:
 7. **Refactoring Strategy**: Specific approach to reduce complexity
 
 Provide an overall summary:
+
 - Total findings by severity and category
 - Tech debt heat map: which directories have the most findings
 - Top 3 highest-impact refactoring targets
@@ -136,7 +141,7 @@ Provide an overall summary:
 ## Severity Classification
 
 | Severity | Criteria | Example |
-|----------|----------|---------|
+| ---------- | ---------- | --------- |
 | **Critical** | Circular dependency causing runtime issues, god function > 150 lines on critical path | 200-line `processPayment` function with 7 levels of nesting |
 | **High** | God function > 150 lines, file > 800 lines, fan-out > 15 imports | `api-client.ts` importing from 18 different modules |
 | **Medium** | Complex function (80-150 lines), deep nesting (> 4 levels), significant duplication | Same 30-line error handling block in 5 API route handlers |
@@ -145,7 +150,7 @@ Provide an overall summary:
 
 ## Example Output
 
-```
+````markdown
 ### Finding: God Function — `lib/changelog/generate.ts` → `generateChangelog`
 
 - **Severity**: High
@@ -166,7 +171,7 @@ Provide an overall summary:
     return formatChangelog(categorized, options.format);
   }
   ```
-```
+````
 
 ## Common False Positives
 

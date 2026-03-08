@@ -11,6 +11,8 @@ lastReviewed: "2026-03-08"
 reviewCycleDays: 180
 ---
 
+# Testing Quality
+
 ## Purpose
 
 Answers "what's not tested?" and assesses the quality of existing tests by comparing source modules against test files, analyzing assertion quality, detecting flaky patterns, and identifying missing edge cases. The analysis applies quantitative thresholds to classify findings by severity — distinguishing critical coverage gaps from acceptable omissions. The user receives a prioritized list of untested code, weak tests, and missing edge cases with specific recommendations.
@@ -46,7 +48,7 @@ Follow this structured approach for testing quality analysis. Complete each phas
 **Categorize untested modules by risk:**
 
 | Module Type | Risk if Untested | Priority |
-|-------------|-----------------|----------|
+| ----------- | --------------- | -------- |
 | Auth / security code | Critical — vulnerabilities go undetected | P0 — test immediately |
 | API routes / handlers | High — contract changes break consumers silently | P1 — test soon |
 | Business logic / hooks | High — core behavior unverified | P1 — test soon |
@@ -62,29 +64,32 @@ Follow this structured approach for testing quality analysis. Complete each phas
 
 For existing test files, read a representative sample (5-10 files) and assess:
 
-**Assertion Quality**
+#### Assertion Quality
+
 1. Count assertions per test case — tests with zero assertions are meaningless
 2. Check assertion specificity:
    - Weak: `expect(result).toBeDefined()`, `expect(result).toBeTruthy()`
    - Strong: `expect(result).toEqual({ id: 1, name: 'test' })`, `expect(fn).toHaveBeenCalledWith('arg')`
 3. Look for tests that only verify happy paths without error scenarios
 
-**Test Isolation**
+#### Test Isolation
+
 1. Check for shared mutable state between tests (global variables, module-level state)
 2. Look for test ordering dependencies (tests that fail when run individually)
 3. Verify proper cleanup in `afterEach`/`afterAll` hooks
 4. Check for hardcoded timeouts or `sleep` calls (flaky pattern)
 
-**Mock Quality**
+#### Mock Quality
+
 1. Look for over-mocking — mocking the system under test rather than its dependencies
 2. Check for `as any` casts on mocks that hide type mismatches
 3. Verify mocks match the actual API of the mocked module
 4. Flag tests where mock setup exceeds test logic (> 60% of test is mock setup)
 
-**Quantitative Thresholds**
+#### Test Quality Thresholds
 
 | Metric | Threshold | Classification |
-|--------|-----------|---------------|
+| ------ | --------- | ------------- |
 | Test file with 0 assertions (any test case) | Always flag | Meaningless test |
 | Test file with > 3 `any` casts | Flag for mock quality | Potential false coverage |
 | Test case with > 10 lines of mock setup vs < 3 lines of assertions | Flag for over-mocking | Test may not verify real behavior |
@@ -95,19 +100,22 @@ For existing test files, read a representative sample (5-10 files) and assess:
 
 For tested modules, check if tests cover these common edge cases:
 
-**Data Edge Cases**
+#### Data Edge Cases
+
 - Empty inputs: empty strings, empty arrays, `null`, `undefined`
 - Boundary values: 0, -1, MAX_SAFE_INTEGER, empty vs whitespace strings
 - Invalid types: wrong data types if not caught by TypeScript at compile time
 - Large inputs: arrays with 1000+ items, strings with 10000+ characters
 
-**Error Path Edge Cases**
+#### Error Path Edge Cases
+
 - Network failures: API timeouts, 500 errors, malformed responses
 - Auth failures: expired tokens, missing permissions, invalid sessions
 - Validation failures: missing required fields, format violations
 - Concurrent operations: race conditions, stale data
 
-**State Edge Cases**
+#### State Edge Cases
+
 - Loading states: component renders before data arrives
 - Error states: component renders after failure
 - Empty states: component renders with no data
@@ -127,10 +135,10 @@ For tested modules, check if tests cover these common edge cases:
    - Error recovery (network failure, invalid input)
 3. Identify orphaned test utilities — test helpers defined but never imported
 
-**Quantitative Thresholds**
+#### Integration Coverage Thresholds
 
 | Metric | Threshold | Classification |
-|--------|-----------|---------------|
+| ------ | --------- | ------------- |
 | API route with 0 integration tests | Flag if route handles mutations | Untested contract |
 | Core user journey with 0 E2E tests | Always flag | Critical coverage gap |
 | Component with > 5 interactive states and < 3 test cases | Flag as undertested | State coverage gap |
@@ -139,6 +147,7 @@ For tested modules, check if tests cover these common edge cases:
 ### Phase 6: Report
 
 For each finding, report:
+
 1. **Severity**: Critical / High / Medium / Low / Informational (use severity table below)
 2. **Category**: Coverage Gap, Test Quality, Missing Edge Cases, or Integration Gap
 3. **Location**: Source file (for coverage gaps) or test file (for quality issues)
@@ -147,6 +156,7 @@ For each finding, report:
 6. **Recommendation**: Specific test to write or test to improve, with example
 
 Provide an overall summary:
+
 - Coverage: estimated percentage of modules with test files
 - Quality: overall test quality assessment (strong, adequate, weak)
 - Top 3 critical gaps to address first
@@ -156,7 +166,7 @@ Provide an overall summary:
 ## Severity Classification
 
 | Severity | Criteria | Example |
-|----------|----------|---------|
+| -------- | -------- | ------- |
 | **Critical** | No tests for auth/security code, or tests with zero assertions on critical path | Auth middleware has a test file but no assertions — passes vacuously |
 | **High** | Public API route untested, core business logic untested, tests with `any` casts hiding bugs | `use-changelog-engine.ts` — 300-line hook with complex state, no test file |
 | **Medium** | Missing error path tests, insufficient edge cases on tested code | `fetchRepoData` tested for success but not for 401, 404, or network timeout |
@@ -165,7 +175,7 @@ Provide an overall summary:
 
 ## Example Output
 
-```
+````markdown
 ### Finding: Critical Module Untested — `lib/auth/session.ts`
 
 - **Severity**: Critical
@@ -187,7 +197,7 @@ Provide an overall summary:
     it('rejects expired refresh token', () => { ... });
   });
   ```
-```
+````
 
 ## Common False Positives
 

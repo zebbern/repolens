@@ -16,6 +16,8 @@ standardsReferenced:
     pinnedVersion: "RFC 9110"
 ---
 
+# API Design Review
+
 ## Purpose
 
 Reviews API endpoints for consistency, security, and developer experience by auditing naming conventions, HTTP method usage, error response formats, pagination patterns, and authentication enforcement. The analysis compares endpoints against each other to find inconsistencies, then validates each against REST best practices. The user receives a prioritized list of API design issues with exact locations and specific remediation.
@@ -73,13 +75,15 @@ Follow this structured approach for API design review. Complete each phase in or
    - Are HTTP status codes used correctly?
    - Are error messages actionable and safe (no stack traces, internal details)?
 3. Build an error format inventory — document each distinct error shape:
-   ```
+
+   ```text
    Route A: { error: string }
    Route B: { message: string, code: number }
    Route C: { error: { message: string, details: object } }
    ```
 
 **Expected error response format** (single consistent shape):
+
 ```json
 {
   "error": {
@@ -92,7 +96,7 @@ Follow this structured approach for API design review. Complete each phase in or
 **Status code usage:**
 
 | Status Code | Usage | Common Mistakes |
-|-------------|-------|-----------------|
+| ----------- | ----- | --------------- |
 | 200 | Successful retrieval or update | Using 200 for creation (should be 201) |
 | 201 | Successful creation | Missing on POST endpoints that create resources |
 | 204 | Successful deletion (no body) | Returning 200 with empty body instead |
@@ -104,10 +108,10 @@ Follow this structured approach for API design review. Complete each phase in or
 | 429 | Rate limited | Missing entirely |
 | 500 | Server error | Returning 500 for client input errors |
 
-**Quantitative Thresholds**
+#### Response Pattern Thresholds
 
 | Metric | Threshold | Action |
-|--------|-----------|--------|
+| ------ | --------- | ------ |
 | Distinct error response formats across routes | > 3 | Flag inconsistency — standardize |
 | Distinct error response formats across routes | 2-3 | Review for unification |
 | Distinct error response formats across routes | 1 | Consistent — healthy |
@@ -130,10 +134,10 @@ Follow this structured approach for API design review. Complete each phase in or
    - Resource creation endpoints
    - Endpoints that trigger expensive operations (AI, email, etc.)
 
-**Quantitative Thresholds**
+#### Authentication Thresholds
 
 | Metric | Threshold | Action |
-|--------|-----------|--------|
+| ------ | --------- | ------ |
 | Non-public route missing auth check | > 0 | Critical — add auth immediately |
 | Protected routes using different auth methods | > 1 method | Flag inconsistency — standardize |
 | Sensitive endpoint without rate limiting | Any | Flag — add rate limiting |
@@ -157,10 +161,10 @@ Follow this structured approach for API design review. Complete each phase in or
    - Is there a way to request partial responses (field selection)?
 5. Check for versioning strategy if multiple API versions coexist
 
-**Quantitative Thresholds**
+#### Data Pattern Thresholds
 
 | Metric | Threshold | Action |
-|--------|-----------|--------|
+| ------ | --------- | ------ |
 | List endpoint returning > 100 items without pagination | Always flag | Add pagination with server-enforced max |
 | Query parameters without validation | > 5 per route | Flag — add validation |
 | Endpoint returning sensitive fields (password, token, secret) | > 0 | Critical — remove from response |
@@ -169,6 +173,7 @@ Follow this structured approach for API design review. Complete each phase in or
 ### Phase 6: Report
 
 For each finding, report:
+
 1. **Severity**: Critical / High / Medium / Low / Informational (use severity table below)
 2. **Category**: Naming, Consistency, Validation, Auth, or Data Patterns
 3. **Location**: Exact file path and line reference
@@ -178,6 +183,7 @@ For each finding, report:
 7. **Affected Routes**: Count of routes with the same issue (for systemic problems)
 
 Provide an overall summary:
+
 - Total API routes reviewed
 - Findings by severity and category
 - Consistency score: are patterns uniform or fragmented?
@@ -187,7 +193,7 @@ Provide an overall summary:
 ## Severity Classification
 
 | Severity | Criteria | Example |
-|----------|----------|---------|
+| -------- | -------- | ------- |
 | **Critical** | Missing auth on protected endpoint, sensitive data exposure in response | `GET /api/users/[id]` returns password hash, no auth check |
 | **High** | Inconsistent error format across > 3 routes, missing input validation on mutation endpoint | POST handler processes body without validation, 5 different error shapes |
 | **Medium** | Missing pagination on list endpoint, naming convention violations | `GET /api/repos` returns all 5000 repos without limit |
@@ -196,7 +202,7 @@ Provide an overall summary:
 
 ## Example Output
 
-```
+````markdown
 ### Finding: Missing Pagination — `GET /api/repos`
 
 - **Severity**: Medium
@@ -223,7 +229,7 @@ Provide an overall summary:
   const total = await db.repo.count({ where: { ownerId } });
   return Response.json({ data: repos, pagination: { page, limit, total } });
   ```
-```
+````
 
 ## Common False Positives
 

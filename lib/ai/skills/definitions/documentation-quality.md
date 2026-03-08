@@ -11,6 +11,8 @@ lastReviewed: "2026-03-08"
 reviewCycleDays: 180
 ---
 
+# Documentation Quality
+
 ## Purpose
 
 Performs a systematic documentation quality audit measuring README completeness, public API documentation coverage, inline comment quality, architecture doc presence, and developer onboarding experience. The analysis applies quantitative thresholds to distinguish comprehensive documentation from gaps that slow onboarding and increase support burden. The user receives a prioritized list of documentation improvements with severity classification, measurable deficiencies, and specific content suggestions.
@@ -29,7 +31,7 @@ Follow this structured approach for every documentation quality audit. Complete 
 2. Read `README.md` (or equivalent) and evaluate against the completeness checklist:
 
 | Section | Required | Weight | Notes |
-|---------|----------|--------|-------|
+| --------- | ---------- | -------- | ------- |
 | Project description | Yes | High | What the project does in 1-2 sentences |
 | Installation / Setup | Yes | High | Steps to get running locally |
 | Usage / Quick start | Yes | High | Basic usage example or commands |
@@ -39,7 +41,7 @@ Follow this structured approach for every documentation quality audit. Complete 
 | License | Yes | Medium | Must be present and match `package.json` |
 | Badge / Status | Optional | Low | CI status, coverage, version badges |
 
-3. Measure README length and content density:
+1. Measure README length and content density:
    - Under 100 words: insufficient for any non-trivial project
    - 100–500 words: minimal — covers basics only
    - 500–2000 words: adequate for most projects
@@ -61,10 +63,10 @@ Follow this structured approach for every documentation quality audit. Complete 
    - `@example` tag for non-obvious usage
 3. Read flagged files with `readFile` and measure coverage ratio
 
-**Quantitative Thresholds**
+#### Documentation Coverage Thresholds
 
 | Metric | Threshold | Classification |
-|--------|-----------|---------------|
+| -------- | ----------- | --------------- |
 | Public function with > 5 params, no JSDoc | Any | Strong flag — complex interface needs docs |
 | Public function with > 3 params, no JSDoc | Any | Flag — non-trivial interface |
 | Module with > 20 exports, no doc comments | Any | Strong flag — high-surface API undocumented |
@@ -99,7 +101,7 @@ Follow this structured approach for every documentation quality audit. Complete 
 3. Measure comment-to-code ratio in complex modules as a signal (not a target)
 
 | Comment Pattern | Classification |
-|----------------|---------------|
+| ---------------- | --------------- |
 | Explains business rule or constraint | Valuable — keep |
 | Documents a non-obvious algorithm | Valuable — keep |
 | Explains a workaround with issue link | Valuable — keep |
@@ -134,6 +136,7 @@ Follow this structured approach for every documentation quality audit. Complete 
 ### Phase 7: Report
 
 For each finding, report:
+
 1. **Severity**: Critical / High / Medium / Low / Informational (use severity table below)
 2. **Category**: README, Code Documentation, API Docs, Comments, Architecture, or Onboarding
 3. **Location**: File path or section reference
@@ -142,6 +145,7 @@ For each finding, report:
 6. **Remediation**: Specific content to add, with templates where helpful
 
 Provide an overall summary:
+
 - Total findings by severity and category
 - Documentation coverage score heuristic
 - Top 3 highest-impact improvements
@@ -151,7 +155,7 @@ Provide an overall summary:
 ## Severity Classification
 
 | Severity | Criteria | Example |
-|----------|----------|---------|
+| ---------- | ---------- | --------- |
 | **Critical** | No README or README with only a title, no setup instructions for a project requiring configuration | Empty `README.md` with just the project name |
 | **High** | Public API with 0% documentation coverage, missing environment setup for project with required env vars | 15 exported functions in `lib/api/` with no JSDoc, no `.env.example` |
 | **Medium** | Missing setup instructions, undocumented complex functions, no architecture docs for large project | Complex 80-line parsing function with no comments explaining the algorithm |
@@ -160,7 +164,7 @@ Provide an overall summary:
 
 ## Example Output
 
-```
+````markdown
 ### Finding: Undocumented Public API Surface
 
 - **Severity**: High
@@ -182,7 +186,7 @@ Provide an overall summary:
    * const repo = await fetchRepository("vercel", "next.js", { branch: "canary" });
    */
   ```
-```
+````
 
 ## Common False Positives
 

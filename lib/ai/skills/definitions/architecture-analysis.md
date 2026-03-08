@@ -11,6 +11,8 @@ lastReviewed: "2026-03-08"
 reviewCycleDays: 180
 ---
 
+# Architecture Analysis
+
 ## Purpose
 
 Performs a systematic architecture analysis of the codebase by mapping dependencies, identifying architectural layers, measuring coupling and cohesion, and detecting structural anti-patterns. The user receives quantified findings (not subjective opinions), actionable refactoring recommendations, and generated diagrams showing module relationships and data flow.
@@ -34,22 +36,26 @@ Follow this structured approach for architecture analysis. Complete each phase i
 
 Identify and document the architectural layers:
 
-**Presentation Layer**
+#### Presentation Layer
+
 - Use `searchFiles` to find component directories and UI code
 - Identify component patterns (atomic design, feature-based, route-based)
 - Note any shared UI library or design system usage
 
-**Application Layer**
+#### Application Layer
+
 - Locate business logic: hooks, services, controllers, use cases
 - Identify state management approach (context, stores, server state)
 - Map data fetching patterns (REST, GraphQL, server actions)
 
-**Data Layer**
+#### Data Layer
+
 - Find data access code: repositories, models, ORM configurations
 - Identify database connections and schemas
 - Note caching strategies
 
-**Infrastructure Layer**
+#### Infrastructure Layer
+
 - Locate middleware, authentication, logging, monitoring
 - Identify external service integrations
 - Note deployment configuration
@@ -62,6 +68,7 @@ Identify and document the architectural layers:
 4. Document the dependency direction (should flow: UI → Application → Data → Infrastructure)
 
 For each major module:
+
 - List its public API (what it exports)
 - List its dependencies (what it imports)
 - Identify its responsibility (single-sentence description)
@@ -70,16 +77,19 @@ For each major module:
 
 Generate diagrams to visualize the architecture:
 
-**High-Level Architecture Diagram**
+#### High-Level Architecture Diagram
+
 - Use `generateDiagram` with type `topology` for module relationships
 - Show major modules as nodes, dependencies as edges
 - Group by architectural layer
 
-**Import Graph**
+#### Import Graph
+
 - Use `generateDiagram` with type `import-graph` for detailed import relationships
 - Focus on the most connected modules
 
-**Data Flow Diagram**
+#### Data Flow Diagram
+
 - Create a sequence diagram showing how data flows through a typical request
 - Trace from user action → UI → API → data → response
 
@@ -87,31 +97,32 @@ Generate diagrams to visualize the architecture:
 
 Measure the architecture against concrete thresholds. Before reporting a finding, verify the count by running `analyzeImports` or `searchFiles` to confirm.
 
-**Coupling Analysis**
+#### Coupling Analysis
 
 | Metric | Threshold | Classification |
-|--------|-----------|---------------|
+| ------ | --------- | ------------- |
 | Direct imports from a single module | >8 | High coupling |
 | Direct imports from a single module | 5–8 | Moderate coupling |
 | Direct imports from a single module | <5 | Healthy |
 
-**Cohesion Analysis**
+#### Cohesion Analysis
 
 | Metric | Threshold | Classification |
-|--------|-----------|---------------|
+| ------ | --------- | ------------- |
 | Unrelated exports from a single module | >15 | Low cohesion — split module |
 | Unrelated exports from a single module | 8–15 | Review for grouping |
 | Unrelated exports from a single module | <8 | Healthy |
 
-**God Module Detection**
+#### God Module Detection
 
 | Metric | Threshold | Classification |
-|--------|-----------|---------------|
+| ------ | --------- | ------------- |
 | Files importing from a single module | >20 | God module candidate |
 | Files importing from a single module | 10–20 | Monitor for growth |
 | Files importing from a single module | <10 | Healthy |
 
-**Dependency Direction**
+#### Dependency Direction
+
 - Do dependencies flow in the correct direction (UI → App → Data → Infra)?
 - Are there dependency inversions where needed?
 - Are infrastructure details leaking into business logic?
@@ -131,6 +142,7 @@ Check for these common architectural anti-patterns:
 ### Phase 7: Report
 
 Deliver:
+
 1. Architecture overview with identified layers and their responsibilities
 2. Module dependency map with import/export relationships
 3. Generated diagrams (topology, import graph, data flow)
@@ -140,7 +152,7 @@ Deliver:
 ## Severity Classification
 
 | Severity | Criteria | Example |
-|----------|----------|---------|
+| -------- | -------- | ------- |
 | **Critical** | Circular dependency causing runtime errors, or layer violation enabling security bypass | Data layer directly imported in client components exposing DB credentials |
 | **High** | God module (>20 importers), circular deps causing bundle bloat, missing layer boundary | `lib/utils.ts` imported by 35 files with 25 unrelated exports |
 | **Medium** | High coupling (>8 imports from one module), prop drilling >3 levels | Every component imports directly from `lib/api/client.ts` |
@@ -149,7 +161,7 @@ Deliver:
 
 ## Example Output
 
-```
+```markdown
 ### Finding: God Module — `lib/utils.ts`
 
 - **Severity**: High

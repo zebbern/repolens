@@ -11,6 +11,8 @@ lastReviewed: "2026-03-08"
 reviewCycleDays: 180
 ---
 
+# State Management Review
+
 ## Purpose
 
 Performs a systematic review of state management patterns across the codebase, identifying unnecessary re-renders, improper state colocation, missing selectors, server/client state confusion, and data flow anti-patterns. The analysis traces state from its source through transformations to consuming components, classifying findings by their impact on performance, correctness, and maintainability. The user receives a prioritized list of state management issues with exact locations, measured metrics, and concrete refactoring strategies.
@@ -52,10 +54,10 @@ Follow this structured approach for every state management review. Complete each
    - Actions that mutate state outside the store pattern
    - Missing type safety on actions or dispatched events
 
-**Quantitative Thresholds**
+#### Store Design Thresholds
 
 | Metric | Threshold | Classification |
-|--------|-----------|---------------|
+| -------- | ----------- | --------------- |
 | Store slice fields | > 20 | Consider splitting into multiple stores |
 | Store slice fields | 10-20 | Review for domain separation |
 | Store slice fields | < 10 | Healthy |
@@ -78,10 +80,10 @@ Follow this structured approach for every state management review. Complete each
    - Zustand selectors: `useStore(state => state.specificField)`
    - Context splitting: separate contexts for frequently vs rarely changing data
 
-**Quantitative Thresholds**
+#### Re-render Thresholds
 
 | Metric | Threshold | Classification |
-|--------|-----------|---------------|
+| -------- | ----------- | --------------- |
 | Context consumers with frequent updates | > 5 consumers | Performance risk — split context or use store |
 | Context consumers with frequent updates | 3-5 consumers | Monitor — profile if slow |
 | Context consumers with frequent updates | < 3 consumers | Acceptable |
@@ -136,10 +138,10 @@ Follow this structured approach for every state management review. Complete each
    - Effects running on every render due to unstable dependencies
 3. Count `useEffect` density per component — high density signals design issues
 
-**Quantitative Thresholds**
+#### Side Effect Thresholds
 
 | Metric | Threshold | Classification |
-|--------|-----------|---------------|
+| -------- | ----------- | --------------- |
 | `useEffect` per component | > 5 | Design smell — decompose component or extract custom hooks |
 | `useEffect` per component | 3-5 | Review — check if effects can be event handlers |
 | `useEffect` per component | 1-2 | Healthy |
@@ -149,6 +151,7 @@ Follow this structured approach for every state management review. Complete each
 ### Phase 7: Report
 
 For each finding, report:
+
 1. **Severity**: Critical / High / Medium / Low / Informational (use severity table below)
 2. **Category**: Store Design, Re-render, Server State, Data Flow, or Side Effects
 3. **Location**: Exact file path and line reference
@@ -157,6 +160,7 @@ For each finding, report:
 6. **Remediation**: Specific refactoring pattern with before/after code
 
 Provide an overall summary:
+
 - Total findings by severity and category
 - State architecture assessment (well-structured, needs refactoring, needs redesign)
 - Top 3 most impactful improvements
@@ -166,7 +170,7 @@ Provide an overall summary:
 ## Severity Classification
 
 | Severity | Criteria | Example |
-|----------|----------|---------|
+| ---------- | ---------- | --------- |
 | **Critical** | State mutation in render path causing infinite loops, stale data displayed to users after mutation | `setState` called unconditionally during render, causing infinite re-renders |
 | **High** | Entire app re-renders on single field change, missing cache invalidation causing stale data | Context provider at root with inline `value={{}}` and 15+ consumers |
 | **Medium** | Prop drilling through > 3 levels, `useEffect` syncing state that could be derived | State passed `Parent → Layout → Sidebar → SidebarItem → Button` |
@@ -175,7 +179,7 @@ Provide an overall summary:
 
 ## Example Output
 
-```
+````markdown
 ### Finding: Re-render Cascade — Root Context Provider with Inline Value
 
 - **Severity**: High
@@ -198,7 +202,7 @@ Provide an overall summary:
       <NotificationContext.Provider value={notificationValue}>
   ```
   Alternatively, migrate to Zustand with selectors for granular subscriptions.
-```
+````
 
 ## Common False Positives
 

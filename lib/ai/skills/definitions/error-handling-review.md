@@ -11,6 +11,8 @@ lastReviewed: "2026-03-08"
 reviewCycleDays: 180
 ---
 
+# Error Handling Review
+
 ## Purpose
 
 Performs a systematic review of error handling patterns across the codebase, identifying unhandled exceptions, inconsistent error formats, missing recovery mechanisms, and leaked internal details. The analysis traces error propagation paths from throw sites through catch boundaries to user-facing responses, classifying findings by severity based on their production impact. The user receives a prioritized list of error handling gaps with exact locations, risk assessment, and concrete remediation patterns.
@@ -50,10 +52,10 @@ Follow this structured approach for every error handling review. Complete each p
    - Error propagation to a higher-level handler
 3. Check for floating promises — async calls without `await` or `.catch()`
 
-**Quantitative Thresholds**
+#### Promise Handling Thresholds
 
 | Pattern | Threshold | Classification |
-|---------|-----------|---------------|
+| ------- | --------- | ------------- |
 | `async` function without any try/catch or .catch() | Any in production code | Flag — unhandled rejection risk |
 | `.then()` chain without `.catch()` | Any | Flag — silent failure |
 | `Promise.all` without try/catch | Any | Flag — one rejection kills all |
@@ -75,10 +77,10 @@ Follow this structured approach for every error handling review. Complete each p
    - Does the handler catch unexpected errors and return a generic 500?
    - Are error details logged server-side while the client gets a safe message?
 
-**Error Response Consistency Checklist**
+#### Error Response Consistency Checklist
 
 | Check | Expected | Severity if Missing |
-|-------|----------|-------------------|
+| ----- | -------- | ------------------- |
 | Consistent error object shape | Same keys across all error responses | Medium |
 | Appropriate HTTP status codes | 4xx for client errors, 5xx for server errors | Medium |
 | No stack traces in response body | Stack traces logged server-side only | High |
@@ -133,6 +135,7 @@ Follow this structured approach for every error handling review. Complete each p
 ### Phase 7: Report
 
 For each finding, report:
+
 1. **Severity**: Critical / High / Medium / Low / Informational (use severity table below)
 2. **Category**: Error Boundary, Promise Handling, API Response, Validation, Recovery, or Logging
 3. **Location**: Exact file path and line reference
@@ -141,6 +144,7 @@ For each finding, report:
 6. **Remediation**: Specific code pattern to fix the issue
 
 Provide an overall summary:
+
 - Total findings by severity and category
 - Error handling coverage assessment (boundaries, async, API, validation)
 - Top 3 most critical gaps to address
@@ -150,7 +154,7 @@ Provide an overall summary:
 ## Severity Classification
 
 | Severity | Criteria | Example |
-|----------|----------|---------|
+| -------- | -------- | ------- |
 | **Critical** | Unhandled rejection on production-critical path, no root error boundary | Async payment handler without try/catch, no `error.tsx` at root |
 | **High** | Leaked stack trace or internal details to client, empty catch on data mutation | API route returning `{ error: err.stack }` to the browser |
 | **Medium** | Inconsistent error format across API routes, catch with only console.error | Half the API returns `{ error }`, half returns `{ message, code }` |
@@ -159,7 +163,7 @@ Provide an overall summary:
 
 ## Example Output
 
-```
+````markdown
 ### Finding: Leaked Stack Trace in API Response
 
 - **Severity**: High
@@ -183,7 +187,7 @@ Provide an overall summary:
     );
   }
   ```
-```
+````
 
 ## Common False Positives
 

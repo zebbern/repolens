@@ -11,6 +11,8 @@ lastReviewed: "2026-03-08"
 reviewCycleDays: 180
 ---
 
+# Database Query Review
+
 ## Purpose
 
 Performs a systematic review of database access patterns across the codebase, identifying N+1 query problems, missing indexes, unbounded queries, long-running transactions, and connection management issues. The analysis traces database calls from their invocation point through ORM abstractions to the actual queries executed, classifying findings by their production impact on latency, throughput, and data integrity. The user receives a prioritized list of database performance and correctness findings with exact locations, measured metrics, and concrete query optimizations.
@@ -49,10 +51,10 @@ Follow this structured approach for every database query review. Complete each p
    - Is the query cached, reducing the real cost?
 3. Trace the call chain — sometimes the loop is in a parent function calling a helper that queries
 
-**Quantitative Thresholds**
+#### N+1 Detection Thresholds
 
 | Metric | Threshold | Classification |
-|--------|-----------|---------------|
+| -------- | ----------- | --------------- |
 | Database call inside loop (user-facing path) | Any with > 10 potential iterations | Critical — batch immediately |
 | Database call inside loop (user-facing path) | Any with 3-10 potential iterations | High — batch when possible |
 | Database call inside loop (background job) | > 100 iterations without batching | High — use batch or cursor |
@@ -93,10 +95,10 @@ Follow this structured approach for every database query review. Complete each p
    - Does the catch block call `rollback` or does the ORM handle it automatically?
    - Are there code paths that exit the transaction block without completing?
 
-**Quantitative Thresholds**
+#### Transaction Pattern Thresholds
 
 | Metric | Threshold | Classification |
-|--------|-----------|---------------|
+| -------- | ----------- | --------------- |
 | Non-DB operations inside transaction | Any I/O (API call, file read) | High — move outside transaction |
 | Transaction with > 5 queries | N/A | Review — can queries be batched? |
 | Related writes without transaction | > 2 writes that must be atomic | High — wrap in transaction |
@@ -133,10 +135,10 @@ Follow this structured approach for every database query review. Complete each p
    - Are batch operations chunked to avoid memory pressure?
    - Is there a cursor/stream pattern for exports or reports?
 
-**Quantitative Thresholds**
+#### Data Volume Thresholds
 
 | Metric | Threshold | Classification |
-|--------|-----------|---------------|
+| -------- | ----------- | --------------- |
 | `findMany`/`SELECT` without `take`/`LIMIT` | Any on user-data table | Medium — add limit |
 | Maximum allowed page size | > 100 rows | Review — may cause slow responses |
 | `SELECT *` on table with > 10 columns | Any | Low — select specific columns |
@@ -145,6 +147,7 @@ Follow this structured approach for every database query review. Complete each p
 ### Phase 7: Report
 
 For each finding, report:
+
 1. **Severity**: Critical / High / Medium / Low / Informational (use severity table below)
 2. **Category**: N+1, Missing Index, Transaction, Connection, or Data Volume
 3. **Location**: Exact file path and line reference
@@ -153,6 +156,7 @@ For each finding, report:
 6. **Remediation**: Specific query optimization with before/after code
 
 Provide an overall summary:
+
 - Total findings by severity and category
 - Database access pattern assessment (well-optimized, needs tuning, needs redesign)
 - Top 3 highest-impact query optimizations
@@ -162,7 +166,7 @@ Provide an overall summary:
 ## Severity Classification
 
 | Severity | Criteria | Example |
-|----------|----------|---------|
+| ---------- | ---------- | --------- |
 | **Critical** | N+1 on user-facing request with unbounded iteration, long-running transaction blocking writes | `findUnique` inside `.map()` over user's repositories (could be 100+) |
 | **High** | Missing index on high-traffic query, multiple related writes without transaction | API list endpoint filtering on unindexed `createdAt` column |
 | **Medium** | Unbounded `SELECT` without `LIMIT`, sequential queries that could be parallelized | `findMany()` returning all rows when only first 20 are displayed |
@@ -171,7 +175,7 @@ Provide an overall summary:
 
 ## Example Output
 
-```
+````markdown
 ### Finding: N+1 Query in Repository Analysis
 
 - **Severity**: Critical
@@ -205,7 +209,7 @@ Provide an overall summary:
   }));
   ```
   This reduces 200 queries to 1 query with an `IN` clause.
-```
+````
 
 ## Common False Positives
 

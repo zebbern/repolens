@@ -18,6 +18,8 @@ standardsReferenced:
     pinnedVersion: "2025"
 ---
 
+# Accessibility Audit
+
 ## Purpose
 
 Performs a WCAG 2.2 AA compliance audit of UI code by analyzing semantic HTML structure, ARIA patterns, keyboard navigation, form accessibility, media alternatives, dynamic content announcements, and color contrast. The analysis traces component trees from rendered output to source code, classifying findings by their impact on users who rely on assistive technologies. The user receives a prioritized list of accessibility barriers with severity classification, affected user groups, WCAG success criteria references, and concrete code fixes. Note: the European Accessibility Act (EAA, effective June 2025) makes WCAG 2.1 AA compliance a legal requirement for many digital products sold in the EU.
@@ -47,10 +49,10 @@ Follow this structured approach for every accessibility audit. Complete each pha
    - Buttons use `<button>`, not `<div onClick>` or `<a>` without href
    - Links use `<a href>` for navigation, not `<span onClick>`
 
-**Quantitative Thresholds**
+#### Semantic HTML Thresholds
 
 | Pattern | Threshold | Classification |
-|---------|-----------|---------------|
+| --------- | ----------- | --------------- |
 | Heading level skip > 1 | Any (`<h2>` → `<h4>`) | Flag — breaks document outline |
 | Multiple `<h1>` per page | > 1 | Flag — confuses screen readers |
 | `<div onClick>` without role | Any | Flag — not keyboard accessible |
@@ -70,7 +72,7 @@ Follow this structured approach for every accessibility audit. Complete each pha
 2. For each interactive pattern, verify ARIA implementation:
 
 | Component | Required ARIA | Common Issues |
-|-----------|--------------|---------------|
+| ----------- | -------------- | --------------- |
 | Dialog | `role="dialog"`, `aria-label` or `aria-labelledby`, `aria-modal="true"` | Missing label, focus not trapped |
 | Menu | `role="menu"`, `role="menuitem"`, `aria-expanded` on trigger | Arrow key navigation missing |
 | Tabs | `role="tablist"`, `role="tab"`, `role="tabpanel"`, `aria-selected` | Panel not associated with tab |
@@ -78,7 +80,7 @@ Follow this structured approach for every accessibility audit. Complete each pha
 | Tooltip | `role="tooltip"`, `aria-describedby` on trigger | Not accessible via keyboard |
 | Combobox | `role="combobox"`, `aria-expanded`, `aria-activedescendant` | Screen reader cannot navigate options |
 
-3. Check for ARIA misuse:
+1. Check for ARIA misuse:
    - `aria-hidden="true"` on focusable elements — creates invisible tab stops
    - `role="button"` without keyboard event handlers — announces as button but is not operable
    - Redundant ARIA on native elements (`role="button"` on `<button>`) — unnecessary
@@ -103,10 +105,10 @@ Follow this structured approach for every accessibility audit. Complete each pha
    - `tabindex="-1"` — programmatically focusable only (valid for focus management)
    - `tabindex` > 0 — breaks natural tab order (**always flag**)
 
-**Quantitative Thresholds**
+#### Keyboard Navigation Thresholds
 
 | Pattern | Threshold | Classification |
-|---------|-----------|---------------|
+| --------- | ----------- | --------------- |
 | `onClick` without `onKeyDown` on non-button element | Any | Flag — not keyboard operable |
 | Focus trap without Escape key exit | Any | Critical — keyboard user stuck |
 | `tabindex` > 0 | Any | Flag — disrupts tab order |
@@ -180,6 +182,7 @@ Follow this structured approach for every accessibility audit. Complete each pha
 ### Phase 8: Report
 
 For each finding, report:
+
 1. **Severity**: Critical / High / Medium / Low / Informational (use severity table below)
 2. **Category**: Semantic HTML, ARIA, Keyboard, Forms, Media, Dynamic Content, or Color/Contrast
 3. **Location**: Exact file path and component reference
@@ -189,6 +192,7 @@ For each finding, report:
 7. **Remediation**: Specific code changes to fix the barrier
 
 Provide an overall summary:
+
 - Total findings by severity and category
 - WCAG 2.2 AA compliance assessment
 - Top 3 most impactful barriers to fix first
@@ -199,7 +203,7 @@ Provide an overall summary:
 ## Severity Classification
 
 | Severity | Criteria | Affected Users | Example |
-|----------|----------|----------------|---------|
+| ---------- | ---------- | ---------------- | --------- |
 | **Critical** | Interactive element not keyboard accessible, focus trap with no exit, form with no labels | Keyboard, screen reader — complete blocker | `<div onClick={submit}>Submit</div>` with no keyboard handler |
 | **High** | Missing form labels, dialog without aria-label, no skip link, images without alt | Screen reader — major functionality loss | `<input type="email">` with no associated label |
 | **Medium** | Improper heading hierarchy, missing live regions for updates, tabindex > 0 | Screen reader — degraded navigation | Heading jumps from `<h2>` to `<h5>` |
@@ -208,7 +212,7 @@ Provide an overall summary:
 
 ## Example Output
 
-```
+````markdown
 ### Finding: Dialog Missing Accessible Label
 
 - **Severity**: High
@@ -228,7 +232,7 @@ Provide an overall summary:
   ```tsx
   <Dialog.Content aria-label="Application settings">
   ```
-```
+````
 
 ## Common False Positives
 

@@ -11,6 +11,8 @@ lastReviewed: "2026-03-08"
 reviewCycleDays: 180
 ---
 
+# Tour Creation
+
 ## Purpose
 
 Creates structured guided tours through a codebase that explain features, flows, or architectural patterns stop-by-stop. Each tour follows a logical path through the code with annotations explaining what the code does, why it matters, and how stops connect. The user receives a navigable walkthrough that enables onboarding, knowledge transfer, or code review — with accurate file references verified against the current codebase state.
@@ -37,16 +39,19 @@ Follow this structured approach for creating effective code tours.
 Design a logical path through the code:
 
 **Flow-Based Ordering** (preferred for features and data flows)
+
 - Start at the user-facing entry point (UI component, API route, CLI command)
 - Follow the execution path step by step
 - End at the final output or side effect
 
 **Layered Ordering** (preferred for architecture overviews)
+
 - Start at the highest abstraction layer
 - Drill into implementation details progressively
 - Show how layers connect
 
 **Concept-Based Ordering** (preferred for pattern explanations)
+
 - Start with the simplest example of the pattern
 - Build complexity gradually
 - Show variations and edge cases
@@ -57,13 +62,15 @@ Design a logical path through the code:
 
 For each stop in the tour:
 
-**Location Selection**
+#### Location Selection
+
 - Point to the exact file and line range where the relevant code lives
 - Prefer function/class declarations over individual lines
 - Include enough context (imports, surrounding code) but not entire files
 - Aim for 5-20 line ranges per stop
 
-**Stop Count Guidelines**
+#### Stop Count Guidelines
+
 - Simple features: 5-8 stops
 - Medium features: 8-15 stops
 - Complex flows: 15-25 stops
@@ -73,20 +80,23 @@ For each stop in the tour:
 
 Each stop's annotation must include all 4 parts:
 
-**Structure**
+#### Structure
+
 1. **What**: One sentence explaining what this code does
 2. **Why**: Why this approach was chosen or why it matters
 3. **How**: Key implementation details worth noting
 4. **Connection**: How this connects to the previous and next stops
 
-**Writing Guidelines**
+#### Writing Guidelines
+
 - Use present tense: "This function validates..." not "This function will validate..."
 - Reference specific variable names, function names, and types from the code
 - Explain non-obvious patterns or conventions
 - Include "notice that..." callouts for subtle but important details
 - Use inline code formatting for identifiers: `functionName`, `VariableType`
 
-**Annotation Length**
+#### Annotation Length
+
 - Keep annotations between 50-200 words per stop
 - Front-load the most important information
 - Use bullet points for multiple observations at a single stop
@@ -112,7 +122,7 @@ Before delivering the tour:
 
 ## Example Annotation
 
-```
+```markdown
 ### Stop 3: Authentication Middleware — `middleware.ts` lines 12-34
 
 **What**: This middleware intercepts every request and checks for a valid session token before allowing access to protected routes.

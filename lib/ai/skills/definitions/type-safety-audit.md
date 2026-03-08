@@ -14,6 +14,8 @@ standardsReferenced:
     pinnedVersion: "5.7"
 ---
 
+# Type Safety Audit
+
 ## Purpose
 
 Performs a systematic audit of TypeScript type safety across the codebase, identifying `any` type usage, unsafe type assertions, missing runtime validation at system boundaries, and overly permissive generic constraints. The analysis distinguishes between intentional type flexibility (third-party workarounds, migration-phase code) and genuine type safety holes that risk runtime errors. The user receives a prioritized list of type safety findings with exact locations, measured metrics, and concrete fixes.
@@ -56,10 +58,10 @@ Follow this structured approach for every type safety audit. Complete each phase
    - **Test code**: mocks, fixtures, type stubs — Informational
 3. Count total `any` occurrences and calculate `any` density (occurrences per 1000 lines)
 
-**Quantitative Thresholds**
+#### Type Safety Thresholds
 
 | Metric | Threshold | Classification |
-|--------|-----------|---------------|
+| -------- | ----------- | --------------- |
 | Files with `any` as % of total `.ts` files | > 5% | Systemic issue — needs codebase-wide effort |
 | Files with `any` as % of total `.ts` files | 2-5% | Elevated — track and reduce |
 | Files with `any` as % of total `.ts` files | < 2% | Healthy |
@@ -74,7 +76,7 @@ Follow this structured approach for every type safety audit. Complete each phase
 ### Phase 3: Type Narrowing Patterns
 
 1. Use `searchFiles` to find type assertion patterns:
-   - Search for `as ` (type assertion syntax) — distinguish safe narrowing from unsafe casts
+   - Search for `as` (type assertion syntax) — distinguish safe narrowing from unsafe casts
    - Search for `!` (non-null assertion) — risky if the value can actually be null
 2. Classify each assertion:
    - **Safe narrowing**: `as const`, `as keyof typeof`, narrowing after type guard — acceptable
@@ -132,6 +134,7 @@ Follow this structured approach for every type safety audit. Complete each phase
 ### Phase 7: Report
 
 For each finding, report:
+
 1. **Severity**: Critical / High / Medium / Low / Informational (use severity table below)
 2. **Category**: Strict Mode, `any` Usage, Type Assertion, Generic, Validation, or Inference
 3. **Location**: Exact file path and line reference
@@ -140,6 +143,7 @@ For each finding, report:
 6. **Fix**: Specific type-safe replacement with code example
 
 Provide an overall summary:
+
 - Total findings by severity and category
 - Type safety score: percentage of files with zero `any`/`as`/`@ts-ignore`
 - `any` density: occurrences per 1000 lines of TypeScript
@@ -150,7 +154,7 @@ Provide an overall summary:
 ## Severity Classification
 
 | Severity | Criteria | Example |
-|----------|----------|---------|
+| ---------- | ---------- | --------- |
 | **Critical** | `any` in public API or data validation boundary, `@ts-nocheck` on production file | API route handler accepting `body: any` without validation |
 | **High** | `@ts-ignore` suppressing a real error, unsafe `as` on user-facing data path | `const user = data as User` without validating `data` shape |
 | **Medium** | Unsafe type assertion in business logic, unconstrained generic in shared utility | `as` cast in a calculation function that could use a type guard |
@@ -159,7 +163,7 @@ Provide an overall summary:
 
 ## Example Output
 
-```
+````markdown
 ### Finding: Unsafe Type Assertion on API Response
 
 - **Severity**: High
@@ -188,7 +192,7 @@ Provide an overall summary:
   const parsed = GitHubRepositorySchema.parse(data);
   return parsed; // type is inferred from schema
   ```
-```
+````
 
 ## Common False Positives
 

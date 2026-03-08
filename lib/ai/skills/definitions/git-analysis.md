@@ -10,6 +10,8 @@ lastReviewed: "2026-03-08"
 reviewCycleDays: 180
 ---
 
+# Git Analysis
+
 ## Purpose
 
 Analyzes git history to reveal development patterns, code ownership, change hotspots, and collaboration dynamics. The analysis applies quantitative thresholds to classify findings by severity — distinguishing meaningful signals from noise (auto-generated files, formatting changes). The user receives actionable insights about code quality risks, knowledge silos, and areas that need refactoring or knowledge sharing.
@@ -36,19 +38,22 @@ Follow this structured approach for git history analysis.
 
 Based on the user's question, focus on the relevant analysis type:
 
-**Change Frequency Analysis**
+#### Change Frequency Analysis
+
 - Use `getGitHistory({ mode: 'commits', path: '<file_or_dir>' })` to see how often specific files change
 - Identify hotspots — files that change most frequently
 - Look for files that always change together (coupling indicators)
 - Note files that haven't changed recently (potential tech debt or stable modules)
 
-**Code Ownership Analysis**
+#### Code Ownership Analysis
+
 - Use `getGitHistory({ mode: 'blame', path: '<file>' })` on key files to see line-by-line authorship
 - Identify primary owners for each module or directory
 - Look for knowledge silos (files with only one contributor)
 - Note bus factor risks (critical code owned by a single person)
 
-**Commit Detail Analysis**
+#### Commit Detail Analysis
+
 - Use `getGitHistory({ mode: 'commit-detail', ref: '<sha>' })` to inspect specific commits
 - Review the changed files and diff statistics
 - Understand the scope and impact of individual changes
@@ -58,34 +63,34 @@ Based on the user's question, focus on the relevant analysis type:
 
 Apply these thresholds to classify findings. **Before reporting a finding, verify it by checking whether the changes are meaningful (not formatting, auto-generation, or lock file updates).**
 
-**Hotspot Detection**
+#### Hotspot Detection
 
 | Metric | Threshold (90 days) | Classification |
-|--------|---------------------|---------------|
+| ------ | ------------------- | ------------- |
 | Changes to a single file | >10 | Active hotspot — review for complexity |
 | Changes to a single file | 5-10 | Warm file — monitor |
 | Changes to a single file | <5 | Stable |
 
-**Bus Factor Risk**
+#### Bus Factor Risk
 
 | Metric | Threshold | Classification |
-|--------|-----------|---------------|
+| ------ | --------- | ------------- |
 | Contributors with blame on a file | 1 | Critical bus factor risk |
 | Contributors with blame on a file | 2 | Elevated risk — cross-train |
 | Contributors with blame on a file | 3+ | Healthy |
 
-**File Coupling**
+#### File Coupling
 
 | Metric | Threshold | Classification |
-|--------|-----------|---------------|
+| ------ | --------- | ------------- |
 | Files that change together | >70% of commits | Tightly coupled — may need merging or explicit interface |
 | Files that change together | 40-70% of commits | Moderate coupling — review dependency |
 | Files that change together | <40% | Independent |
 
-**Code Churn**
+#### Code Churn
 
 | Metric | Threshold (30 days) | Classification |
-|--------|---------------------|---------------|
+| ------ | ------------------- | ------------- |
 | Reversals/rewrites on same file | >3 | Churn indicator — unstable requirements or design issue |
 | Reversals/rewrites on same file | 2-3 | Mild churn — monitor |
 | Reversals/rewrites on same file | 0-1 | Normal |
@@ -93,6 +98,7 @@ Apply these thresholds to classify findings. **Before reporting a finding, verif
 ### Phase 4: Contextual Code Review
 
 For files identified as interesting from git analysis:
+
 1. Use `readFile` to read the current state of key files
 2. Compare current code with git history insights
 3. Note if recent changes introduced complexity or simplified code
@@ -103,25 +109,29 @@ For files identified as interesting from git analysis:
 
 Structure findings based on the analysis type:
 
-**For Change Frequency Reports**
+#### For Change Frequency Reports
+
 - Top 10 most frequently changed files (with change count and last modified date)
 - Change frequency by directory or module
 - Coupling analysis (files that change together, with co-change percentage)
 - Stability analysis (unchanged files)
 
-**For Code Ownership Reports**
+#### For Code Ownership Reports
+
 - Primary maintainers by module (contributor name, line count, percentage)
 - Knowledge distribution heat map
 - Bus factor assessment (files with single contributor)
 - Recommendations for knowledge sharing
 
-**For Commit Analysis Reports**
+#### For Commit Analysis Reports
+
 - Summary of analyzed commits
 - Impact assessment of changes (files affected, lines changed)
 - Pattern observations
 - Recommendations based on findings
 
-**General Report Guidelines**
+#### General Report Guidelines
+
 - Always include specific file paths and commit references
 - Use tables for structured data (file paths, counts, contributors)
 - Highlight actionable insights over raw data
@@ -130,7 +140,7 @@ Structure findings based on the analysis type:
 ## Severity Classification
 
 | Severity | Criteria | Example |
-|----------|----------|---------|
+| -------- | -------- | ------- |
 | **Critical** | Single-contributor ownership on critical path code, >15 changes in 90 days with increasing complexity | Core auth module with 1 contributor and 18 changes |
 | **High** | Active hotspot (>10 changes) combined with bus factor risk, or >3 churn reversals | Payment processing file rewritten 4 times in 30 days |
 | **Medium** | Bus factor = 1 on non-critical code, or tightly coupled files (>70% co-change) | Config parser known by only one developer |
@@ -139,7 +149,7 @@ Structure findings based on the analysis type:
 
 ## Example Output
 
-```
+```markdown
 ### Finding: Active Hotspot with Bus Factor Risk — `lib/ai/chat-engine.ts`
 
 - **Severity**: High

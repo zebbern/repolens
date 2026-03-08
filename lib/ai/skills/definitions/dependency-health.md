@@ -16,6 +16,8 @@ standardsReferenced:
     pinnedVersion: "2024"
 ---
 
+# Dependency Health
+
 ## Purpose
 
 Performs a comprehensive dependency health audit covering vulnerability scanning, maintenance status, license compliance, bundle impact, and supply chain risks. The analysis reads package manifests and lock files, cross-references known CVE patterns, evaluates maintenance signals, and flags licensing conflicts. The user receives a prioritized list of dependency risks with severity classification, affected packages, and specific remediation actions.
@@ -59,10 +61,10 @@ Follow this structured approach for every dependency health audit. Complete each
    - README badges showing failing CI
    - Dependencies depending on other unmaintained packages
 
-**Quantitative Thresholds**
+#### Maintenance Status Thresholds
 
 | Signal | Threshold | Classification |
-|--------|-----------|---------------|
+| -------- | ----------- | --------------- |
 | Last publish | > 6 months ago | Stale — investigate maintenance status |
 | Last publish | > 12 months ago | Potentially abandoned — seek alternatives |
 | Last publish | > 24 months ago | Likely abandoned — plan migration |
@@ -112,6 +114,7 @@ Follow this structured approach for every dependency health audit. Complete each
 ### Phase 7: Report
 
 For each finding, report:
+
 1. **Severity**: Critical / High / Medium / Low / Informational (use severity table below)
 2. **Category**: Vulnerability, Maintenance, License, Bundle Impact, or Supply Chain
 3. **Package**: The affected dependency name and version
@@ -120,6 +123,7 @@ For each finding, report:
 6. **Remediation**: Specific action — upgrade, replace, remove, or pin
 
 Provide an overall summary:
+
 - Total findings by severity and category
 - Dependency health score heuristic (Critical=0 is baseline)
 - Top 3 most urgent actions
@@ -129,7 +133,7 @@ Provide an overall summary:
 ## Severity Classification
 
 | Severity | Criteria | Example |
-|----------|----------|---------|
+| ---------- | ---------- | --------- |
 | **Critical** | Known CVE in direct production dependency with reachable code path | `ws` < 8.17.1 with ReDoS in header parsing |
 | **High** | Abandoned package (>24 months) with no maintained alternative in use, or strong copyleft license in commercial project | Using GPL-3.0 library in proprietary SaaS |
 | **Medium** | Outdated major version (2+ behind), stale package (6-12 months), or duplicate functionality | Both `axios` and `node-fetch` in the same project |
@@ -138,7 +142,7 @@ Provide an overall summary:
 
 ## Example Output
 
-```
+````markdown
 ### Finding: Known Vulnerability in Production Dependency
 
 - **Severity**: Critical

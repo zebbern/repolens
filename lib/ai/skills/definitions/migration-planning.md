@@ -11,6 +11,8 @@ lastReviewed: "2026-03-08"
 reviewCycleDays: 180
 ---
 
+# Migration Planning
+
 ## Purpose
 
 Performs a systematic migration assessment by inventorying current framework and library versions, researching target version changes, quantifying affected files and API surface, and generating a step-by-step migration plan with risk classification. The analysis distinguishes between blocking breaking changes, parallelizable updates, and optional improvements — producing a prioritized migration checklist with rollback strategies, testing requirements, and estimated blast radius per step.
@@ -57,10 +59,10 @@ Follow this structured approach for every migration assessment. Complete each ph
    - **Mechanical**: Simple manual change repeated across files
    - **Requires judgment**: New pattern or API with multiple migration options
 
-**Quantitative Thresholds**
+#### Migration Impact Thresholds
 
 | Metric | Threshold | Classification |
-|--------|-----------|---------------|
+| -------- | ----------- | --------------- |
 | Total files affected | > 50 | High-risk migration — phase in stages |
 | Total files affected | 20-50 | Moderate — plan for focused sprint |
 | Total files affected | < 20 | Low-risk — can be done in a single PR |
@@ -115,6 +117,7 @@ Follow this structured approach for every migration assessment. Complete each ph
 ### Phase 7: Report
 
 For each finding, report:
+
 1. **Severity**: Critical / High / Medium / Low / Informational (use severity table below)
 2. **Category**: Breaking Change, Deprecation, Configuration, Peer Dependency, or New Feature
 3. **Location**: Affected files and import paths
@@ -124,6 +127,7 @@ For each finding, report:
 7. **Effort Estimate**: Automated, Mechanical, or Requires Judgment
 
 Provide an overall summary:
+
 - Total breaking changes by severity
 - Migration complexity rating (Low / Moderate / High / Extreme)
 - Recommended migration strategy (incremental vs big-bang)
@@ -134,7 +138,7 @@ Provide an overall summary:
 ## Severity Classification
 
 | Severity | Criteria | Example |
-|----------|----------|---------|
+| ---------- | ---------- | --------- |
 | **Critical** | Breaking change with no clear migration path, or runtime behavior change that silently corrupts data | Removed API with no replacement, serialization format change affecting stored data |
 | **High** | Deprecated API used in > 10 files, peer dependency cascade requiring multiple coordinated upgrades | `getServerSideProps` removal affecting 15 page files in Next.js 15 upgrade |
 | **Medium** | Configuration format change, import path rename, or new required field | `next.config.js` → `next.config.mjs` with new export format |
@@ -143,7 +147,7 @@ Provide an overall summary:
 
 ## Example Output
 
-```
+````markdown
 ### Finding: Breaking Change — `next/image` Layout Prop Removed
 
 - **Severity**: High
@@ -168,7 +172,7 @@ Provide an overall summary:
   ```
 - **Codemod**: `npx @next/codemod@latest next-image-to-legacy-image .` (converts to legacy, then manually update)
 - **Verification**: Search for remaining `layout=` props, build, visual regression test on image-heavy pages
-```
+````
 
 ## Common False Positives
 

@@ -15,6 +15,8 @@ standardsReferenced:
     pinnedVersion: "2024"
 ---
 
+# Performance Analysis
+
 ## Purpose
 
 Performs a systematic performance audit of the codebase by analyzing bundle composition, data fetching patterns, rendering efficiency, and asset delivery. The analysis applies quantitative thresholds to classify findings by severity — distinguishing real bottlenecks from minor optimization opportunities. The user receives a prioritized list of performance issues with exact file locations, measured impact, and specific remediation guidance.
@@ -46,10 +48,10 @@ Follow this structured approach for every performance analysis. Complete each ph
 5. Check for barrel file imports that pull in entire module trees:
    - Look for `import { OneSmallThing } from './components'` patterns where the barrel re-exports many modules
 
-**Quantitative Thresholds**
+#### Bundle Loading Thresholds
 
 | Metric | Threshold | Action |
-|--------|-----------|--------|
+| -------- | ----------- | -------- |
 | Single import estimated > 100KB | Flag for code splitting | Use dynamic `import()` or `React.lazy` |
 | Static import of chart/editor/map library | Flag for lazy loading | Wrap in `dynamic()` or `Suspense` |
 | Barrel import pulling > 10 re-exports | Flag for direct imports | Import from specific file paths |
@@ -70,10 +72,10 @@ Follow this structured approach for every performance analysis. Complete each ph
 5. Check for missing caching on expensive or repeated queries:
    - Same query called from multiple components without caching layer
 
-**Quantitative Thresholds**
+#### Data Fetching Thresholds
 
 | Metric | Threshold | Action |
-|--------|-----------|--------|
+| -------- | ----------- | -------- |
 | Database/API call inside a loop | Always flag | Batch or use `WHERE IN` / bulk endpoint |
 | Query without LIMIT/take on list data | Always flag | Add pagination or bounded limit |
 | Sequential awaits (> 2) with no data dependency | Flag for parallelization | Use `Promise.all` or `Promise.allSettled` |
@@ -95,10 +97,10 @@ Follow this structured approach for every performance analysis. Complete each ph
    - DOM reads followed by DOM writes in alternation
    - Measuring element dimensions inside render loops
 
-**Quantitative Thresholds**
+#### Rendering Thresholds
 
 | Metric | Threshold | Action |
-|--------|-----------|--------|
+| -------- | ----------- | -------- |
 | Component with > 5 `useState` calls | Review for state consolidation | Consider `useReducer` or state object |
 | Context provider re-rendering > 20 consumers | Flag value memoization | Memoize context value or split contexts |
 | Array/object sort/filter in render without `useMemo` on > 50 items | Flag for memoization | Wrap in `useMemo` with proper deps |
@@ -122,6 +124,7 @@ Follow this structured approach for every performance analysis. Complete each ph
 ### Phase 6: Report
 
 For each finding, report:
+
 1. **Severity**: Critical / High / Medium / Low / Informational (use severity table below)
 2. **Category**: Bundle, Data Fetching, Rendering, or Assets
 3. **Location**: Exact file path and line reference
@@ -131,6 +134,7 @@ For each finding, report:
 7. **Confidence**: High / Medium / Low — based on static analysis vs runtime verification
 
 Provide an overall summary:
+
 - Total findings by severity and category
 - Top 3 highest-impact issues to address first
 - Quick wins (low-effort, high-impact fixes)
@@ -139,7 +143,7 @@ Provide an overall summary:
 ## Severity Classification
 
 | Severity | Criteria | Example |
-|----------|----------|---------|
+| ---------- | ---------- | --------- |
 | **Critical** | N+1 query on production-critical path, unbounded query on large table | `for (const user of users) { await db.posts.findMany({ where: { userId: user.id } }) }` |
 | **High** | Missing code splitting on module > 100KB, request waterfall blocking page load | Static import of `recharts` on every page when only used on dashboard |
 | **Medium** | Missing memoization on expensive computation, inline object props causing re-renders | Sorting 500-item array in render without `useMemo` |
@@ -148,7 +152,7 @@ Provide an overall summary:
 
 ## Example Output
 
-```
+````markdown
 ### Finding: N+1 Query in Repository Loading — `lib/api/repos.ts`
 
 - **Severity**: Critical
@@ -171,7 +175,7 @@ Provide an overall summary:
     include: { stats: true },
   });
   ```
-```
+````
 
 ## Common False Positives
 

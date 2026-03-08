@@ -217,7 +217,7 @@ test.describe('Tab bar', () => {
 
     await loadApp(page)
 
-    const expectedTabs = ['Repo', 'Issues', 'Docs', 'Diagram', 'Code', 'Deps', 'Changelog', 'Git History', 'Tours']
+    const expectedTabs = ['Repo', 'Issues', 'Diagram', 'Code', 'Deps', 'Docs', 'Changelog', 'Git History', 'Tours']
     for (const tabName of expectedTabs) {
       await expect(
         page.getByRole('tab', { name: tabName, exact: true }),

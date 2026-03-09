@@ -113,13 +113,43 @@ graph TD
 | **SessionProvider** | NextAuth session management for GitHub OAuth | Session, auth status |
 | **ThemeProvider** | Dark/light/system theme via `next-themes` | Theme preference |
 | **APIKeysProvider** | Manages AI provider API keys (OpenAI, Anthropic, Google, OpenRouter), model selection, and key validation | API keys in localStorage, selected model, available models |
-| **RepositoryProvider** | Fetches, indexes, and caches repository data. Manages the `CodeIndex`, search state, modified file contents, codebase analysis, and tab data caching | `GitHubRepo`, file tree, `CodeIndex`, loading stage, indexing progress, `FullAnalysis`, `getTabCache`/`setTabCache` (Issues, Deps, Git History survive tab switches) |
+| **RepositoryProvider** | Fetches, indexes, and caches repository data. Splits into 3 sub-contexts for render isolation (see below) | `GitHubRepo`, file tree, `CodeIndex`, loading stage, indexing progress, `FullAnalysis`, `getTabCache`/`setTabCache` |
 | **DocsProvider** | Hosts the `useChat` instance for documentation generation. Splits into two sub-contexts: `DocsStateContext` (generated docs list) and `DocsChatContext` (streaming chat state) | Generated docs, active doc ID, chat messages/status |
 | **ToursProvider** | Manages repo tours: CRUD, playback state, active tour/stop tracking. Persists tours in IndexedDB via `tour-cache.ts`. Split contexts (state + playback) | Tours list, active tour, current stop index, playback state |
 | **ChangelogProvider** | Hosts `useChat` for changelog generation. Split contexts like DocsProvider (State + Chat) | Generated changelogs, active ID, chat streaming state |
 | **AppProvider** | Lightweight global UI state. Tracks selected file path for cross-feature coordination (e.g., blame view) | Preview URL, generating flag, sidebar width, selected file path |
 
 `ComparisonProvider` is used locally on the `/compare` page, not in the global provider tree.
+
+### RepositoryProvider 3-Context Split
+
+`RepositoryProvider` uses three separate React Contexts to isolate re-renders. Components subscribe only to the slice of state they need, preventing unnecessary updates during high-frequency operations like indexing progress.
+
+```mermaid
+graph TD
+  RP["RepositoryProvider"] --> DC["RepositoryDataCtx"]
+  RP --> AC["RepositoryActionsCtx"]
+  RP --> PC["RepositoryProgressCtx"]
+  DC --> H1["useRepositoryData()"]
+  AC --> H2["useRepositoryActions()"]
+  PC --> H3["useRepositoryProgress()"]
+  H1 --> BC["useRepository()"]
+  H2 --> BC
+  H3 --> BC
+```
+
+| Context | Interface | Contents | Update Frequency |
+| ------- | --------- | -------- | ---------------- |
+| **RepositoryDataCtx** | `RepositoryDataContextType` | `repo`, `files`, `parsedFiles`, `codeIndex`, `codebaseAnalysis`, `failedFiles`, `isCacheHit` | Rare — stable after load completes |
+| **RepositoryActionsCtx** | `RepositoryActionsContextType` | `connectRepository`, `disconnectRepository`, `loadFileContent`, `getFileByPath`, `updateCodeIndex`, `pinFile`, `unpinFile`, `clearPins`, `getPinnedContents`, `getTabCache`, `setTabCache`, `setSearchState`, `setModifiedContents`, `getFileContent` | Never — stable callback references |
+| **RepositoryProgressCtx** | `RepositoryProgressContextType` | `isLoading`, `error`, `indexingProgress`, `searchState`, `modifiedContents`, `loadingStage`, `contentAvailability`, `contentLoadingStats`, `pinnedFiles`, `isPinned` | Frequent — updates during indexing, search, and pin changes |
+
+**Hooks**:
+
+- `useRepositoryData()` — subscribe to repo data only (components displaying file trees, code browser)
+- `useRepositoryActions()` — subscribe to stable callbacks only (components triggering actions)
+- `useRepositoryProgress()` — subscribe to loading/progress state only (progress bars, loading indicators)
+- `useRepository()` — backward-compatible convenience hook that spreads all 3 sub-contexts
 
 ## AI Chat System
 
@@ -192,34 +222,57 @@ The scanner detects security vulnerabilities, code quality issues, and supply ch
 
 ```mermaid
 graph TD
-  A["scanIssues()"] --> B["1. Regex Rules"]
+  A["scanIssues()"] --> B["1. Regex Rules (single-pass)"]
   A --> C["2. AST Analysis"]
   A --> D["2b. Taint Tracking"]
   A --> E["3. Composite Rules"]
   A --> F["4. Structural Rules"]
   A --> G["5. Supply Chain Rules"]
+  A --> G2["5b. Tree-sitter Rules"]
   B --> H["Deduplicate"]
   C --> H
   D --> H
   E --> H
   F --> H
   G --> H
+  G2 --> H
   H --> I["6. Structural Context Cross-reference"]
   I --> J["Risk Scoring"]
   J --> K["Health Grades"]
   K --> L["ScanResults"]
 ```
 
+### Single-Pass Regex Architecture
+
+Regex rule scanning uses a single-pass architecture via `buildCompiledRuleIndex()`. Instead of iterating the entire codebase once per rule (which previously caused ~268 sequential passes), all rules are pre-compiled into `CompiledRule` objects and grouped by file extension into a `Map<string, CompiledRule[]>`.
+
+```mermaid
+graph LR
+  A["RULES array"] --> B["buildCompiledRuleIndex()"]
+  B --> C["rulesForExtension: Map"]
+  B --> D["universalRules: CompiledRule[]"]
+  E["Iterate files once"] --> F{"Get file extension"}
+  F --> G["Merge universalRules + rulesForExtension.get(ext)"]
+  G --> H["Test each line against applicable rules"]
+```
+
+- **Pre-compilation**: Each `ScanRule.pattern` is compiled to a `RegExp` via `buildSearchRegex()` once, stored in a `CompiledRule` alongside `isSecurityCritical` metadata.
+- **Extension grouping**: Rules with a `fileFilter` are indexed under each applicable extension (e.g., `.ts`, `.py`). Rules with no `fileFilter` go into `universalRules` and apply to every file.
+- **Dead-rule pruning**: Rules whose `fileFilter` extensions don't appear in the codebase's `presentExtensions` set are skipped entirely.
+- **Single iteration**: `runRegexRules()` iterates each file once, merging universal rules with extension-specific rules, and tests each line against all applicable compiled regexes.
+- **Unscanned files**: `countUnscannedFiles()` uses `!file.content` to identify files without loaded content (IDB/Lazy tier), reported as `unscannedFileCount` in results.
+
 ### Rule Types
 
 | Rule Type | Module | How It Works |
 | --------- | ------ | ------------ |
-| **Regex** | `rules-security.ts`, `rules-quality.ts`, `rules-framework.ts`, `rules-security-lang.ts` | Pattern matching via `searchIndex()`. Supports file type filters, exclude patterns, context-aware suppression (comments, tests, type annotations) |
+| **Regex** | `rules-security.ts`, `rules-quality.ts`, `rules-framework.ts`, `rules-security-lang.ts` | Single-pass pattern matching via `buildCompiledRuleIndex()`. Rules pre-compiled and grouped by extension. Supports file type filters, exclude patterns, context-aware suppression (comments, tests, type annotations) |
 | **AST** | `ast-analyzer.ts`, `ast-parser.ts` | Parses source into AST nodes, analyzes control flow, detects structural patterns (empty catch, eval usage, unsafe assignments) |
 | **Composite** | `rules-composite.ts` | Multi-pattern rules: ALL `requiredPatterns` must appear in the same file, reported at the `sinkPattern` line |
 | **Taint** | `taint-tracker.ts` | Tracks data flow from sources (user input) through the AST to sinks (SQL queries, DOM manipulation), detecting unsanitized paths |
 | **Structural** | `structural-scanner.ts` | Uses the dependency graph to detect circular dependencies, large files (>400 lines), high coupling (15+ importers), and dead modules |
 | **Supply Chain** | `supply-chain-scanner.ts` | Scans `package.json` lifecycle scripts, lockfiles, GitHub Actions workflows, and Python dependency files for suspicious patterns |
+| **Tree-sitter** | `rules-tree-sitter.ts`, `tree-sitter-scanner.ts` | S-expression queries for non-JS/TS languages (Python, Java, Go, Rust, C/C++, Ruby, PHP, Swift, Kotlin) via `scanWithTreeSitter()` |
 | **Entropy** | `entropy.ts` | Shannon entropy analysis to distinguish real secrets from placeholder values in credential-pattern matches |
 
 ### Scoring and Grading
@@ -561,9 +614,12 @@ graph TD
   R8 --> G5
 
   A8 --> A1
+  A8 --> A8b["agent-tools.ts"]
   A8 --> A6
   A8 --> A7
   A8 --> A9
+  A8b --> A1
+  A8b --> A9
   A1 --> A2
   A3 --> A2
   A3 --> C1
@@ -742,7 +798,8 @@ The Next.js middleware enables clean URLs (`/owner/repo`) by rewriting to `/?rep
 1. **Define the schema** in `lib/ai/tool-schemas.ts` using Zod.
 2. **Add the tool definition** in `lib/ai/tool-definitions.ts` using `tool()` with a description and `inputSchema` (no `execute`).
 3. **Implement the executor** in `lib/ai/client-tool-executor.ts` — add a case to the `switch (toolName)` in `executeToolLocally()`.
-4. The tool is automatically available via the `repoLensAgent` ToolLoopAgent (imported in `lib/ai/agent/agent.ts`). Chat, docs, and changelog routes all use the same agent instance.
+4. **Register in `agent-tools.ts`** — Add the tool to the `agentTools` object in `lib/ai/agent/agent-tools.ts`. This makes it available to the `repoLensAgent` and adds its name to the `AgentToolName` union.
+5. If the tool is skill-gated, add it to `SKILL_TOOLS` in `lib/ai/agent/prepare-step.ts`; otherwise add it to `CORE_TOOLS`.
 
 ### Adding a New Scanner Rule
 
@@ -798,6 +855,35 @@ The skills system provides specialized analysis methodologies that the AI can lo
 - **SkillRegistry** lazily loads and caches skill definitions, validates frontmatter via Zod, and enforces filename-to-ID consistency.
 - **Server-executed tools** (`discoverSkills`, `loadSkill`) allow the AI to discover and load skills at runtime.
 - **UI**: `SkillSelector` component lets users pre-select skills before chatting.
+
+## Agent Architecture
+
+The AI agent is a `ToolLoopAgent` from the Vercel AI SDK that orchestrates all AI interactions (chat, docs, changelog). Key modules are in `lib/ai/agent/`.
+
+### Agent Tools Module
+
+`agent-tools.ts` is the single source of truth for the agent's tool set. It merges `codeTools` (from `tool-definitions.ts`) with the skill tools (`discoverSkills`, `loadSkill` from `lib/ai/skills/`) into a combined `agentTools` object.
+
+| Export | Type | Purpose |
+| ------ | ---- | ------- |
+| `agentTools` | Object | Combined tools object registered on the `ToolLoopAgent` |
+| `AgentTools` | `typeof agentTools` | Full tools object type for generic type parameters |
+| `AgentToolName` | `keyof AgentTools` | String union of all tool names — used to type `CORE_TOOLS` and `SKILL_TOOLS` in `prepare-step.ts` |
+
+This module was extracted to break a circular import between `agent.ts` (which defines the agent) and `prepare-step.ts` (which references tool names for skill-gating). Both now import tool types from `agent-tools.ts` without depending on each other.
+
+### Tool Gating via Skills
+
+`prepare-step.ts` uses `AgentToolName[]` to type two tool lists:
+
+- **`CORE_TOOLS`**: Always available (`readFile`, `readFiles`, `searchFiles`, `listDirectory`, `findSymbol`, `getFileStats`, `loadSkill`, `discoverSkills`).
+- **`SKILL_TOOLS`**: Gated by loaded skills (e.g., `scanIssues` requires `security-audit`, `generateDiagram` requires `architecture-analysis`).
+
+The `prepareStep` callback inspects the message history for `<skill-instructions>` tags in `loadSkill` tool results, extracts loaded skill IDs, and returns the appropriate `activeTools` subset for each step.
+
+### Agent Instance
+
+`agent.ts` creates the singleton `repoLensAgent` as `new ToolLoopAgent<CallOptions, typeof agentTools>(...)`. The second type parameter (`typeof agentTools`) ensures compile-time type safety for tool references throughout the agent pipeline.
 
 ## Rate Limiting
 

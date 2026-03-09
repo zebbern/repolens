@@ -1,0 +1,116 @@
+app/api/inline-actions/__tests__/route.test.ts(183,28): error TS2345: Argument of type 'Request' is not assignable to parameter of type 'NextRequest'.
+  Type 'Request' is missing the following properties from type 'NextRequest': cookies, nextUrl, page, ua
+app/api/inline-actions/__tests__/route.test.ts(196,28): error TS2345: Argument of type 'Request' is not assignable to parameter of type 'NextRequest'.
+  Type 'Request' is missing the following properties from type 'NextRequest': cookies, nextUrl, page, ua
+app/api/inline-actions/__tests__/route.test.ts(209,28): error TS2345: Argument of type 'Request' is not assignable to parameter of type 'NextRequest'.
+  Type 'Request' is missing the following properties from type 'NextRequest': cookies, nextUrl, page, ua
+app/api/inline-actions/__tests__/route.test.ts(220,28): error TS2345: Argument of type 'Request' is not assignable to parameter of type 'NextRequest'.
+  Type 'Request' is missing the following properties from type 'NextRequest': cookies, nextUrl, page, ua
+app/api/inline-actions/__tests__/route.test.ts(235,16): error TS2345: Argument of type 'Request' is not assignable to parameter of type 'NextRequest'.
+  Type 'Request' is missing the following properties from type 'NextRequest': cookies, nextUrl, page, ua
+app/api/inline-actions/__tests__/route.test.ts(247,16): error TS2345: Argument of type 'Request' is not assignable to parameter of type 'NextRequest'.
+  Type 'Request' is missing the following properties from type 'NextRequest': cookies, nextUrl, page, ua
+app/api/inline-actions/__tests__/route.test.ts(263,28): error TS2345: Argument of type 'Request' is not assignable to parameter of type 'NextRequest'.
+  Type 'Request' is missing the following properties from type 'NextRequest': cookies, nextUrl, page, ua
+app/api/inline-actions/__tests__/route.test.ts(278,16): error TS2345: Argument of type 'Request' is not assignable to parameter of type 'NextRequest'.
+  Type 'Request' is missing the following properties from type 'NextRequest': cookies, nextUrl, page, ua
+app/api/inline-actions/__tests__/route.test.ts(293,28): error TS2345: Argument of type 'Request' is not assignable to parameter of type 'NextRequest'.
+  Type 'Request' is missing the following properties from type 'NextRequest': cookies, nextUrl, page, ua
+components/features/chat/__tests__/pin-file-picker.test.tsx(44,3): error TS2739: Type '{ files: Map<string, { path: string; name: string; content: string; language: string; lines: string[]; lineCount: number; }>; totalFiles: number; totalLines: number; isIndexing: false; }' is missing the following properties from type 'CodeIndex': meta, contentStore
+components/features/code/hooks/__tests__/use-inline-actions.test.ts(24,3): error TS2739: Type '{ files: Map<any, any>; totalFiles: number; totalLines: number; isIndexing: false; }' is missing the following properties from type 'CodeIndex': meta, contentStore
+components/features/git-history/__tests__/git-history-panel.test.tsx(67,46): error TS2352: Conversion of type '{ repo: null; getTabCache: Mock<() => undefined>; setTabCache: Mock<Procedure>; }' to type '{ isLoading: boolean; error: string | null; indexingProgress: IndexingProgress; searchState: SearchState; modifiedContents: Map<string, string>; loadingStage: LoadingStage; contentAvailability: ContentAvailability; ... 23 more ...; isCacheHit: boolean; }' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+  Type '{ repo: null; getTabCache: Mock<() => undefined>; setTabCache: Mock<Procedure>; }' is missing the following properties from type '{ isLoading: boolean; error: string | null; indexingProgress: IndexingProgress; searchState: SearchState; modifiedContents: Map<string, string>; ... 25 more ...; isCacheHit: boolean; }': isLoading, error, indexingProgress, searchState, and 24 more.
+components/features/issues/compliance-dashboard.test.tsx(62,3): error TS2739: Type '{ files: Map<any, any>; totalFiles: number; totalLines: number; isIndexing: false; }' is missing the following properties from type 'CodeIndex': meta, contentStore
+components/features/issues/cve-section.test.tsx(16,3): error TS2739: Type '{ files: Map<any, any>; totalFiles: number; totalLines: number; isIndexing: false; }' is missing the following properties from type 'CodeIndex': meta, contentStore
+components/features/preview/__tests__/ai-feature-empty-state.test.tsx(13,15): error TS2741: Property 'onOpenSettings' is missing in type '{ tabId: string; }' but required in type 'AIFeatureEmptyStateProps'.
+components/features/preview/__tests__/ai-feature-empty-state.test.tsx(20,15): error TS2741: Property 'onOpenSettings' is missing in type '{ tabId: string; }' but required in type 'AIFeatureEmptyStateProps'.
+components/features/preview/__tests__/ai-feature-empty-state.test.tsx(29,15): error TS2741: Property 'onOpenSettings' is missing in type '{ tabId: string; }' but required in type 'AIFeatureEmptyStateProps'.
+components/features/preview/__tests__/ai-feature-empty-state.test.tsx(37,15): error TS2741: Property 'onOpenSettings' is missing in type '{ tabId: string; }' but required in type 'AIFeatureEmptyStateProps'.
+components/features/preview/__tests__/ai-feature-empty-state.test.tsx(44,15): error TS2741: Property 'onOpenSettings' is missing in type '{ tabId: string; }' but required in type 'AIFeatureEmptyStateProps'.
+components/features/preview/__tests__/ai-feature-empty-state.test.tsx(55,15): error TS2741: Property 'onOpenSettings' is missing in type '{ tabId: string; }' but required in type 'AIFeatureEmptyStateProps'.
+components/features/preview/__tests__/ai-feature-empty-state.test.tsx(62,15): error TS2741: Property 'onOpenSettings' is missing in type '{ tabId: string; }' but required in type 'AIFeatureEmptyStateProps'.
+components/features/preview/__tests__/ai-feature-empty-state.test.tsx(73,37): error TS2741: Property 'onOpenSettings' is missing in type '{ tabId: string; }' but required in type 'AIFeatureEmptyStateProps'.
+components/features/preview/__tests__/ai-feature-empty-state.test.tsx(89,15): error TS2741: Property 'onOpenSettings' is missing in type '{ tabId: string; }' but required in type 'AIFeatureEmptyStateProps'.
+hooks/use-docs-engine.test.ts(140,66): error TS2345: Argument of type 'boolean' is not assignable to parameter of type 'string[]'.
+hooks/use-docs-engine.test.ts(169,66): error TS2345: Argument of type 'boolean' is not assignable to parameter of type 'string[]'.
+hooks/use-docs-engine.test.ts(292,66): error TS2345: Argument of type 'boolean' is not assignable to parameter of type 'string[]'.
+hooks/use-docs-engine.test.ts(427,66): error TS2345: Argument of type 'boolean' is not assignable to parameter of type 'string[]'.
+hooks/use-docs-engine.test.ts(469,84): error TS2345: Argument of type 'boolean' is not assignable to parameter of type 'string[]'.
+hooks/use-docs-engine.test.ts(510,74): error TS2345: Argument of type 'boolean' is not assignable to parameter of type 'string[]'.
+lib/auth/config.test.ts(24,35): error TS2352: Conversion of type '{ token: JWT; account: Account; profile: never; trigger: "signIn"; }' to type '{ token: JWT; user: User | AdapterUser; account?: Account | null | undefined; profile?: Profile | undefined; trigger?: "signIn" | "signUp" | "update" | undefined; isNewUser?: boolean | undefined; session?: any; }' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+  Property 'user' is missing in type '{ token: JWT; account: Account; profile: never; trigger: "signIn"; }' but required in type '{ token: JWT; user: User | AdapterUser; account?: Account | null | undefined; profile?: Profile | undefined; trigger?: "signIn" | "signUp" | "update" | undefined; isNewUser?: boolean | undefined; session?: any; }'.
+lib/auth/config.test.ts(29,23): error TS2344: Type '((params: { token: JWT; user: User | AdapterUser; account?: Account | null | undefined; profile?: Profile | undefined; trigger?: "signIn" | "signUp" | "update" | undefined; isNewUser?: boolean | undefined; session?: any; }) => Awaitable<...>) | undefined' does not satisfy the constraint '(...args: any) => any'.
+  Type 'undefined' is not assignable to type '(...args: any) => any'.
+lib/auth/config.test.ts(52,23): error TS2344: Type '((params: { token: JWT; user: User | AdapterUser; account?: Account | null | undefined; profile?: Profile | undefined; trigger?: "signIn" | "signUp" | "update" | undefined; isNewUser?: boolean | undefined; session?: any; }) => Awaitable<...>) | undefined' does not satisfy the constraint '(...args: any) => any'.
+  Type 'undefined' is not assignable to type '(...args: any) => any'.
+lib/auth/config.test.ts(67,35): error TS2352: Conversion of type '{ token: JWT; account: Account; profile: never; trigger: "signIn"; }' to type '{ token: JWT; user: User | AdapterUser; account?: Account | null | undefined; profile?: Profile | undefined; trigger?: "signIn" | "signUp" | "update" | undefined; isNewUser?: boolean | undefined; session?: any; }' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+  Property 'user' is missing in type '{ token: JWT; account: Account; profile: never; trigger: "signIn"; }' but required in type '{ token: JWT; user: User | AdapterUser; account?: Account | null | undefined; profile?: Profile | undefined; trigger?: "signIn" | "signUp" | "update" | undefined; isNewUser?: boolean | undefined; session?: any; }'.
+lib/auth/config.test.ts(72,23): error TS2344: Type '((params: { token: JWT; user: User | AdapterUser; account?: Account | null | undefined; profile?: Profile | undefined; trigger?: "signIn" | "signUp" | "update" | undefined; isNewUser?: boolean | undefined; session?: any; }) => Awaitable<...>) | undefined' does not satisfy the constraint '(...args: any) => any'.
+  Type 'undefined' is not assignable to type '(...args: any) => any'.
+lib/auth/config.test.ts(99,23): error TS2344: Type '((params: { session: { user: AdapterUser; } & AdapterSession; user: AdapterUser; } & { session: Session; token: JWT; } & { newSession: any; trigger?: "update" | undefined; }) => Awaitable<...>) | undefined' does not satisfy the constraint '(...args: any) => any'.
+  Type 'undefined' is not assignable to type '(...args: any) => any'.
+lib/auth/config.test.ts(101,21): error TS2339: Property 'user' does not exist on type 'Awaitable<Session | DefaultSession>'.
+  Property 'user' does not exist on type 'PromiseLike<Session | DefaultSession>'.
+lib/auth/config.test.ts(118,23): error TS2344: Type '((params: { session: { user: AdapterUser; } & AdapterSession; user: AdapterUser; } & { session: Session; token: JWT; } & { newSession: any; trigger?: "update" | undefined; }) => Awaitable<...>) | undefined' does not satisfy the constraint '(...args: any) => any'.
+  Type 'undefined' is not assignable to type '(...args: any) => any'.
+lib/auth/config.test.ts(120,21): error TS2339: Property 'user' does not exist on type 'Awaitable<Session | DefaultSession>'.
+  Property 'user' does not exist on type 'PromiseLike<Session | DefaultSession>'.
+lib/auth/config.test.ts(121,21): error TS2339: Property 'user' does not exist on type 'Awaitable<Session | DefaultSession>'.
+  Property 'user' does not exist on type 'PromiseLike<Session | DefaultSession>'.
+lib/auth/config.test.ts(139,23): error TS2344: Type '((params: { session: { user: AdapterUser; } & AdapterSession; user: AdapterUser; } & { session: Session; token: JWT; } & { newSession: any; trigger?: "update" | undefined; }) => Awaitable<...>) | undefined' does not satisfy the constraint '(...args: any) => any'.
+  Type 'undefined' is not assignable to type '(...args: any) => any'.
+lib/auth/config.test.ts(142,21): error TS2339: Property 'user' does not exist on type 'Awaitable<Session | DefaultSession>'.
+  Property 'user' does not exist on type 'PromiseLike<Session | DefaultSession>'.
+lib/code/parser/__tests__/analyzer-async.test.ts(40,3): error TS2739: Type '{ files: Map<string, { path: string; name: string; content: string; language?: string | undefined; lines: string[]; lineCount: number; }>; totalFiles: number; totalLines: number; isIndexing: false; }' is missing the following properties from type 'CodeIndex': meta, contentStore
+lib/code/scanner/__tests__/serialization.test.ts(22,3): error TS2739: Type '{ issues: { id: string; ruleId: string; category: "security"; severity: "critical"; title: string; description: string; file: string; line: number; column: number; snippet: string; }[]; summary: { total: number; ... 5 more ...; byReliability: number; }; ... 9 more ...; issuesPerKloc: number; }' is missing the following properties from type 'ScanResults': isPartialScan, suppressionCount
+lib/code/scanner/__tests__/serialization.test.ts(61,5): error TS2322: Type 'Map<string, { imports: string[]; exports: string[]; symbols: never[]; lines: number; language: string; } | { imports: never[]; exports: string[]; symbols: string[]; lines: number; language: string; }>' is not assignable to type 'Map<string, FileAnalysis>'.
+  Type '{ imports: string[]; exports: string[]; symbols: never[]; lines: number; language: string; } | { imports: never[]; exports: string[]; symbols: string[]; lines: number; language: string; }' is not assignable to type 'FileAnalysis'.
+    Type '{ imports: string[]; exports: string[]; symbols: never[]; lines: number; language: string; }' is missing the following properties from type 'FileAnalysis': path, types, classes, jsxComponents
+lib/code/scanner/__tests__/tree-sitter-scanner.test.ts(120,39): error TS2345: Argument of type 'unknown[]' is not assignable to parameter of type '{ pattern: number; captures: Record<string, Node[]>; }[]'.
+  Type 'unknown' is not assignable to type '{ pattern: number; captures: Record<string, Node[]>; }'.
+lib/code/scanner/__tests__/tree-sitter-scanner.test.ts(183,39): error TS2345: Argument of type 'unknown[]' is not assignable to parameter of type '{ pattern: number; captures: Record<string, Node[]>; }[]'.
+  Type 'unknown' is not assignable to type '{ pattern: number; captures: Record<string, Node[]>; }'.
+lib/code/scanner/__tests__/tree-sitter-scanner.test.ts(225,39): error TS2345: Argument of type 'unknown[]' is not assignable to parameter of type '{ pattern: number; captures: Record<string, Node[]>; }[]'.
+  Type 'unknown' is not assignable to type '{ pattern: number; captures: Record<string, Node[]>; }'.
+lib/code/scanner/__tests__/tree-sitter-scanner.test.ts(260,39): error TS2345: Argument of type 'unknown[]' is not assignable to parameter of type '{ pattern: number; captures: Record<string, Node[]>; }[]'.
+  Type 'unknown' is not assignable to type '{ pattern: number; captures: Record<string, Node[]>; }'.
+lib/code/scanner/__tests__/tree-sitter-scanner.test.ts(283,39): error TS2345: Argument of type 'unknown[]' is not assignable to parameter of type '{ pattern: number; captures: Record<string, Node[]>; }[]'.
+  Type 'unknown' is not assignable to type '{ pattern: number; captures: Record<string, Node[]>; }'.
+lib/code/scanner/cve-lookup.test.ts(24,3): error TS2739: Type '{ files: Map<string, { path: string; name: string; content: string; lines: string[]; lineCount: number; }>; totalFiles: number; totalLines: number; isIndexing: false; }' is missing the following properties from type 'CodeIndex': meta, contentStore
+lib/diagrams/generators/treemap.test.ts(43,11): error TS2739: Type '{ files: Map<any, any>; totalFiles: number; totalLines: number; isIndexing: false; }' is missing the following properties from type 'CodeIndex': meta, contentStore
+lib/export/download.test.ts(24,9): error TS2322: Type 'Mock<Procedure | Constructable>' is not assignable to type '() => void'.
+  Type 'MockInstance<Procedure | Constructable> & (new (...args: any[]) => any) & {}' is not assignable to type '() => void'.
+    Type 'MockInstance<Procedure | Constructable> & (new (...args: any[]) => any) & {}' provides no match for the signature '(): void'.
+lib/export/json-export.test.ts(33,3): error TS2322: Type '{ files: Map<any, any>; totalFiles: number; totalLines: number; isIndexing: boolean; meta?: Map<string, CodeIndexMeta> | undefined; contentStore?: ContentStore | undefined; }' is not assignable to type 'CodeIndex'.
+  Types of property 'meta' are incompatible.
+    Type 'Map<string, CodeIndexMeta> | undefined' is not assignable to type 'Map<string, CodeIndexMeta>'.
+      Type 'undefined' is not assignable to type 'Map<string, CodeIndexMeta>'.
+lib/export/json-export.test.ts(89,3): error TS2322: Type '{ issues: CodeIssue[]; summary: { total: number; critical: number; warning: number; info: number; bySecurity: number; byBadPractice: number; byReliability: number; }; ... 16 more ...; complianceSummary?: { standard: string; coveredCount: number; totalCount: number; coveragePercent: number; }[] | undefined; }' is not assignable to type 'ScanResults'.
+  Types of property 'securityGrade' are incompatible.
+    Type 'HealthGrade | undefined' is not assignable to type 'HealthGrade'.
+      Type 'undefined' is not assignable to type 'HealthGrade'.
+lib/export/markdown-export.test.ts(38,3): error TS2322: Type '{ files: Map<any, any>; totalFiles: number; totalLines: number; isIndexing: boolean; meta?: Map<string, CodeIndexMeta> | undefined; contentStore?: ContentStore | undefined; }' is not assignable to type 'CodeIndex'.
+  Types of property 'meta' are incompatible.
+    Type 'Map<string, CodeIndexMeta> | undefined' is not assignable to type 'Map<string, CodeIndexMeta>'.
+      Type 'undefined' is not assignable to type 'Map<string, CodeIndexMeta>'.
+lib/github/__tests__/indexing-pipeline.test.ts(35,62): error TS2556: A spread argument must either have a tuple type or be passed to a rest parameter.
+lib/github/__tests__/indexing-pipeline.test.ts(43,66): error TS2556: A spread argument must either have a tuple type or be passed to a rest parameter.
+lib/github/__tests__/indexing-pipeline.test.ts(44,75): error TS2556: A spread argument must either have a tuple type or be passed to a rest parameter.
+lib/github/__tests__/indexing-pipeline.test.ts(45,64): error TS2556: A spread argument must either have a tuple type or be passed to a rest parameter.
+lib/github/__tests__/indexing-pipeline.test.ts(47,58): error TS2556: A spread argument must either have a tuple type or be passed to a rest parameter.
+lib/github/__tests__/stream-unzip.test.ts(23,33): error TS2322: Type 'Uint8Array<ArrayBufferLike>' is not assignable to type 'BlobPart'.
+  Type 'Uint8Array<ArrayBufferLike>' is not assignable to type 'ArrayBufferView<ArrayBuffer>'.
+    Types of property 'buffer' are incompatible.
+      Type 'ArrayBufferLike' is not assignable to type 'ArrayBuffer'.
+        Type 'SharedArrayBuffer' is missing the following properties from type 'ArrayBuffer': resizable, resize, detached, transfer, transferToFixedLength
+lib/github/__tests__/stream-unzip.test.ts(258,45): error TS2322: Type 'Uint8Array<ArrayBufferLike>' is not assignable to type 'BlobPart'.
+  Type 'Uint8Array<ArrayBufferLike>' is not assignable to type 'ArrayBufferView<ArrayBuffer>'.
+    Types of property 'buffer' are incompatible.
+      Type 'ArrayBufferLike' is not assignable to type 'ArrayBuffer'.
+        Type 'SharedArrayBuffer' is missing the following properties from type 'ArrayBuffer': resizable, resize, detached, transfer, transferToFixedLength
+providers/__tests__/api-keys-provider-integration.test.tsx(135,45): error TS2345: Argument of type '(call: [string, ...unknown[]]) => string' is not assignable to parameter of type '(value: any[], index: number, array: any[][]) => string'.
+  Types of parameters 'call' and 'value' are incompatible.
+    Type 'any[]' is not assignable to type '[string, ...unknown[]]'.
+      Source provides no match for required element at position 0 in target.
+types/comparison.test.ts(17,11): error TS2739: Type '{ totalFiles: number; totalLines: number; primaryLanguage: string; languageBreakdown: { TypeScript: number; CSS: number; }; stars: number; forks: number; }' is missing the following properties from type 'RepoMetrics': openIssues, pushedAt, license
+types/comparison.test.ts(28,7): error TS2739: Type '{ owner: string; name: string; fullName: string; description: null; defaultBranch: string; stars: number; forks: number; language: string; topics: never[]; isPrivate: false; url: string; }' is missing the following properties from type 'GitHubRepo': openIssuesCount, pushedAt, license

@@ -7,7 +7,7 @@ import { ChevronLeft, ChevronRight, Square, FileCode, ExternalLink } from "lucid
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { cn } from "@/lib/utils"
-import { useRepository } from "@/providers"
+import { useRepositoryData } from "@/providers"
 import { getFileLines } from "@/lib/code/code-index"
 import type { Tour, TourStop } from "@/types/tours"
 
@@ -30,7 +30,7 @@ export function TourPlayback({
   onGoToStop,
   onNavigateToFile,
 }: TourPlaybackProps) {
-  const { codeIndex } = useRepository()
+  const { codeIndex } = useRepositoryData()
   const totalStops = tour.stops.length
   const currentStop = tour.stops[activeStopIndex]
   const isFirst = activeStopIndex === 0

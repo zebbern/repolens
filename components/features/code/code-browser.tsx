@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useMemo, useCallback, useRef } from "react"
 import { Code2 } from "lucide-react"
-import { useRepository, useAPIKeys, useTours, useApp } from "@/providers"
+import { useRepositoryData, useRepositoryActions, useRepositoryProgress, useAPIKeys, useTours, useApp } from "@/providers"
 import type { CodeBrowserProps, SidebarMode, SymbolRange, InlineActionType } from "./types"
 import { useFileOperations } from "./hooks/use-file-operations"
 import { useSearch } from "./hooks/use-search"
@@ -28,7 +28,9 @@ import { TourPlayerBar } from "./tour-player-bar"
 import { TourStopOverlay } from "./tour-stop-overlay"
 
 export function CodeBrowser({ navigateToFile, navigateToLine, onNavigateComplete }: CodeBrowserProps) {
-  const { repo, files, codeIndex, updateCodeIndex, indexingProgress: sharedIndexingProgress, modifiedContents, setModifiedContents, getFileContent, codebaseAnalysis, contentAvailability, contentLoadingStats, loadFileContent } = useRepository()
+  const { repo, files, codeIndex, codebaseAnalysis } = useRepositoryData()
+  const { updateCodeIndex, setModifiedContents, getFileContent, loadFileContent, setSearchState } = useRepositoryActions()
+  const { indexingProgress: sharedIndexingProgress, modifiedContents, contentAvailability, contentLoadingStats, searchState } = useRepositoryProgress()
 
   // Tours
   const {
@@ -92,7 +94,6 @@ export function CodeBrowser({ navigateToFile, navigateToLine, onNavigateComplete
   }, [])
 
   // Search state – persisted at provider level
-  const { searchState, setSearchState } = useRepository()
   const {
     searchQuery, setSearchQuery, debouncedSearchQuery, setDebouncedSearchQuery,
     replaceQuery, setReplaceQuery, showReplace, setShowReplace,

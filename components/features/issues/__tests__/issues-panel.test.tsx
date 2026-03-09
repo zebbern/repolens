@@ -100,6 +100,13 @@ vi.mock('@/providers', () => ({
     getTabCache: () => undefined,
     setTabCache: () => {},
   }),
+  useRepositoryData: () => ({
+    codebaseAnalysis: { files: new Map() },
+  }),
+  useRepositoryActions: () => ({
+    getTabCache: () => undefined,
+    setTabCache: () => {},
+  }),
 }))
 
 vi.mock('@/providers/api-keys-provider', () => ({

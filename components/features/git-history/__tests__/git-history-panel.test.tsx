@@ -12,6 +12,13 @@ vi.mock('@/providers', () => ({
     getTabCache: vi.fn(() => undefined),
     setTabCache: vi.fn(),
   })),
+  useRepositoryData: vi.fn(() => ({
+    repo: { owner: 'test', name: 'repo', defaultBranch: 'main' },
+  })),
+  useRepositoryActions: vi.fn(() => ({
+    getTabCache: vi.fn(() => undefined),
+    setTabCache: vi.fn(),
+  })),
 }))
 
 vi.mock('next-auth/react', () => ({
@@ -33,7 +40,7 @@ vi.mock('@/components/ui/tooltip', () => ({
   TooltipTrigger: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }))
 
-import { useApp, useRepository } from '@/providers'
+import { useApp, useRepository, useRepositoryData, useRepositoryActions } from '@/providers'
 import { GitHistoryPanel } from '../git-history-panel'
 
 // ---------------------------------------------------------------------------
@@ -53,6 +60,13 @@ describe('GitHistoryPanel', () => {
       getTabCache: vi.fn(() => undefined),
       setTabCache: vi.fn(),
     } as unknown as ReturnType<typeof useRepository>)
+    vi.mocked(useRepositoryData).mockReturnValue({
+      repo: { owner: 'test', name: 'repo', defaultBranch: 'main' },
+    } as unknown as ReturnType<typeof useRepositoryData>)
+    vi.mocked(useRepositoryActions).mockReturnValue({
+      getTabCache: vi.fn(() => undefined),
+      setTabCache: vi.fn(),
+    } as unknown as ReturnType<typeof useRepositoryActions>)
   })
 
   it('shows view mode tabs including Timeline', () => {
@@ -64,7 +78,8 @@ describe('GitHistoryPanel', () => {
   })
 
   it('shows "no repo" message when repo is null', () => {
-    vi.mocked(useRepository).mockReturnValue({ repo: null, getTabCache: vi.fn(() => undefined), setTabCache: vi.fn() } as ReturnType<typeof useRepository>)
+    vi.mocked(useRepository).mockReturnValue({ repo: null, getTabCache: vi.fn(() => undefined), setTabCache: vi.fn() } as unknown as ReturnType<typeof useRepository>)
+    vi.mocked(useRepositoryData).mockReturnValue({ repo: null } as unknown as ReturnType<typeof useRepositoryData>)
 
     render(<GitHistoryPanel />)
 

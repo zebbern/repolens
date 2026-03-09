@@ -19,7 +19,7 @@ import {
   Loader2,
 } from 'lucide-react'
 import { toast } from 'sonner'
-import { useRepository } from '@/providers'
+import { useRepositoryData } from '@/providers'
 import type { FullAnalysis } from '@/lib/code/import-parser'
 import { scanInWorker, type ScanResults } from '@/lib/code/issue-scanner'
 import { generateProjectSummary } from '@/lib/diagrams/diagram-data'
@@ -39,7 +39,7 @@ interface ExportMenuProps {
 }
 
 export function ExportMenu({ activeTab }: ExportMenuProps) {
-  const { repo, codeIndex, codebaseAnalysis } = useRepository()
+  const { repo, codeIndex, codebaseAnalysis } = useRepositoryData()
   const [isExporting, setIsExporting] = useState(false)
 
   const hasData = Boolean(repo && codeIndex.totalFiles > 0)

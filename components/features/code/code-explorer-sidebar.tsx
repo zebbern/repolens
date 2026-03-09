@@ -9,7 +9,7 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip'
 import { FileTreeNode, type FileIssueCounts } from './file-tree-node'
-import { useRepository } from '@/providers'
+import { useRepositoryProgress, useRepositoryActions } from '@/providers'
 import type { FileNode } from '@/types/repository'
 import type { CodeIndex } from '@/lib/code/code-index'
 import type { OpenTab } from './types'
@@ -54,7 +54,8 @@ export function CodeExplorerSidebar({
   contentAvailability,
   contentLoadingStats,
 }: CodeExplorerSidebarProps) {
-  const { isPinned, pinFile, unpinFile } = useRepository()
+  const { isPinned } = useRepositoryProgress()
+  const { pinFile, unpinFile } = useRepositoryActions()
 
   const handlePinToggle = (path: string, type: 'file' | 'directory') => {
     if (isPinned(path)) {

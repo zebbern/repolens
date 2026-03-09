@@ -10,7 +10,7 @@ import { compareVersions, isOutdated } from '@/lib/deps/version-checker'
 import type { DependencyHealth, NpmPackageMeta } from '@/lib/deps/types'
 import { cn } from '@/lib/utils'
 import { Package, RefreshCw } from 'lucide-react'
-import { useRepository } from '@/providers'
+import { useRepositoryActions } from '@/providers'
 import { DepsSummary } from './deps-summary'
 import { DepsTable } from './deps-table'
 import { DepsDetailDrawer } from './deps-detail-drawer'
@@ -28,7 +28,7 @@ export function DepsPanel({ codeIndex }: DepsPanelProps) {
   const [depTypes, setDepTypes] = useState<Map<string, 'production' | 'dev'>>(new Map())
   const [cveResults, setCveResults] = useState<CveResult[]>([])
   const [selectedDep, setSelectedDep] = useState<DependencyHealth | null>(null)
-  const { getTabCache, setTabCache } = useRepository()
+  const { getTabCache, setTabCache } = useRepositoryActions()
 
   const loadDependencies = useCallback(async () => {
     setLoadState('loading')

@@ -12,7 +12,7 @@ import { SkillSelector } from "./skill-selector"
 import { TokenUsageFooter } from "./token-usage-footer"
 import { Bot, AlertCircle, Download } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { useAPIKeys, useRepository, useTours, useGitHubToken } from "@/providers"
+import { useAPIKeys, useRepositoryData, useRepositoryActions, useRepositoryProgress, useTours, useGitHubToken } from "@/providers"
 import { toast } from "sonner"
 import { buildFileTreeString } from "@/lib/github/fetcher"
 import { downloadFile } from "@/lib/export"
@@ -31,7 +31,9 @@ import type { Tour } from "@/types/tours"
 
 export function ChatSidebar({ className }: { className?: string }) {
   const { selectedModel, apiKeys, getValidProviders } = useAPIKeys()
-  const { repo, files, codeIndex, pinnedFiles, pinFile, unpinFile, clearPins, getPinnedContents } = useRepository()
+  const { repo, files, codeIndex } = useRepositoryData()
+  const { pinFile, unpinFile, clearPins, getPinnedContents } = useRepositoryActions()
+  const { pinnedFiles } = useRepositoryProgress()
   const { saveTour, startTour } = useTours()
   const { token: githubToken } = useGitHubToken()
   const [input, setInput] = useState("")

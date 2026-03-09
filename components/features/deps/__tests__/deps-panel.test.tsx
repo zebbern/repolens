@@ -60,6 +60,10 @@ vi.mock('@/providers', () => {
       getTabCache,
       setTabCache,
     }),
+    useRepositoryActions: () => ({
+      getTabCache,
+      setTabCache,
+    }),
   }
 })
 

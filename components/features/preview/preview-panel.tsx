@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef, useMemo, lazy, Suspense } from "react"
 import { cn } from "@/lib/utils"
-import { useApp, useRepository, useAPIKeys, useGitHubToken } from "@/providers"
+import { useApp, useRepositoryData, useRepositoryActions, useRepositoryProgress, useAPIKeys, useGitHubToken } from "@/providers"
 import { LoadingProgress } from "@/components/features/loading/loading-progress"
 import { ProjectSummaryPanel } from "@/components/features/repo/project-summary"
 import { flattenFiles } from "@/lib/code/code-index"
@@ -55,11 +55,9 @@ const ToursPanel = lazy(() =>
 
 export function PreviewPanel({ className }: { className?: string }) {
   const { previewUrl, isGenerating: isLoading } = useApp()
-  const {
-    repo, files, isLoading: isConnecting, error: repoError,
-    connectRepository, disconnectRepository, codeIndex,
-    loadingStage, indexingProgress, isCacheHit,
-  } = useRepository()
+  const { repo, files, codeIndex, isCacheHit } = useRepositoryData()
+  const { connectRepository, disconnectRepository } = useRepositoryActions()
+  const { isLoading: isConnecting, error: repoError, loadingStage, indexingProgress } = useRepositoryProgress()
   const { getValidProviders, isHydrated } = useAPIKeys()
   const hasApiKey = isHydrated && getValidProviders().length > 0
   const { isHydrated: isTokenHydrated } = useGitHubToken()

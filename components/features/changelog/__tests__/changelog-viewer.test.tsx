@@ -21,6 +21,11 @@ vi.mock('@/providers', () => ({
     files: [{ path: 'index.ts' }],
     codeIndex: null,
   }),
+  useRepositoryData: () => ({
+    repo: mockRepo,
+    files: [{ path: 'index.ts' }],
+    codeIndex: null,
+  }),
   useChangelog: () => ({
     generatedChangelogs: [],
     activeChangelogId: null,

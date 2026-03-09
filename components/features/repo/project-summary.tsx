@@ -9,7 +9,7 @@ import { cn } from '@/lib/utils'
 import { generateProjectSummary, type ProjectSummary } from '@/lib/diagrams/diagram-data'
 import type { FullAnalysis } from '@/lib/code/import-parser'
 import type { CodeIndex } from '@/lib/code/code-index'
-import { useRepository } from '@/providers'
+import { useRepositoryData } from '@/providers'
 
 // ---------------------------------------------------------------------------
 // Language colors + labels
@@ -382,7 +382,7 @@ interface ProjectSummaryPanelProps {
 }
 
 export function ProjectSummaryPanel({ codeIndex, onNavigateToFile }: ProjectSummaryPanelProps) {
-  const { codebaseAnalysis: analysis } = useRepository()
+  const { codebaseAnalysis: analysis } = useRepositoryData()
 
   const summaryData = useMemo<ProjectSummary | null>(() => {
     if (!analysis) return null

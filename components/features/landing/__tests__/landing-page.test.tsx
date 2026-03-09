@@ -9,6 +9,13 @@ vi.mock('@/providers', () => ({
     indexingProgress: 0,
     isCacheHit: false,
   }),
+  useRepositoryData: () => ({
+    isCacheHit: false,
+  }),
+  useRepositoryProgress: () => ({
+    loadingStage: 'idle',
+    indexingProgress: 0,
+  }),
 }))
 
 vi.mock('@/components/features/loading/loading-progress', () => ({

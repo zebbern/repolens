@@ -15,7 +15,7 @@ import {
   type AvailableDiagram,
 } from '@/lib/diagrams/diagram-data'
 import type { CodeIndex } from '@/lib/code/code-index'
-import { useRepository } from '@/providers'
+import { useRepositoryData } from '@/providers'
 import { Network, Loader2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { FileNode } from '@/types/repository'
@@ -48,7 +48,7 @@ interface DiagramViewerProps {
 
 export function DiagramViewer({ files, codeIndex, className, onNavigateToFile }: DiagramViewerProps) {
   const [viewMode, setViewMode] = useState<DiagramViewMode>('overview')
-  const { codebaseAnalysis: analysis } = useRepository()
+  const { codebaseAnalysis: analysis } = useRepositoryData()
   const mermaidRef = useRef<MermaidDiagramHandle>(null)
   const treemapRef = useRef<SVGSVGElement>(null)
   const [isPending, startTransition] = useTransition()

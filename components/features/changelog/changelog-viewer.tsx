@@ -13,7 +13,7 @@ import {
   AlertDialogTitle, AlertDialogTrigger,
 } from '@/components/ui/alert-dialog'
 import { useIsMobile } from '@/hooks/use-mobile'
-import { useAPIKeys, useRepository, useChangelog } from '@/providers'
+import { useAPIKeys, useRepositoryData, useChangelog } from '@/providers'
 import { downloadFile } from '@/lib/export'
 import {
   CHANGELOG_PRESETS,
@@ -39,7 +39,7 @@ interface ChangelogViewerProps {
 
 export function ChangelogViewer({ className }: ChangelogViewerProps) {
   const { selectedModel, getValidProviders } = useAPIKeys()
-  const { repo } = useRepository()
+  const { repo } = useRepositoryData()
   const { activeChangelogId, setActiveChangelogId, showNewChangelog, setShowNewChangelog } = useChangelog()
   const {
     generatedChangelogs, messages, status, error,

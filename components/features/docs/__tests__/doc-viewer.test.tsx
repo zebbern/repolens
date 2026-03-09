@@ -7,6 +7,7 @@ import userEvent from '@testing-library/user-event'
 vi.mock('@/providers', () => ({
   useAPIKeys: vi.fn(),
   useRepository: vi.fn(),
+  useRepositoryData: vi.fn(),
   useDocs: vi.fn(),
 }))
 
@@ -48,7 +49,7 @@ vi.mock('@/components/ui/markdown-renderer', () => ({
 
 // ---------- Imports ----------
 
-import { useAPIKeys, useRepository, useDocs } from '@/providers'
+import { useAPIKeys, useRepository, useRepositoryData, useDocs } from '@/providers'
 import { useDocsEngine } from '@/hooks/use-docs-engine'
 import { useIsMobile } from '@/hooks/use-mobile'
 import { flattenFiles } from '@/lib/code/code-index'
@@ -192,6 +193,12 @@ function setupMocks(overrides: SetupOptions = {}) {
     ...(overrides.repo !== undefined ? { repo: overrides.repo } : {}),
     ...(overrides.files ? { files: overrides.files } : {}),
   } as unknown as ReturnType<typeof useRepository>)
+
+  vi.mocked(useRepositoryData).mockReturnValue({
+    ...defaultRepoValue,
+    ...(overrides.repo !== undefined ? { repo: overrides.repo } : {}),
+    ...(overrides.files ? { files: overrides.files } : {}),
+  } as unknown as ReturnType<typeof useRepositoryData>)
 
   vi.mocked(useDocs).mockReturnValue({
     ...defaultDocsValue,

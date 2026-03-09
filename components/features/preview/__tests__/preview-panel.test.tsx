@@ -32,6 +32,18 @@ const mockUseAPIKeys = vi.fn(() => ({
 vi.mock('@/providers', () => ({
   useApp: () => mockUseApp(),
   useRepository: () => mockUseRepository(),
+  useRepositoryData: () => {
+    const r = mockUseRepository()
+    return { repo: r.repo, files: r.files, codeIndex: r.codeIndex, isCacheHit: r.isCacheHit, parsedFiles: [], codebaseAnalysis: null, failedFiles: [] }
+  },
+  useRepositoryActions: () => {
+    const r = mockUseRepository()
+    return { connectRepository: r.connectRepository, disconnectRepository: r.disconnectRepository }
+  },
+  useRepositoryProgress: () => {
+    const r = mockUseRepository()
+    return { isLoading: r.isLoading, error: r.error, loadingStage: r.loadingStage, indexingProgress: r.indexingProgress }
+  },
   useAPIKeys: () => mockUseAPIKeys(),
   useGitHubToken: () => ({ isHydrated: true }),
 }))

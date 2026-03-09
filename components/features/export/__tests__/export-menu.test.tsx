@@ -15,6 +15,17 @@ vi.mock('@/providers', () => ({
     },
     codebaseAnalysis: { files: new Map() },
   }),
+  useRepositoryData: () => ({
+    repo: {
+      fullName: 'owner/repo',
+      url: 'https://github.com/owner/repo',
+    },
+    codeIndex: {
+      totalFiles: 10,
+      files: new Map(),
+    },
+    codebaseAnalysis: { files: new Map() },
+  }),
 }))
 
 vi.mock('@/lib/code/issue-scanner', () => ({

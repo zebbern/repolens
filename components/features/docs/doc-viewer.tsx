@@ -17,7 +17,7 @@ import {
 import { Sheet, SheetContent, SheetTrigger, SheetHeader, SheetTitle } from '@/components/ui/sheet'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { useIsMobile } from '@/hooks/use-mobile'
-import { useAPIKeys, useRepository, useDocs } from '@/providers'
+import { useAPIKeys, useRepositoryData, useDocs } from '@/providers'
 import type { UIMessage } from 'ai'
 import { isToolUIPart, getToolName } from 'ai'
 import { flattenFiles } from '@/lib/code/code-index'
@@ -60,7 +60,7 @@ interface DocViewerProps {
 
 export function DocViewer({ className }: DocViewerProps) {
   const { selectedModel, getValidProviders } = useAPIKeys()
-  const { repo, files } = useRepository()
+  const { repo, files } = useRepositoryData()
   const { activeDocId, setActiveDocId, showNewDoc, setShowNewDoc, generatedDocs } = useDocs()
   const {
     messages,

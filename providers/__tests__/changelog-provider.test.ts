@@ -39,6 +39,11 @@ vi.mock('@/providers', () => ({
     files: [{ path: 'index.ts' }],
     codeIndex: null,
   }),
+  useRepositoryData: () => ({
+    repo: { fullName: 'owner/repo', description: 'A repo' },
+    files: [{ path: 'index.ts' }],
+    codeIndex: null,
+  }),
 }))
 
 vi.mock('@/lib/github/fetcher', () => ({

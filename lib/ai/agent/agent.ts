@@ -1,7 +1,6 @@
 import { ToolLoopAgent } from 'ai'
-import { codeTools } from '@/lib/ai/tool-definitions'
 import { createAIModel } from '@/lib/ai/providers'
-import { discoverSkillsTool, loadSkillTool } from '@/lib/ai/skills'
+import { agentTools } from './agent-tools'
 import { callOptionsSchema, type CallOptions } from './options'
 import { buildPrepareCall } from './prepare-call'
 import { buildPrepareStep } from './prepare-step'
@@ -10,19 +9,15 @@ import { buildPrepareStep } from './prepare-step'
  * The main RepoLens agent. Handles chat, docs, and changelog modes
  * through a single `ToolLoopAgent` with mode-based `prepareCall` dispatch.
  */
-export const repoLensAgent = new ToolLoopAgent<CallOptions>({
+export const repoLensAgent = new ToolLoopAgent<CallOptions, typeof agentTools>({
   callOptionsSchema,
-  tools: {
-    ...codeTools,
-    discoverSkills: discoverSkillsTool,
-    loadSkill: loadSkillTool,
-  },
+  tools: agentTools,
   // Required constructor parameter — always overridden by prepareCall per request
   model: createAIModel('openai', 'gpt-4o', 'placeholder'),
   prepareCall: buildPrepareCall(),
-  // Cast needed: prepareStep returns string[] activeTools but ToolLoopAgent
-  // generic infers tool keys from the tools object. The names are validated
-  // at runtime by the agent framework.
+  // SDK limitation: NoInfer<TOOLS> on PrepareStepFunction prevents type resolution.
+  // CORE_TOOLS and SKILL_TOOLS in prepare-step.ts are typed as AgentToolName[]
+  // for compile-time safety on tool names.
   prepareStep: buildPrepareStep() as never,
   experimental_repairToolCall: async ({ toolCall, error }) => {
     console.warn(

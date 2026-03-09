@@ -13,7 +13,7 @@ import {
 import { useChat } from '@ai-sdk/react'
 import { DefaultChatTransport, lastAssistantMessageIsCompleteWithToolCalls } from 'ai'
 import type { UIMessage } from 'ai'
-import { useAPIKeys, useRepository } from '@/providers'
+import { useAPIKeys, useRepositoryData } from '@/providers'
 import { buildFileTreeString } from '@/lib/github/fetcher'
 import { buildStructuralIndex } from '@/lib/ai/structural-index'
 import { getMaxIndexBytesForModel } from '@/lib/ai/providers'
@@ -69,7 +69,7 @@ const DocsChatContext = createContext<DocsChatContextType | null>(null)
 
 export function DocsProvider({ children }: { children: ReactNode }) {
   const { selectedModel, apiKeys, getValidProviders } = useAPIKeys()
-  const { repo, files, codeIndex } = useRepository()
+  const { repo, files, codeIndex } = useRepositoryData()
 
   const hasValidKey = getValidProviders().length > 0 && selectedModel
 

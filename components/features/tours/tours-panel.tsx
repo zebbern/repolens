@@ -4,7 +4,7 @@ import { useEffect, useState, useCallback } from "react"
 import { Map, Plus, Route } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
-import { useTours, useRepository, useAPIKeys } from "@/providers"
+import { useTours, useRepositoryData, useAPIKeys } from "@/providers"
 import { executeToolLocally } from "@/lib/ai/client-tool-executor"
 import type { Tour } from "@/types/tours"
 import { TourList } from "./tour-list"
@@ -31,7 +31,7 @@ export function ToursPanel({ className, onNavigateToFile }: ToursPanelProps) {
     nextStop,
     prevStop,
   } = useTours()
-  const { repo, codeIndex } = useRepository()
+  const { repo, codeIndex } = useRepositoryData()
   const { getValidProviders, isHydrated } = useAPIKeys()
 
   const [showGenerateDialog, setShowGenerateDialog] = useState(false)

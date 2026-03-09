@@ -1,5 +1,6 @@
 import { pruneMessages, type ModelMessage } from 'ai'
 import { createContextCompactor } from '@/lib/ai/context-compactor'
+import type { AgentToolName } from './agent-tools'
 import type { CompactionContext } from './prepare-call'
 
 /**
@@ -39,21 +40,21 @@ type PrepareStepParams = {
 
 type PrepareStepResult = {
   messages?: ModelMessage[]
-  activeTools?: string[]
+  activeTools?: AgentToolName[]
 } | undefined
 
 /**
  * Core tools always available to the agent regardless of loaded skills.
  */
-const CORE_TOOLS = [
+const CORE_TOOLS: readonly AgentToolName[] = [
   'readFile', 'readFiles', 'searchFiles', 'listDirectory',
   'findSymbol', 'getFileStats', 'loadSkill', 'discoverSkills',
-] as const
+]
 
 /**
  * Tools unlocked when specific skills are loaded.
  */
-const SKILL_TOOLS: Record<string, string[]> = {
+const SKILL_TOOLS: Record<string, AgentToolName[]> = {
   'security-audit': ['scanIssues'],
   'architecture-analysis': ['analyzeImports', 'generateDiagram', 'getProjectOverview'],
   'tour-creation': ['generateTour'],
@@ -90,7 +91,7 @@ function extractLoadedSkillIds(messages: ModelMessage[]): string[] {
  * Core tools are always available. Skill-specific tools are unlocked
  * when the corresponding skill has been loaded via `loadSkill`.
  */
-function getActiveTools(messages: ModelMessage[]): string[] {
+function getActiveTools(messages: ModelMessage[]): AgentToolName[] {
   const loadedSkills = extractLoadedSkillIds(messages)
   const skillTools = loadedSkills.flatMap(id => SKILL_TOOLS[id] ?? [])
   return [...CORE_TOOLS, ...skillTools]

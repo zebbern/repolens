@@ -6,7 +6,7 @@ import { ThemeProvider } from "next-themes"
 import { AppProvider, useApp } from "./app-provider"
 import { APIKeysProvider, useAPIKeys } from "./api-keys-provider"
 import { GitHubTokenProvider, useGitHubToken } from "./github-token-provider"
-import { RepositoryProvider, useRepository, type LoadingStage } from "./repository-provider"
+import { RepositoryProvider, useRepository, useRepositoryData, useRepositoryActions, useRepositoryProgress, type LoadingStage, type RepositoryDataContextType, type RepositoryActionsContextType, type RepositoryProgressContextType } from "./repository-provider"
 import { DocsProvider, useDocs, useDocsChat } from "./docs-provider"
 import { ChangelogProvider, useChangelog, useChangelogChat } from "./changelog-provider"
 import { ToursProvider, useTours } from "./tours-provider"
@@ -39,6 +39,6 @@ export function Providers({ children }: ProvidersProps) {
   )
 }
 
-export { useApp, useAPIKeys, useGitHubToken, useRepository, useDocs, useDocsChat, useChangelog, useChangelogChat, useTours }
-export type { LoadingStage }
+export { useApp, useAPIKeys, useGitHubToken, useRepository, useRepositoryData, useRepositoryActions, useRepositoryProgress, useDocs, useDocsChat, useChangelog, useChangelogChat, useTours }
+export type { LoadingStage, RepositoryDataContextType, RepositoryActionsContextType, RepositoryProgressContextType }
 export type { PinnedFile, PinnedContentsResult } from '@/types/types'

@@ -3,7 +3,7 @@
 import { useEffect, useCallback, useState } from "react"
 import { GitCommitHorizontal, History, FileText, AlertCircle, X, RefreshCw, Loader2, Info, Lock, BarChart3 } from "lucide-react"
 import { useSession } from "next-auth/react"
-import { useApp, useRepository } from "@/providers"
+import { useApp, useRepositoryData, useRepositoryActions } from "@/providers"
 import { useGitHistory, type GitHistoryView } from "@/hooks/use-git-history"
 import { fetchFileViaProxy } from "@/lib/github/client"
 import { Button } from "@/components/ui/button"
@@ -41,7 +41,8 @@ const VIEW_TABS: Array<{ id: GitHistoryView; label: string; icon: typeof History
 
 export function GitHistoryPanel({ navigateToFile }: GitHistoryPanelProps) {
   const { selectedFilePath } = useApp()
-  const { repo, getTabCache, setTabCache } = useRepository()
+  const { repo } = useRepositoryData()
+  const { getTabCache, setTabCache } = useRepositoryActions()
   const { data: session } = useSession()
 
   const {

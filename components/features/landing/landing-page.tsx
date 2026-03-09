@@ -4,7 +4,7 @@ import { useEffect, useRef } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Github, Loader2, ArrowRight } from "lucide-react"
-import { useRepository } from "@/providers"
+import { useRepositoryData, useRepositoryProgress } from "@/providers"
 import { LoadingProgress } from "@/components/features/loading/loading-progress"
 import { RecentRepos } from "@/components/features/landing/recent-repos"
 
@@ -33,7 +33,8 @@ export function LandingPage({
   error,
 }: LandingPageProps) {
   const inputRef = useRef<HTMLInputElement>(null)
-  const { loadingStage, indexingProgress, isCacheHit } = useRepository()
+  const { loadingStage, indexingProgress } = useRepositoryProgress()
+  const { isCacheHit } = useRepositoryData()
 
   useEffect(() => {
     const timer = setTimeout(() => inputRef.current?.focus(), 100)

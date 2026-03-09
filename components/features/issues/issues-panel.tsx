@@ -12,7 +12,7 @@ import {
   type ValidationResult,
 } from '@/lib/code/issue-scanner'
 import { getFileContent } from '@/lib/code/code-index'
-import { useRepository } from '@/providers'
+import { useRepositoryData, useRepositoryActions } from '@/providers'
 import { useAPIKeys } from '@/providers/api-keys-provider'
 import { useBatchOperations } from '@/hooks/use-batch-operations'
 import { cn } from '@/lib/utils'
@@ -51,7 +51,8 @@ export function IssuesPanel({ codeIndex, onNavigateToFile }: IssuesPanelProps) {
   const validatingIssuesRef = useRef(validatingIssues)
   validatingIssuesRef.current = validatingIssues
 
-  const { codebaseAnalysis: analysis, getTabCache, setTabCache } = useRepository()
+  const { codebaseAnalysis: analysis } = useRepositoryData()
+  const { getTabCache, setTabCache } = useRepositoryActions()
   const { selectedProvider, selectedModel, apiKeys } = useAPIKeys()
 
   const [results, setResults] = useState<ScanResults | null>(null)

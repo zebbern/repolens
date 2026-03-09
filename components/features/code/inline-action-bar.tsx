@@ -54,7 +54,7 @@ export function InlineActionBar({
         className={cn(
           "absolute right-2 top-1/2 -translate-y-1/2 z-20",
           "flex items-center gap-0.5",
-          "rounded-lg border border-foreground/[0.08] bg-surface-elevated shadow-md",
+          "rounded-lg border border-foreground/8 bg-surface-elevated shadow-md",
           "px-1 py-0.5",
           "animate-in fade-in slide-in-from-bottom-1 duration-150",
         )}
@@ -72,7 +72,7 @@ export function InlineActionBar({
                 <Button
                   variant="ghost"
                   size="icon"
-                  className="h-7 w-7 text-text-secondary hover:text-text-primary hover:bg-foreground/[0.06]"
+                  className="h-7 w-7 text-text-secondary hover:text-text-primary hover:bg-foreground/6"
                   disabled={isDisabled}
                   aria-label={label}
                   onClick={() => handleAction(type)}

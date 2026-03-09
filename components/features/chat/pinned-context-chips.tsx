@@ -91,7 +91,7 @@ export function PinnedContextChips({
                   className={cn(
                     "group flex shrink-0 items-center gap-1 rounded-md border px-2 py-1 text-xs transition-colors",
                     "border-accent-primary/20 bg-accent-primary/10 text-text-secondary",
-                    "hover:bg-accent-primary/20 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent-primary",
+                    "hover:bg-accent-primary/20 focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-accent-primary",
                   )}
                   onKeyDown={(e) => handleChipKeyDown(e, path, index)}
                   aria-label={`Pinned ${pin.type}: ${path}. Press Delete to unpin.`}

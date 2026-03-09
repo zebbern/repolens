@@ -201,7 +201,7 @@ export function IssuesPanel({ codeIndex, onNavigateToFile }: IssuesPanelProps) {
     return (
       <div className="flex items-center justify-center h-full">
         <div className="flex flex-col items-center gap-4 text-text-muted animate-in fade-in duration-300">
-          <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-foreground/[0.04] border border-foreground/[0.06]">
+          <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-foreground/4 border border-foreground/6">
             <Shield className="h-6 w-6 text-text-secondary" />
           </div>
           <p className="text-sm font-medium text-text-secondary">No repository loaded</p>
@@ -252,7 +252,7 @@ export function IssuesPanel({ codeIndex, onNavigateToFile }: IssuesPanelProps) {
         <ComplianceDashboard codeIndex={codeIndex} scanResults={results} />
       ) : (
       <>
-        <div className="px-4 py-3 border-b border-foreground/[0.06]">
+        <div className="px-4 py-3 border-b border-foreground/6">
           <IssueSummary
             results={results}
             hasValidApiKey={hasValidApiKey}

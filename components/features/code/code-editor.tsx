@@ -349,12 +349,12 @@ const CodeEditor = React.forwardRef<HTMLDivElement, CodeEditorProps>(
                       hoveredSymbolRange &&
                         lineNum >= hoveredSymbolRange.startLine &&
                         lineNum <= hoveredSymbolRange.endLine &&
-                        "bg-foreground/[0.03]",
+                        "bg-foreground/3",
                     )}
                   >
                     {/* Line Number + Gutter indicators */}
                     <td className={cn(
-                      "sticky left-0 text-text-muted text-right px-3 select-none border-r border-foreground/[0.06] align-top w-[1%]",
+                      "sticky left-0 text-text-muted text-right px-3 select-none border-r border-foreground/6 align-top w-[1%]",
                       isHighlighted ? "bg-code-selection" : "bg-background"
                     )}>
                       <span className="relative inline-flex items-center">

@@ -186,7 +186,7 @@ export function ChangelogViewer({ className }: ChangelogViewerProps) {
     return (
       <div className={cn('flex items-center justify-center h-full', className)}>
         <div className="flex flex-col items-center gap-4 text-text-muted animate-in fade-in duration-300">
-          <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-foreground/[0.04] border border-foreground/[0.06]">
+          <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-foreground/4 border border-foreground/6">
             <History className="h-6 w-6 text-text-secondary" />
           </div>
           <div className="flex flex-col items-center gap-1">
@@ -229,7 +229,7 @@ export function ChangelogViewer({ className }: ChangelogViewerProps) {
 
   const sidebarContent = (
     <>
-      <div className="flex items-center justify-between px-3 h-10 border-b border-foreground/[0.06] shrink-0">
+      <div className="flex items-center justify-between px-3 h-10 border-b border-foreground/6 shrink-0">
         <span className="text-xs font-medium text-text-secondary">Generated Changelogs</span>
         <Button variant="ghost" size="sm" className="h-6 gap-1 text-text-muted hover:text-text-primary px-1.5" onClick={handleNewClick} disabled={isGenerating} title="New changelog">
           <Plus className="h-3.5 w-3.5" /><span className="text-[10px]">New</span>
@@ -279,7 +279,7 @@ export function ChangelogViewer({ className }: ChangelogViewerProps) {
 
   return (
     <div className={cn('flex h-full', className)}>
-      {!isMobile && <div className="w-56 border-r border-foreground/[0.06] flex flex-col shrink-0">{sidebarContent}</div>}
+      {!isMobile && <div className="w-56 border-r border-foreground/6 flex flex-col shrink-0">{sidebarContent}</div>}
       <div className="flex-1 flex flex-col min-w-0">
         {showNewChangelog || !activeChangelog ? (
           <NewChangelogView
@@ -299,11 +299,11 @@ export function ChangelogViewer({ className }: ChangelogViewerProps) {
         ) : (
           <div ref={contentRef} className="flex-1 overflow-y-auto p-6">
             <div className="max-w-3xl">
-              <div className="flex items-center gap-2 mb-4 pb-3 border-b border-foreground/[0.06]">
+              <div className="flex items-center gap-2 mb-4 pb-3 border-b border-foreground/6">
                 {getPresetIcon(activeChangelog.type)}
                 <h1 className="text-lg font-semibold text-text-primary flex-1">{activeChangelog.title}</h1>
                 {activeChangelog.fromRef && activeChangelog.toRef && (
-                  <code className="text-[10px] text-text-muted bg-foreground/[0.04] px-1.5 py-0.5 rounded">{activeChangelog.fromRef}...{activeChangelog.toRef}</code>
+                  <code className="text-[10px] text-text-muted bg-foreground/4 px-1.5 py-0.5 rounded">{activeChangelog.fromRef}...{activeChangelog.toRef}</code>
                 )}
                 <Button variant="ghost" size="icon" className="h-8 w-8 text-text-muted hover:text-text-primary shrink-0"
                   title="Regenerate" aria-label="Regenerate this changelog" onClick={() => onRegenerate(activeChangelog)} disabled={isGenerating}>

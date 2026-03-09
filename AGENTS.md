@@ -11,7 +11,7 @@
 | Framework | Next.js (App Router) | 15.2.6 |
 | Language | TypeScript | ^5 |
 | UI Library | React | ^19 |
-| Styling | Tailwind CSS | ^3.4.17 |
+| Styling | Tailwind CSS | ^4.2.1 |
 | Component Library | shadcn/ui + Radix UI | Multiple primitives |
 | AI SDK | Vercel AI SDK (`ai`) | ^6.0.108 |
 | AI Providers | `@ai-sdk/openai`, `@ai-sdk/anthropic`, `@ai-sdk/google` | ^3.x |
@@ -21,8 +21,8 @@
 | Syntax Highlighting | Shiki | ^4.0.1 |
 | Markdown | react-markdown | ^10.1.0 |
 | Markdown plugins | remark-gfm, rehype-raw | ^4.0.1 / ^7.0.0 |
-| Forms | react-hook-form + zod | ^7.60 / 3.25.x |
-| Charts | Recharts | 2.15.4 |
+| Forms | react-hook-form + zod | ^7.60 / ^4.0 |
+| Charts | Recharts | ^3.8.0 |
 | Icons | lucide-react | ^0.454.0 |
 | Archive Handling | fflate | ^0.8.2 |
 | Package Manager | pnpm | — |
@@ -225,7 +225,6 @@ workproject/                    # Next.js application root
 │   └── app.spec.ts             # Playwright E2E tests
 ├── middleware.ts                # URL rewriting (owner/repo → /?repo=...) + security headers
 ├── next.config.mjs             # Next.js config (CSP, image optimization, package imports)
-├── tailwind.config.ts           # Tailwind config (custom colors, shadcn/ui theme)
 ├── tsconfig.json                # TypeScript config (strict, path alias @/*)
 ├── vitest.config.ts             # Vitest config (jsdom, path alias, coverage)
 └── playwright.config.ts         # Playwright config (chromium, localhost:3000)
@@ -440,5 +439,5 @@ The GitHub REST API does not support blame. `lib/github/graphql.ts` provides a l
 ### CSS Theming
 
 - Add new color tokens as CSS custom properties in `globals.css` (both light and dark variants).
-- Reference them in `tailwind.config.ts` with the `hsl(var(--token))` pattern.
+- Register them in the `@theme` block in `globals.css` with the `--color-token: hsl(var(--token))` pattern.
 - Use semantic names (e.g., `--status-error`, `--interactive-hover`), not color values.

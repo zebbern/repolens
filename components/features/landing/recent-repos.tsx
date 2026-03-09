@@ -64,9 +64,9 @@ export function RecentRepos({ onConnectWithUrl }: RecentReposProps) {
             type="button"
             onClick={() => handleClick(repo.owner, repo.repo)}
             className={cn(
-              "group relative flex flex-col gap-1.5 rounded-lg border border-foreground/[0.08] bg-foreground/[0.03] p-3 text-left transition-all",
-              "hover:border-foreground/15 hover:bg-foreground/[0.06]",
-              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50",
+              "group relative flex flex-col gap-1.5 rounded-lg border border-foreground/8 bg-foreground/3 p-3 text-left transition-all",
+              "hover:border-foreground/15 hover:bg-foreground/6",
+              "focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary/50",
             )}
           >
             {/* Remove button */}

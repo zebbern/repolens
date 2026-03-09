@@ -95,7 +95,7 @@ export function CodeExplorerSidebar({
             <span>Loaded {contentLoadingStats.completed} / {contentLoadingStats.total} files</span>
             <span>{Math.round((contentLoadingStats.completed / contentLoadingStats.total) * 100)}%</span>
           </div>
-          <div className="h-1 w-full bg-foreground/[0.06] rounded-full overflow-hidden">
+          <div className="h-1 w-full bg-foreground/6 rounded-full overflow-hidden">
             <div
               className="h-full bg-blue-500/60 rounded-full transition-all duration-300"
               style={{ width: `${(contentLoadingStats.completed / contentLoadingStats.total) * 100}%` }}
@@ -127,7 +127,7 @@ export function CodeExplorerSidebar({
 
       {/* Modified Files Section */}
       {modifiedTabs.length > 0 && (
-        <div className="border-t border-foreground/[0.06] p-2">
+        <div className="border-t border-foreground/6 p-2">
           <div className="flex items-center justify-between mb-2">
             <span className="text-xs font-medium text-text-muted uppercase">
               Modified ({modifiedTabs.length})

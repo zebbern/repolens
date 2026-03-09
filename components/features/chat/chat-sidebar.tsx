@@ -214,7 +214,7 @@ export function ChatSidebar({ className }: { className?: string }) {
   return (
     <aside className={cn("flex h-full flex-col overflow-hidden rounded-lg bg-card", className)}>
       {/* Header */}
-      <div className="flex h-11 items-center justify-between border-b border-foreground/[0.06] px-4">
+      <div className="flex h-11 items-center justify-between border-b border-foreground/6 px-4">
         <span className="text-sm font-medium text-text-primary">Chat</span>
         <div className="flex items-center gap-1">
           {messages.length > 0 && (
@@ -265,7 +265,7 @@ export function ChatSidebar({ className }: { className?: string }) {
       <div className="flex-1 space-y-4 overflow-y-auto p-4 text-sm">
         {messages.length === 0 && hasValidKey && (
           <div className="flex flex-col items-center justify-center h-full text-center animate-in fade-in duration-300">
-            <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-foreground/[0.04] border border-foreground/[0.06] mb-4">
+            <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-foreground/4 border border-foreground/6 mb-4">
               <Bot className="h-6 w-6 text-text-secondary" />
             </div>
             <p className="text-sm font-medium text-text-secondary">

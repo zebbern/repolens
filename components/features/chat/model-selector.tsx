@@ -106,7 +106,7 @@ export function ModelSelector({ className, onOpenSettings }: ModelSelectorProps)
                   >
                     <div className="flex items-center justify-between w-full">
                       <span className="truncate">{model.name}</span>
-                      {selectedModel?.id === model.id && <Check className="h-4 w-4 ml-2 flex-shrink-0" />}
+                      {selectedModel?.id === model.id && <Check className="h-4 w-4 ml-2 shrink-0" />}
                     </div>
                   </DropdownMenuItem>
                 ))}

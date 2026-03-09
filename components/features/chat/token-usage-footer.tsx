@@ -96,7 +96,7 @@ export function TokenUsageFooter({ inputTokens, outputTokens, model }: TokenUsag
       </div>
       <Progress
         value={contextUtilization}
-        className="h-1 bg-foreground/[0.06]"
+        className="h-1 bg-foreground/6"
         indicatorClassName={progressColor}
       />
     </div>

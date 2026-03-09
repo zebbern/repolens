@@ -72,7 +72,7 @@ describe('GitHubTokenInput', () => {
     }
   })
 
-  it('calls setToken when input is committed via blur', async () => {
+  it('calls setToken when input is committed via blur-sm', async () => {
     const user = userEvent.setup()
     render(<GitHubTokenInput />)
 

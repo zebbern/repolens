@@ -207,7 +207,7 @@ export function DiagramViewer({ files, codeIndex, className, onNavigateToFile }:
     return (
       <div className={cn('flex h-full items-center justify-center', className)}>
         <div className="flex flex-col items-center gap-4 text-text-muted animate-in fade-in duration-300">
-          <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-foreground/[0.04] border border-foreground/[0.06]">
+          <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-foreground/4 border border-foreground/6">
             <Network className="h-6 w-6 text-text-secondary" />
           </div>
           <div className="flex flex-col items-center gap-1">
@@ -241,7 +241,7 @@ export function DiagramViewer({ files, codeIndex, className, onNavigateToFile }:
 
       {/* Title bar */}
       {activeDiagram && (
-        <div className="px-4 py-1.5 border-b border-foreground/[0.06] bg-background">
+        <div className="px-4 py-1.5 border-b border-foreground/6 bg-background">
           <h3 className="text-xs font-medium text-text-secondary">{activeDiagram.title}</h3>
         </div>
       )}

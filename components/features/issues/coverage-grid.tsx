@@ -45,8 +45,8 @@ const STATUS_CONFIG: Record<ComplianceStatus, {
   'no-coverage': {
     label: 'No Coverage',
     color: 'text-text-muted',
-    bgColor: 'bg-foreground/[0.04]',
-    borderColor: 'border-foreground/[0.06]',
+    bgColor: 'bg-foreground/4',
+    borderColor: 'border-foreground/6',
     icon: Circle,
   },
 }
@@ -79,9 +79,9 @@ export function CoverageGrid({ title, categories }: CoverageGridProps) {
   )
 
   return (
-    <div className="rounded-md border border-foreground/[0.06]">
+    <div className="rounded-md border border-foreground/6">
       {/* Grid Header */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-foreground/[0.06]">
+      <div className="flex items-center justify-between px-4 py-3 border-b border-foreground/6">
         <h3 className="text-sm font-semibold text-text-primary">{title}</h3>
         <div className="flex items-center gap-1.5">
           {(['pass', 'warn', 'fail', 'no-coverage'] as const).map((s) => {
@@ -104,7 +104,7 @@ export function CoverageGrid({ title, categories }: CoverageGridProps) {
       </div>
 
       {/* Grid Items */}
-      <div className="divide-y divide-foreground/[0.04]">
+      <div className="divide-y divide-foreground/4">
         {entries.map(([id, cat]) => {
           const cfg = STATUS_CONFIG[cat.status]
           const StatusIcon = cfg.icon
@@ -115,7 +115,7 @@ export function CoverageGrid({ title, categories }: CoverageGridProps) {
               <button
                 onClick={() => toggle(id)}
                 aria-expanded={isExpanded}
-                className="w-full flex items-center gap-2.5 px-4 py-2.5 hover:bg-foreground/[0.02] transition-colors text-left"
+                className="w-full flex items-center gap-2.5 px-4 py-2.5 hover:bg-foreground/2 transition-colors text-left"
               >
                 {isExpanded
                   ? <ChevronDown className="h-3 w-3 text-text-muted shrink-0" />

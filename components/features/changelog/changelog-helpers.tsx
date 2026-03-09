@@ -107,7 +107,7 @@ export function ChangelogToolActivity({ messages }: { messages: UIMessage[] }) {
             </span>
           )}
           {visibleFiles.map((t, i) => (
-            <span key={i} className="text-[10px] font-mono text-text-muted px-1.5 py-0.5 rounded bg-foreground/[0.03] border border-foreground/[0.06]">
+            <span key={i} className="text-[10px] font-mono text-text-muted px-1.5 py-0.5 rounded bg-foreground/3 border border-foreground/6">
               {t.path?.split('/').slice(-2).join('/') || t.path}
             </span>
           ))}
@@ -115,7 +115,7 @@ export function ChangelogToolActivity({ messages }: { messages: UIMessage[] }) {
             <button
               onClick={() => setIsExpanded(prev => !prev)}
               aria-expanded={isExpanded}
-              className="text-[10px] text-text-muted hover:text-text-secondary px-2 py-0.5 rounded bg-foreground/[0.03] border border-foreground/[0.06] transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:rounded"
+              className="text-[10px] text-text-muted hover:text-text-secondary px-2 py-0.5 rounded bg-foreground/3 border border-foreground/6 transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:rounded"
             >
               {isExpanded ? 'Show less' : `Show all ${readFiles.length}`}
             </button>

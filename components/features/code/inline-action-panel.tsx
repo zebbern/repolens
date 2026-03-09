@@ -44,12 +44,12 @@ export function InlineActionPanel({
       aria-label="AI analysis result"
       className={cn(
         "w-[350px] shrink-0 flex flex-col",
-        "bg-background border-l border-foreground/[0.06]",
+        "bg-background border-l border-foreground/6",
         "animate-in slide-in-from-right-2 duration-200",
       )}
     >
       {/* Header */}
-      <div className="flex items-center justify-between gap-2 px-3 py-2 border-b border-foreground/[0.06]">
+      <div className="flex items-center justify-between gap-2 px-3 py-2 border-b border-foreground/6">
         <div className="flex items-center gap-2 min-w-0">
           {result && (
             <>

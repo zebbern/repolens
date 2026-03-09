@@ -65,7 +65,7 @@ export function TaintFlowDiagram({ flow, className }: TaintFlowDiagramProps) {
 
   return (
     <div
-      className={cn('flex flex-col gap-0 rounded-md border border-foreground/[0.06] bg-foreground/[0.02] p-2.5', className)}
+      className={cn('flex flex-col gap-0 rounded-md border border-foreground/6 bg-foreground/2 p-2.5', className)}
     >
       <p className="text-[10px] font-medium text-text-muted mb-1.5">
         Data Flow: Lines {flow.startLine}–{flow.endLine}
@@ -89,7 +89,7 @@ export function TaintFlowDiagram({ flow, className }: TaintFlowDiagramProps) {
               <div className="flex items-center gap-2 w-full">
                 <span
                   className={cn(
-                    'flex-shrink-0 w-3 h-3 flex items-center justify-center text-[6px] rounded-full border',
+                    'shrink-0 w-3 h-3 flex items-center justify-center text-[6px] rounded-full border',
                     step.kind === 'source' && 'border-blue-500/40 bg-blue-500/20',
                     step.kind === 'sink' && 'border-red-500/40 bg-red-500/20',
                     step.kind === 'intermediate' && 'border-foreground/15 bg-foreground/5',
@@ -112,7 +112,7 @@ export function TaintFlowDiagram({ flow, className }: TaintFlowDiagramProps) {
                 >
                   {step.label}
                 </span>
-                <span className="text-[9px] text-text-muted/60 flex-shrink-0">
+                <span className="text-[9px] text-text-muted/60 shrink-0">
                   {step.kind === 'source' ? 'source' : step.kind === 'sink' ? 'sink' : ''}
                 </span>
               </div>

@@ -527,7 +527,7 @@ export function MermaidDiagram({ chart, className, onNodeClick, onShowRawCode, r
             <AlertTriangle className="h-4 w-4 shrink-0" />
             <p className="text-sm font-medium">Failed to render diagram</p>
           </div>
-          <p className="text-xs text-text-muted max-w-md break-words text-center">
+          <p className="text-xs text-text-muted max-w-md wrap-break-word text-center">
             {parsed.message}
           </p>
           {(parsed.line != null || parsed.character != null) && (

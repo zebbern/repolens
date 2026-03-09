@@ -126,7 +126,7 @@ export function LandingPage({
                   key={repo.name}
                   onClick={() => handleExampleClick(repo.url)}
                   disabled={isConnecting}
-                  className="flex items-center gap-1.5 rounded-full border border-foreground/[0.08] bg-foreground/[0.03] px-3.5 py-1.5 text-xs font-medium text-text-secondary transition-all hover:border-foreground/15 hover:bg-foreground/[0.06] hover:text-text-primary disabled:opacity-50"
+                  className="flex items-center gap-1.5 rounded-full border border-foreground/8 bg-foreground/3 px-3.5 py-1.5 text-xs font-medium text-text-secondary transition-all hover:border-foreground/15 hover:bg-foreground/6 hover:text-text-primary disabled:opacity-50"
                 >
                   <Github className="h-3 w-3" />
                   {repo.name}

@@ -19,7 +19,7 @@ export function CodeActivityBar({ sidebarMode, onModeChange }: CodeActivityBarPr
   ]
 
   return (
-    <div className="w-12 shrink-0 bg-background border-r border-foreground/[0.06] flex flex-col items-center py-2 gap-2">
+    <div className="w-12 shrink-0 bg-background border-r border-foreground/6 flex flex-col items-center py-2 gap-2">
       {items.map(({ mode, icon: Icon, label }) => (
         <Button
           key={mode}

@@ -64,12 +64,12 @@ export function TourPlayerBar({
 
   return (
     <div
-      className="relative bg-surface-elevated border-b border-foreground/[0.06] animate-in slide-in-from-top-1 duration-200"
+      className="relative bg-surface-elevated border-b border-foreground/6 animate-in slide-in-from-top-1 duration-200"
       role="toolbar"
       aria-label="Tour player controls"
     >
       {/* Progress bar */}
-      <div className="absolute top-0 left-0 right-0 h-0.5 bg-foreground/[0.04]">
+      <div className="absolute top-0 left-0 right-0 h-0.5 bg-foreground/4">
         <div
           className="h-full bg-accent-primary transition-all duration-300 ease-out"
           style={{ width: `${progressPercent}%` }}
@@ -132,7 +132,7 @@ export function TourPlayerBar({
                   ? "bg-accent-primary"
                   : idx < activeStopIndex
                     ? "bg-accent-primary/40"
-                    : "bg-foreground/[0.1]"
+                    : "bg-foreground/10"
               )} />
             </button>
           ))}

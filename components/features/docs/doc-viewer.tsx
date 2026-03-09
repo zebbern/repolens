@@ -163,7 +163,7 @@ export function DocViewer({ className }: DocViewerProps) {
     return (
       <div className={cn('flex items-center justify-center h-full', className)}>
         <div className="flex flex-col items-center gap-4 text-text-muted animate-in fade-in duration-300">
-          <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-foreground/[0.04] border border-foreground/[0.06]">
+          <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-foreground/4 border border-foreground/6">
             <FileText className="h-6 w-6 text-text-secondary" />
           </div>
           <div className="flex flex-col items-center gap-1">
@@ -221,7 +221,7 @@ export function DocViewer({ className }: DocViewerProps) {
 
   const sidebarContent = (
     <>
-      <div className="flex items-center justify-between px-3 h-10 border-b border-foreground/[0.06] shrink-0">
+      <div className="flex items-center justify-between px-3 h-10 border-b border-foreground/6 shrink-0">
         <span className="text-xs font-medium text-text-secondary">Generated Docs</span>
         <Button
           variant="ghost"
@@ -296,7 +296,7 @@ export function DocViewer({ className }: DocViewerProps) {
     <div className={cn('flex h-full', className)}>
       {/* Sidebar -- desktop */}
       {!isMobile && (
-        <div className="w-56 border-r border-foreground/[0.06] flex flex-col shrink-0">
+        <div className="w-56 border-r border-foreground/6 flex flex-col shrink-0">
           {sidebarContent}
         </div>
       )}
@@ -308,7 +308,7 @@ export function DocViewer({ className }: DocViewerProps) {
           <div ref={isGenerating ? contentRef : undefined} className="flex-1 overflow-y-auto flex flex-col">
             {/* Mobile sidebar trigger */}
             {isMobile && (
-              <div className="flex items-center gap-2 px-4 h-10 border-b border-foreground/[0.06] shrink-0">
+              <div className="flex items-center gap-2 px-4 h-10 border-b border-foreground/6 shrink-0">
                 <Sheet open={sidebarOpen} onOpenChange={setSidebarOpen}>
                   <SheetTrigger asChild>
                     <Button variant="ghost" size="icon" className="h-9 w-9 text-text-muted hover:text-text-primary" aria-label="Open document sidebar">
@@ -426,10 +426,10 @@ export function DocViewer({ className }: DocViewerProps) {
                           disabled={isGenerating}
                           className={cn(
                             'w-full flex items-center gap-3 p-3 rounded-lg border transition-all text-left',
-                            'hover:bg-foreground/[0.03] hover:border-foreground/15',
+                            'hover:bg-foreground/3 hover:border-foreground/15',
                             selectedPreset === preset.id
-                              ? 'border-foreground/20 bg-foreground/[0.04]'
-                              : 'border-foreground/[0.06] bg-foreground/[0.01]',
+                              ? 'border-foreground/20 bg-foreground/4'
+                              : 'border-foreground/6 bg-foreground/1',
                             isGenerating && 'opacity-50 pointer-events-none'
                           )}
                         >
@@ -457,7 +457,7 @@ export function DocViewer({ className }: DocViewerProps) {
                             ) : null}
                             {showFileSearch && (
                               <div className="rounded-lg border border-foreground/10 bg-card overflow-hidden">
-                                <div className="flex items-center gap-2 px-2 border-b border-foreground/[0.06]">
+                                <div className="flex items-center gap-2 px-2 border-b border-foreground/6">
                                   <Search className="h-3.5 w-3.5 text-text-muted shrink-0" />
                                   <Input
                                     autoFocus
@@ -517,7 +517,7 @@ export function DocViewer({ className }: DocViewerProps) {
                               onChange={e => setCustomPrompt(e.target.value)}
                               placeholder="e.g. 'Explain the auth flow', 'Document the database schema', 'Write a deployment guide'..."
                               aria-label="Custom documentation prompt"
-                              className="w-full h-20 rounded-lg border border-foreground/10 bg-foreground/[0.02] px-3 py-2 text-xs text-text-primary placeholder:text-text-muted resize-none focus:outline-none focus:border-foreground/20"
+                              className="w-full h-20 rounded-lg border border-foreground/10 bg-foreground/2 px-3 py-2 text-xs text-text-primary placeholder:text-text-muted resize-none focus:outline-hidden focus:border-foreground/20"
                               onKeyDown={e => {
                                 if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && customPrompt.trim()) {
                                   onGenerate(preset)
@@ -548,11 +548,11 @@ export function DocViewer({ className }: DocViewerProps) {
           // Viewing a generated doc
           <div ref={contentRef} className="flex-1 overflow-y-auto p-6">
             <div className="max-w-3xl">
-              <div className="flex items-center gap-2 mb-4 pb-3 border-b border-foreground/[0.06]">
+              <div className="flex items-center gap-2 mb-4 pb-3 border-b border-foreground/6">
                 {getPresetIcon(activeDoc.type)}
                 <h1 className="text-lg font-semibold text-text-primary flex-1">{activeDoc.title}</h1>
                 {activeDoc.targetFile && (
-                  <code className="text-[10px] text-text-muted bg-foreground/[0.04] px-1.5 py-0.5 rounded">{activeDoc.targetFile}</code>
+                  <code className="text-[10px] text-text-muted bg-foreground/4 px-1.5 py-0.5 rounded">{activeDoc.targetFile}</code>
                 )}
                 <Button
                   variant="ghost"
@@ -667,7 +667,7 @@ function ToolActivity({ messages }: { messages: UIMessage[] }) {
             </span>
           )}
           {visibleFiles.map((t, i) => (
-            <span key={i} className="text-[10px] font-mono text-text-muted px-1.5 py-0.5 rounded bg-foreground/[0.03] border border-foreground/[0.06]">
+            <span key={i} className="text-[10px] font-mono text-text-muted px-1.5 py-0.5 rounded bg-foreground/3 border border-foreground/6">
               {t.path?.split('/').slice(-2).join('/') || t.path}
             </span>
           ))}
@@ -675,7 +675,7 @@ function ToolActivity({ messages }: { messages: UIMessage[] }) {
             <button
               onClick={() => setIsExpanded(prev => !prev)}
               aria-expanded={isExpanded}
-              className="text-[10px] text-text-muted hover:text-text-secondary px-2 py-0.5 rounded bg-foreground/[0.03] border border-foreground/[0.06] transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:rounded"
+              className="text-[10px] text-text-muted hover:text-text-secondary px-2 py-0.5 rounded bg-foreground/3 border border-foreground/6 transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:rounded"
             >
               {isExpanded ? 'Show less' : `Show all ${readFiles.length}`}
             </button>

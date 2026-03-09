@@ -124,7 +124,7 @@ export function DepsTable({ deps, depTypes, onSelectDep, className }: DepsTableP
             placeholder="Filter packages…"
             value={search}
             onChange={e => setSearch(e.target.value)}
-            className="h-8 w-full rounded-md border bg-background pl-8 pr-3 text-sm outline-none focus:ring-1 focus:ring-ring"
+            className="h-8 w-full rounded-md border bg-background pl-8 pr-3 text-sm outline-hidden focus:ring-1 focus:ring-ring"
             aria-label="Filter packages by name"
           />
         </div>
@@ -187,7 +187,7 @@ export function DepsTable({ deps, depTypes, onSelectDep, className }: DepsTableP
                   key={dep.packageName}
                   className={cn(
                     'cursor-pointer border-b transition-colors hover:bg-muted/50',
-                    dep.isOutdated && 'bg-amber-500/[0.03]',
+                    dep.isOutdated && 'bg-amber-500/3',
                   )}
                   onClick={() => onSelectDep(dep)}
                   role="row"

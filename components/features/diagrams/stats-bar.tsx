@@ -15,7 +15,7 @@ interface StatsBarProps {
 
 export function StatsBar({ stats, topology }: StatsBarProps) {
   return (
-    <div className="flex items-center gap-4 px-4 py-2 border-t border-foreground/[0.06] text-xs text-text-muted bg-card">
+    <div className="flex items-center gap-4 px-4 py-2 border-t border-foreground/6 text-xs text-text-muted bg-card">
       <span><span className="text-text-secondary font-medium">{stats.totalNodes}</span> nodes</span>
       {stats.totalEdges > 0 && <span><span className="text-text-secondary font-medium">{stats.totalEdges}</span> edges</span>}
       {stats.avgDepsPerFile !== undefined && <span><span className="text-text-secondary font-medium">{stats.avgDepsPerFile}</span> avg deps/file</span>}
@@ -27,7 +27,7 @@ export function StatsBar({ stats, topology }: StatsBarProps) {
       )}
       {topology && (
         <>
-          <span className="border-l border-foreground/[0.06] pl-4"><span className="text-text-secondary font-medium">{topology.clusters}</span> clusters</span>
+          <span className="border-l border-foreground/6 pl-4"><span className="text-text-secondary font-medium">{topology.clusters}</span> clusters</span>
           <span>depth <span className="text-text-secondary font-medium">{topology.maxDepth}</span></span>
           {topology.orphans > 0 && <span className="text-gray-500">{topology.orphans} orphans</span>}
           {topology.connectors > 0 && <span className="text-purple-400">{topology.connectors} connectors</span>}

@@ -104,7 +104,7 @@ function SharedDependenciesTable({
 
   return (
     <div className="rounded-lg border border-foreground/10 overflow-x-auto">
-      <div className="flex items-center gap-2 px-4 py-3 border-b border-foreground/10 bg-foreground/[0.02]">
+      <div className="flex items-center gap-2 px-4 py-3 border-b border-foreground/10 bg-foreground/2">
         <Package className="h-4 w-4 text-text-secondary" />
         <span className="text-sm font-medium">Shared Dependencies</span>
         <Badge variant="secondary" className="text-xs">
@@ -152,7 +152,7 @@ function UniqueDepsList({
 
   return (
     <Collapsible open={isOpen} onOpenChange={setIsOpen}>
-      <CollapsibleTrigger className="flex w-full items-center gap-2 rounded-lg border border-foreground/10 px-4 py-3 text-sm font-medium hover:bg-foreground/[0.03] transition-colors">
+      <CollapsibleTrigger className="flex w-full items-center gap-2 rounded-lg border border-foreground/10 px-4 py-3 text-sm font-medium hover:bg-foreground/3 transition-colors">
         <ChevronRight
           className={cn(
             "h-4 w-4 text-text-secondary transition-transform duration-200",

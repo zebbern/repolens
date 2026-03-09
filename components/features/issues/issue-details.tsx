@@ -32,7 +32,7 @@ export function IssueDetails({
       )}
 
       {/* Code snippet */}
-      <div className="rounded bg-foreground/5 border border-foreground/[0.04] px-2.5 py-1.5 overflow-x-auto">
+      <div className="rounded bg-foreground/5 border border-foreground/4 px-2.5 py-1.5 overflow-x-auto">
         <code className="text-[10px] font-mono text-text-secondary whitespace-pre">{issue.snippet}</code>
       </div>
 
@@ -49,14 +49,14 @@ export function IssueDetails({
       {/* Fix suggestion diff */}
       {showFix && fix !== undefined && (() => {
         if (!fix) return (
-          <div className="rounded bg-foreground/5 border border-foreground/[0.04] px-2.5 py-1.5">
+          <div className="rounded bg-foreground/5 border border-foreground/4 px-2.5 py-1.5">
             <p className="text-[10px] text-text-muted">No automated fix available for this issue.</p>
           </div>
         )
         return (
           <div className="flex flex-col gap-1.5">
             <p className="text-[10px] text-text-muted font-medium">Suggested Fix</p>
-            <div className="rounded bg-foreground/5 border border-foreground/[0.04] overflow-hidden">
+            <div className="rounded bg-foreground/5 border border-foreground/4 overflow-hidden">
               {fix.diffLines.map((dl: DiffLine, i: number) => (
                 <div
                   key={`${dl.lineNumber}-${dl.type}-${i}`}
@@ -87,7 +87,7 @@ export function IssueDetails({
             'text-[10px] px-2 py-1 rounded-md border transition-colors flex items-center gap-1',
             showFix
               ? 'bg-foreground/10 border-foreground/20 text-text-primary'
-              : 'border-foreground/[0.06] text-text-muted hover:text-text-secondary hover:bg-foreground/5',
+              : 'border-foreground/6 text-text-muted hover:text-text-secondary hover:bg-foreground/5',
           )}
         >
           <Wrench className="h-2.5 w-2.5" />
@@ -102,7 +102,7 @@ export function IssueDetails({
               'text-[10px] px-2 py-1 rounded-md border transition-colors flex items-center gap-1',
               hasValidApiKey
                 ? 'border-violet-500/20 text-violet-400 hover:bg-violet-500/10'
-                : 'border-foreground/[0.06] text-text-muted/50 cursor-not-allowed',
+                : 'border-foreground/6 text-text-muted/50 cursor-not-allowed',
             )}
             title={hasValidApiKey ? 'Verify this finding with AI' : 'Configure an API key to use AI validation'}
           >

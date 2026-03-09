@@ -192,7 +192,7 @@ function MetricBarChart({
                 {r.id}
               </span>
               <div className="relative flex-1">
-                <div className="h-2 w-full rounded-full bg-foreground/[0.06]">
+                <div className="h-2 w-full rounded-full bg-foreground/6">
                   <div
                     className="h-2 rounded-full transition-all duration-500 ease-out"
                     style={{
@@ -254,7 +254,7 @@ function LanguageBar({ repo }: { repo: ComparisonRepo }) {
       <span className="w-[140px] shrink-0 truncate text-xs text-text-secondary md:w-[180px]">
         {repo.id}
       </span>
-      <div className="flex h-2 flex-1 overflow-hidden rounded-full bg-foreground/[0.06]">
+      <div className="flex h-2 flex-1 overflow-hidden rounded-full bg-foreground/6">
         {entries.map(([lang, count]) => {
           const pct = (count / total) * 100
           const color =

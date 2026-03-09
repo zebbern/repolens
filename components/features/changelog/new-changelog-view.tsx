@@ -71,7 +71,7 @@ export function NewChangelogView(props: NewChangelogViewProps) {
   return (
     <div ref={isGenerating ? contentRef : undefined} className="flex-1 overflow-y-auto flex flex-col">
       {isMobile && (
-        <div className="flex items-center gap-2 px-4 h-10 border-b border-foreground/[0.06] shrink-0">
+        <div className="flex items-center gap-2 px-4 h-10 border-b border-foreground/6 shrink-0">
           <Sheet open={sidebarOpen} onOpenChange={setSidebarOpen}>
             <SheetTrigger asChild>
               <Button variant="ghost" size="icon" className="h-9 w-9 text-text-muted hover:text-text-primary" aria-label="Open changelog sidebar">
@@ -131,7 +131,7 @@ function RefRangeSelector({ refSource, setRefSource, tags, branches, refsLoading
   fromRef: string; setFromRef: (r: string) => void; toRef: string; setToRef: (r: string) => void
 }) {
   return (
-    <div className="mb-4 rounded-lg border border-foreground/[0.06] bg-foreground/[0.01] p-4">
+    <div className="mb-4 rounded-lg border border-foreground/6 bg-foreground/1 p-4">
       <div className="flex items-center gap-2 mb-3">
         <span className="text-xs font-medium text-text-secondary">Range</span>
         <div className="flex items-center gap-1 ml-auto">
@@ -238,8 +238,8 @@ function PresetPicker({ isGenerating, isFetchingCommits, fromRef, toRef, selecte
           <button onClick={() => preset.id === 'custom' ? setSelectedPreset('custom') : onGenerate(preset)} disabled={isDisabled}
             aria-pressed={selectedPreset === preset.id}
             className={cn(
-              'w-full flex items-center gap-3 p-3 rounded-lg border transition-all text-left hover:bg-foreground/[0.03] hover:border-foreground/15',
-              selectedPreset === preset.id ? 'border-foreground/20 bg-foreground/[0.04]' : 'border-foreground/[0.06] bg-foreground/[0.01]',
+              'w-full flex items-center gap-3 p-3 rounded-lg border transition-all text-left hover:bg-foreground/3 hover:border-foreground/15',
+              selectedPreset === preset.id ? 'border-foreground/20 bg-foreground/4' : 'border-foreground/6 bg-foreground/1',
               isDisabled && 'opacity-50 pointer-events-none',
             )}>
             <span className="text-text-muted shrink-0">{getPresetIcon(preset.id as ChangelogType)}</span>
@@ -253,7 +253,7 @@ function PresetPicker({ isGenerating, isFetchingCommits, fromRef, toRef, selecte
             <div className="mt-2 flex flex-col gap-2">
               <textarea autoFocus value={customPrompt} onChange={e => setCustomPrompt(e.target.value)}
                 placeholder="e.g. 'Focus on breaking changes', 'Write in Spanish'..." aria-label="Custom changelog prompt"
-                className="w-full h-20 rounded-lg border border-foreground/10 bg-foreground/[0.02] px-3 py-2 text-xs text-text-primary placeholder:text-text-muted resize-none focus:outline-none focus:border-foreground/20"
+                className="w-full h-20 rounded-lg border border-foreground/10 bg-foreground/2 px-3 py-2 text-xs text-text-primary placeholder:text-text-muted resize-none focus:outline-hidden focus:border-foreground/20"
                 onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && customPrompt.trim()) onGenerate(preset) }} />
               <div className="flex items-center justify-between">
                 <span className="text-[10px] text-text-muted">Ctrl+Enter to generate</span>

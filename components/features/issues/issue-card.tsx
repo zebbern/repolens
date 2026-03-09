@@ -60,7 +60,7 @@ export function IssueCard({
         )}
         {/* CWE badge inline */}
         {issue.cwe && (
-          <span className="text-[9px] px-1 py-px rounded bg-foreground/[0.04] border border-foreground/[0.06] text-text-muted font-mono shrink-0">
+          <span className="text-[9px] px-1 py-px rounded bg-foreground/4 border border-foreground/6 text-text-muted font-mono shrink-0">
             {issue.cwe}
           </span>
         )}

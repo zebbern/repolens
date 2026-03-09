@@ -64,7 +64,7 @@ function SummaryDashboard({ data, onNavigate }: { data: ProjectSummary; onNaviga
   return (
     <div className="flex flex-col gap-4">
       {/* Header row */}
-      <div className="flex items-center gap-3 pb-2 border-b border-foreground/[0.06]">
+      <div className="flex items-center gap-3 pb-2 border-b border-foreground/6">
         <div className="flex items-center gap-2">
           <Activity className="h-4 w-4 text-text-secondary" />
           <h2 className="text-sm font-semibold text-text-primary tracking-tight">Project Overview</h2>
@@ -100,7 +100,7 @@ function SummaryDashboard({ data, onNavigate }: { data: ProjectSummary; onNaviga
           { label: 'Circular Deps', value: data.circularDeps.length, sub: data.circularDeps.length > 0 ? 'Files that import each other' : 'No circular imports found', warn: data.circularDeps.length > 0 },
           { label: 'Unused Files', value: data.orphanFiles.length, sub: data.orphanFiles.length > 0 ? 'Not imported by any other file' : 'All files are connected', warn: data.orphanFiles.length > 5 },
         ].map(metric => (
-          <div key={metric.label} className="rounded-lg border border-foreground/[0.06] bg-foreground/[0.02] p-3">
+          <div key={metric.label} className="rounded-lg border border-foreground/6 bg-foreground/2 p-3">
             <p className="text-xs text-text-muted">{metric.label}</p>
             <p className={cn('text-xl font-bold tabular-nums mt-0.5', metric.warn ? 'text-amber-400' : 'text-text-primary')}>
               {metric.value}
@@ -111,7 +111,7 @@ function SummaryDashboard({ data, onNavigate }: { data: ProjectSummary; onNaviga
       </div>
 
       {/* Language breakdown */}
-      <div className="rounded-lg border border-foreground/[0.06] bg-foreground/[0.02] p-4">
+      <div className="rounded-lg border border-foreground/6 bg-foreground/2 p-4">
         <h3 className="text-xs font-medium text-text-secondary mb-3">Language Breakdown</h3>
         <div className="h-3 rounded-full overflow-hidden flex bg-foreground/5 mb-3">
           {data.languages.filter(l => l.pct > 0.5).map(l => (
@@ -137,7 +137,7 @@ function SummaryDashboard({ data, onNavigate }: { data: ProjectSummary; onNaviga
 
       {/* Folder breakdown */}
       {data.folderBreakdown && data.folderBreakdown.length > 1 && (
-        <div className="rounded-lg border border-foreground/[0.06] bg-foreground/[0.02] p-4">
+        <div className="rounded-lg border border-foreground/6 bg-foreground/2 p-4">
           <h3 className="text-xs font-medium text-text-secondary mb-1">Where the Code Lives</h3>
           <p className="text-[10px] text-text-muted mb-3">Lines of code by top-level folder. Largest folders contain the core logic.</p>
           <div className="flex flex-col gap-2">
@@ -165,7 +165,7 @@ function SummaryDashboard({ data, onNavigate }: { data: ProjectSummary; onNaviga
       {/* Most Imported + Most Dependencies */}
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         {/* Most Imported */}
-        <div className="rounded-lg border border-foreground/[0.06] bg-foreground/[0.02] p-4">
+        <div className="rounded-lg border border-foreground/6 bg-foreground/2 p-4">
           <h3 className="text-xs font-medium text-text-secondary mb-1 flex items-center gap-1.5">
             <Target className="h-3 w-3 text-amber-400" />
             Most Imported Files
@@ -201,7 +201,7 @@ function SummaryDashboard({ data, onNavigate }: { data: ProjectSummary; onNaviga
         </div>
 
         {/* Most Dependencies */}
-        <div className="rounded-lg border border-foreground/[0.06] bg-foreground/[0.02] p-4">
+        <div className="rounded-lg border border-foreground/6 bg-foreground/2 p-4">
           <h3 className="text-xs font-medium text-text-secondary mb-1 flex items-center gap-1.5">
             <ArrowRight className="h-3 w-3 text-blue-400" />
             Heaviest Files
@@ -239,7 +239,7 @@ function SummaryDashboard({ data, onNavigate }: { data: ProjectSummary; onNaviga
 
       {/* External Dependencies */}
       {data.externalDeps && data.externalDeps.length > 0 && (
-        <div className="rounded-lg border border-foreground/[0.06] bg-foreground/[0.02] p-4">
+        <div className="rounded-lg border border-foreground/6 bg-foreground/2 p-4">
           <h3 className="text-xs font-medium text-text-secondary mb-1 flex items-center gap-1.5">
             <Package className="h-3 w-3 text-cyan-400" />
             External Packages ({data.externalDeps.length})
@@ -249,7 +249,7 @@ function SummaryDashboard({ data, onNavigate }: { data: ProjectSummary; onNaviga
             {(expandedSections.externalDeps ? data.externalDeps : data.externalDeps.slice(0, 8)).map(dep => (
               <div
                 key={dep.pkg}
-                className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-md bg-foreground/[0.03] border border-foreground/[0.06]"
+                className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-md bg-foreground/3 border border-foreground/6"
               >
                 <span className="text-text-secondary font-mono text-[11px]">{dep.pkg}</span>
                 <span className="text-[10px] text-text-muted tabular-nums">{dep.usedByCount} files</span>
@@ -267,7 +267,7 @@ function SummaryDashboard({ data, onNavigate }: { data: ProjectSummary; onNaviga
       {/* Entry points + Connectors */}
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         {data.entryPoints.length > 0 && (
-          <div className="rounded-lg border border-foreground/[0.06] bg-foreground/[0.02] p-4">
+          <div className="rounded-lg border border-foreground/6 bg-foreground/2 p-4">
             <h3 className="text-xs font-medium text-text-secondary mb-1 flex items-center gap-1.5">
               <ChevronRight className="h-3 w-3 text-emerald-400" />
               Entry Points ({data.entryPoints.length})
@@ -294,7 +294,7 @@ function SummaryDashboard({ data, onNavigate }: { data: ProjectSummary; onNaviga
         )}
 
         {data.connectors.length > 0 && (
-          <div className="rounded-lg border border-foreground/[0.06] bg-foreground/[0.02] p-4">
+          <div className="rounded-lg border border-foreground/6 bg-foreground/2 p-4">
             <h3 className="text-xs font-medium text-text-secondary mb-1 flex items-center gap-1.5">
               <Link2 className="h-3 w-3 text-blue-400" />
               Bridge Files ({data.connectors.length})
@@ -323,7 +323,7 @@ function SummaryDashboard({ data, onNavigate }: { data: ProjectSummary; onNaviga
 
       {/* Unused files */}
       {data.orphanFiles.length > 0 && (
-        <div className="rounded-lg border border-foreground/[0.06] bg-foreground/[0.02] p-4">
+        <div className="rounded-lg border border-foreground/6 bg-foreground/2 p-4">
           <h3 className="text-xs font-medium text-text-secondary mb-1 flex items-center gap-1.5">
             <FileWarning className="h-3 w-3 text-gray-400" />
             Unused Files ({data.orphanFiles.length})
@@ -334,7 +334,7 @@ function SummaryDashboard({ data, onNavigate }: { data: ProjectSummary; onNaviga
               <button
                 key={o}
                 onClick={() => onNavigate?.(o)}
-                className="text-[10px] text-text-muted px-2 py-1 rounded bg-foreground/[0.03] hover:bg-foreground/5 transition-colors truncate max-w-[240px]"
+                className="text-[10px] text-text-muted px-2 py-1 rounded bg-foreground/3 hover:bg-foreground/5 transition-colors truncate max-w-[240px]"
                 title={o}
               >
                 {shortPath(o)}

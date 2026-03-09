@@ -58,7 +58,7 @@ export function ComplianceDashboard({ codeIndex, scanResults }: ComplianceDashbo
         </div>
         <button
           onClick={handleExport}
-          className="flex items-center gap-1.5 text-[11px] px-2.5 py-1 rounded-md border border-foreground/10 bg-foreground/[0.04] text-text-secondary hover:bg-foreground/[0.08] hover:text-text-primary transition-colors"
+          className="flex items-center gap-1.5 text-[11px] px-2.5 py-1 rounded-md border border-foreground/10 bg-foreground/4 text-text-secondary hover:bg-foreground/8 hover:text-text-primary transition-colors"
         >
           <Download className="h-3 w-3" />
           Export JSON

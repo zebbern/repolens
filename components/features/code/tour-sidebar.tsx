@@ -55,7 +55,7 @@ export function TourSidebar({
   return (
     <div className="flex h-full flex-col">
       {/* Header */}
-      <div className="flex h-9 items-center justify-between border-b border-foreground/[0.06] px-3">
+      <div className="flex h-9 items-center justify-between border-b border-foreground/6 px-3">
         <span className="text-xs font-semibold uppercase tracking-wider text-text-muted">
           Tours
         </span>
@@ -75,7 +75,7 @@ export function TourSidebar({
       <ScrollArea className="flex-1">
         {tours.length === 0 ? (
           <div className="flex flex-col items-center justify-center px-4 py-12 text-center animate-in fade-in duration-300">
-            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-foreground/[0.04] border border-foreground/[0.06] mb-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-foreground/4 border border-foreground/6 mb-3">
               <Route className="h-5 w-5 text-text-secondary" />
             </div>
             <p className="text-sm font-medium text-text-secondary mb-1">No tours yet</p>
@@ -104,8 +104,8 @@ export function TourSidebar({
                   className={cn(
                     "group rounded-md border border-transparent px-2.5 py-2 transition-colors",
                     isActive
-                      ? "bg-foreground/[0.06] border-foreground/[0.08]"
-                      : "hover:bg-foreground/[0.03]"
+                      ? "bg-foreground/6 border-foreground/8"
+                      : "hover:bg-foreground/3"
                   )}
                 >
                   <div className="flex items-start justify-between gap-2">
@@ -119,7 +119,7 @@ export function TourSidebar({
                         </p>
                       )}
                       <div className="flex items-center gap-2 mt-1.5">
-                        <span className="text-[10px] text-text-muted bg-foreground/[0.04] px-1.5 py-0.5 rounded">
+                        <span className="text-[10px] text-text-muted bg-foreground/4 px-1.5 py-0.5 rounded">
                           {tour.stops.length} {tour.stops.length === 1 ? "stop" : "stops"}
                         </span>
                         <span className="text-[10px] text-text-muted">
@@ -183,7 +183,7 @@ export function TourSidebar({
                 onChange={(e) => setNewName(e.target.value)}
                 onKeyDown={handleKeyDown}
                 placeholder="e.g. Authentication Flow"
-                className="w-full rounded-md border border-foreground/[0.1] bg-background px-3 py-2 text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-2 focus:ring-accent-primary/50"
+                className="w-full rounded-md border border-foreground/10 bg-background px-3 py-2 text-sm text-text-primary placeholder:text-text-muted focus:outline-hidden focus:ring-2 focus:ring-accent-primary/50"
                 autoFocus
               />
             </div>
@@ -201,7 +201,7 @@ export function TourSidebar({
                 onChange={(e) => setNewDescription(e.target.value)}
                 placeholder="A brief description of what this tour covers..."
                 rows={3}
-                className="w-full rounded-md border border-foreground/[0.1] bg-background px-3 py-2 text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-2 focus:ring-accent-primary/50 resize-none"
+                className="w-full rounded-md border border-foreground/10 bg-background px-3 py-2 text-sm text-text-primary placeholder:text-text-muted focus:outline-hidden focus:ring-2 focus:ring-accent-primary/50 resize-none"
               />
             </div>
           </div>

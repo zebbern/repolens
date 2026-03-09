@@ -48,7 +48,7 @@ export function CoverageSummaryChart({ report }: CoverageSummaryChartProps) {
   ]
 
   return (
-    <div className="rounded-md border border-foreground/[0.06] p-4">
+    <div className="rounded-md border border-foreground/6 p-4">
       <h3 className="text-sm font-semibold text-text-primary mb-3">Coverage Overview</h3>
       <div className="flex items-center gap-6">
         {/* Bar chart */}
@@ -73,13 +73,9 @@ export function CoverageSummaryChart({ report }: CoverageSummaryChartProps) {
                     fontSize: '11px',
                     color: 'var(--text-primary)',
                   }}
-                  formatter={(value: number) => [`${value}%`, 'Coverage']}
+                  formatter={(value) => [`${value}%`, 'Coverage']}
                 />
-                <rc.Bar dataKey="coverage" radius={[0, 4, 4, 0]} barSize={16}>
-                  {data.map((entry, index) => (
-                    <rc.Cell key={index} fill={entry.fill} />
-                  ))}
-                </rc.Bar>
+                <rc.Bar dataKey="coverage" radius={[0, 4, 4, 0]} barSize={16} />
               </rc.BarChart>
             </rc.ResponsiveContainer>
           ) : (

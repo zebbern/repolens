@@ -35,7 +35,7 @@ function CustomTooltip({
 }) {
   if (!active || !payload?.length) return null
   return (
-    <div className="rounded border bg-popover px-3 py-2 text-xs text-popover-foreground shadow-sm">
+    <div className="rounded border bg-popover px-3 py-2 text-xs text-popover-foreground shadow-xs">
       <p className="mb-1 font-medium">{label}</p>
       {payload.map((entry) => (
         <div key={entry.name} className="flex items-center gap-2">

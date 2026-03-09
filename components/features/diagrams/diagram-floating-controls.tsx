@@ -54,7 +54,7 @@ export function DiagramFloatingControls({
       {/* Focus on file search */}
       {analysis && (
         <div className="relative">
-          <div className="flex items-center gap-0.5 rounded-lg border border-foreground/10 bg-card/90 backdrop-blur-sm shadow-lg">
+          <div className="flex items-center gap-0.5 rounded-lg border border-foreground/10 bg-card/90 backdrop-blur-xs shadow-lg">
             {!focusOpen && !focusTarget ? (
               <Button
                 variant="ghost"
@@ -121,7 +121,7 @@ export function DiagramFloatingControls({
       )}
 
       {/* Zoom controls */}
-      <div className="flex items-center gap-0.5 rounded-lg border border-foreground/10 bg-card/90 backdrop-blur-sm shadow-lg">
+      <div className="flex items-center gap-0.5 rounded-lg border border-foreground/10 bg-card/90 backdrop-blur-xs shadow-lg">
         <Button variant="ghost" size="icon" className="h-7 w-7 text-text-secondary hover:text-text-primary" onClick={() => setZoom(z => Math.max(0.2, z - 0.15))}>
           <ZoomOut className="h-3.5 w-3.5" />
         </Button>

@@ -11,7 +11,7 @@ interface PreviewRepoHeaderProps {
 
 export function PreviewRepoHeader({ repo, onDisconnect }: PreviewRepoHeaderProps) {
   return (
-    <div className="flex items-center justify-between border-b border-foreground/[0.06] px-4 py-3">
+    <div className="flex items-center justify-between border-b border-foreground/6 px-4 py-3">
       <div className="flex items-center gap-3">
         <div className="flex h-8 w-8 items-center justify-center rounded-md bg-foreground/5">
           <Github className="h-4 w-4 text-text-secondary" />

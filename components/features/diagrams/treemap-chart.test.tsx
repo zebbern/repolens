@@ -155,7 +155,7 @@ describe('TreemapChart', () => {
       expect(onNodeClick).not.toHaveBeenCalled()
     })
 
-    it('shows a focus ring when a node is focused', () => {
+    it('shows a focus ring-3 when a node is focused', () => {
       const { container } = render(
         <TreemapChart data={sampleData} width={600} height={400} />,
       )
@@ -169,7 +169,7 @@ describe('TreemapChart', () => {
       expect(focusRing).toBeTruthy()
     })
 
-    it('removes focus ring on blur', () => {
+    it('removes focus ring-3 on blur-sm', () => {
       const { container } = render(
         <TreemapChart data={sampleData} width={600} height={400} />,
       )
@@ -183,7 +183,7 @@ describe('TreemapChart', () => {
       expect(focusRing).toBeFalsy()
     })
 
-    it('moves focus ring to next node on ArrowRight', () => {
+    it('moves focus ring-3 to next node on ArrowRight', () => {
       const { container } = render(
         <TreemapChart data={sampleData} width={600} height={400} />,
       )
@@ -198,7 +198,7 @@ describe('TreemapChart', () => {
       expect(focusRing).toBeTruthy()
     })
 
-    it('moves focus ring to previous node on ArrowLeft', () => {
+    it('moves focus ring-3 to previous node on ArrowLeft', () => {
       const { container } = render(
         <TreemapChart data={sampleData} width={600} height={400} />,
       )

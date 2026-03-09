@@ -95,7 +95,7 @@ function ToolResultContent({ result }: { result: unknown }) {
       // Not JSON — render as plain text
     }
     return (
-      <div className="whitespace-pre-wrap break-words text-[11px] font-mono text-text-secondary">
+      <div className="whitespace-pre-wrap wrap-break-word text-[11px] font-mono text-text-secondary">
         {cleaned}
       </div>
     )
@@ -137,7 +137,7 @@ function FormattedObject({ value }: { value: unknown }) {
     }
 
     return (
-      <pre className="whitespace-pre-wrap break-words text-[11px] font-mono text-text-secondary">
+      <pre className="whitespace-pre-wrap wrap-break-word text-[11px] font-mono text-text-secondary">
         {cleanControlChars(JSON.stringify(value, null, 2))}
       </pre>
     )
@@ -173,7 +173,7 @@ function FormattedObject({ value }: { value: unknown }) {
 
     // Larger objects: formatted JSON
     return (
-      <pre className="whitespace-pre-wrap break-words text-[11px] font-mono text-text-secondary">
+      <pre className="whitespace-pre-wrap wrap-break-word text-[11px] font-mono text-text-secondary">
         {cleanControlChars(JSON.stringify(value, null, 2))}
       </pre>
     )
@@ -293,7 +293,7 @@ function ToolCallIndicator({
 
       <CollapsibleContent>
         {hasResult && (
-          <div className="mt-1 ml-6 max-h-60 overflow-y-auto overflow-x-auto rounded bg-surface-elevated p-2 border border-foreground/[0.06]">
+          <div className="mt-1 ml-6 max-h-60 overflow-y-auto overflow-x-auto rounded bg-surface-elevated p-2 border border-foreground/6">
             <ToolResultContent result={result} />
           </div>
         )}

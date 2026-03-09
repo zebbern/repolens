@@ -62,7 +62,7 @@ export function FileHistoryList({
       {/* Grouped commits */}
       {groups.map((group) => (
         <div key={group.dateKey} className="mb-3">
-          <h3 className="sticky top-0 z-10 bg-background/95 backdrop-blur-sm text-xs font-semibold text-muted-foreground uppercase tracking-wider py-2 px-1 border-b mb-1">
+          <h3 className="sticky top-0 z-10 bg-background/95 backdrop-blur-xs text-xs font-semibold text-muted-foreground uppercase tracking-wider py-2 px-1 border-b mb-1">
             {group.label}
           </h3>
 

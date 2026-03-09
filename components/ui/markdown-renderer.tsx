@@ -120,7 +120,7 @@ function CodeBlockHeader({
   onToggleWordWrap: () => void
 }) {
   return (
-    <div className="flex items-center justify-between px-3 py-1.5 bg-foreground/[0.08] border-b border-foreground/[0.06] rounded-t-lg">
+    <div className="flex items-center justify-between px-3 py-1.5 bg-foreground/8 border-b border-foreground/6 rounded-t-lg">
       <span className="text-xs font-mono text-text-muted select-none">
         {language || "text"}
       </span>
@@ -151,7 +151,7 @@ function CodeBlockHeader({
 function LineNumbers({ count }: { count: number }) {
   return (
     <div
-      className="select-none text-right pr-3 border-r border-foreground/[0.06] text-text-muted text-xs font-mono leading-[1.7142857] pt-4 pb-4 pl-3 shrink-0"
+      className="select-none text-right pr-3 border-r border-foreground/6 text-text-muted text-xs font-mono leading-[1.7142857] pt-4 pb-4 pl-3 shrink-0"
       aria-hidden="true"
     >
       {Array.from({ length: count }, (_, i) => (
@@ -211,13 +211,13 @@ function CodeBlock({
   }, [trimmedCode, lang, theme])
 
   const wrapClasses = wordWrap
-    ? "[&_pre]:whitespace-pre-wrap [&_pre]:break-words"
+    ? "[&_pre]:whitespace-pre-wrap [&_pre]:wrap-break-word"
     : "[&_pre]:overflow-x-auto [&_pre]:whitespace-pre"
 
   // Fallback: Shiki hasn't loaded yet
   if (!html) {
     return (
-      <div className="rounded-lg overflow-hidden my-3 border border-foreground/[0.06] shadow-sm">
+      <div className="rounded-lg overflow-hidden my-3 border border-foreground/6 shadow-xs">
         <CodeBlockHeader
           language={language}
           text={trimmedCode}
@@ -229,7 +229,7 @@ function CodeBlock({
           <pre
             className={cn(
               "flex-1 p-4 text-sm font-mono bg-surface-elevated min-w-0",
-              wordWrap ? "whitespace-pre-wrap break-words" : "overflow-x-auto whitespace-pre",
+              wordWrap ? "whitespace-pre-wrap wrap-break-word" : "overflow-x-auto whitespace-pre",
             )}
           >
             <code>{trimmedCode}</code>
@@ -240,7 +240,7 @@ function CodeBlock({
   }
 
   return (
-    <div className="rounded-lg overflow-hidden my-3 border border-foreground/[0.06] shadow-sm">
+    <div className="rounded-lg overflow-hidden my-3 border border-foreground/6 shadow-xs">
       <CodeBlockHeader
         language={language}
         text={trimmedCode}
@@ -252,7 +252,7 @@ function CodeBlock({
         <div
           className={cn(
             "flex-1 min-w-0",
-            "[&>pre]:!rounded-none [&>pre]:!p-4 [&>pre]:!m-0 [&>pre]:text-sm",
+            "[&>pre]:rounded-none! [&>pre]:p-4! [&>pre]:m-0! [&>pre]:text-sm",
             wrapClasses,
           )}
           dangerouslySetInnerHTML={{ __html: html }}
@@ -358,7 +358,7 @@ function MermaidDiagramBlock({ children }: { children: string }) {
   }, [])
 
   return (
-    <div className="relative group my-3 rounded-lg border border-foreground/[0.06] shadow-sm overflow-hidden">
+    <div className="relative group my-3 rounded-lg border border-foreground/6 shadow-xs overflow-hidden">
       <div className="absolute top-0 right-0 flex items-center gap-1 z-10">
         <button
           onClick={handleDownloadSvg}
@@ -381,8 +381,8 @@ function MermaidDiagramBlock({ children }: { children: string }) {
         </Suspense>
       </div>
       {showRawCode && (
-        <div className="border-t border-foreground/[0.06]">
-          <div className="flex items-center justify-between px-3 py-1.5 bg-foreground/[0.04]">
+        <div className="border-t border-foreground/6">
+          <div className="flex items-center justify-between px-3 py-1.5 bg-foreground/4">
             <span className="text-xs text-text-muted font-mono">Raw mermaid source</span>
             <button
               onClick={handleToggleRawCode}
@@ -477,7 +477,7 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
         // Blockquotes
         "[&_blockquote]:border-l-2 [&_blockquote]:border-text-accent [&_blockquote]:pl-3 [&_blockquote]:italic [&_blockquote]:text-text-secondary [&_blockquote]:my-2",
         // Links
-        "[&_a]:text-status-info [&_a]:underline [&_a]:underline-offset-2 hover:[&_a]:text-status-info/80",
+        "[&_a]:text-status-info [&_a]:underline [&_a]:underline-offset-2 [&_a]:hover:text-status-info/80",
         // Horizontal rules
         "[&_hr]:border-foreground/10 [&_hr]:my-3",
         // Strong & emphasis

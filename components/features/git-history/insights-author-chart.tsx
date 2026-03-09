@@ -24,7 +24,7 @@ function CustomTooltip({
   if (!active || !payload?.[0]) return null
   const { author, hours } = payload[0].payload
   return (
-    <div className="rounded border bg-popover px-3 py-2 text-xs text-popover-foreground shadow-sm">
+    <div className="rounded border bg-popover px-3 py-2 text-xs text-popover-foreground shadow-xs">
       <span className="font-medium">{author}</span>
       <span className="ml-2 text-muted-foreground">~{hours.toFixed(1)}h</span>
     </div>

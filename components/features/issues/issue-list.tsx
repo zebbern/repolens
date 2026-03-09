@@ -63,7 +63,7 @@ export function IssueList({
     <div className="flex flex-col">
       {/* Overflow notice */}
       {ruleOverflow.size > 0 && (
-        <div className="px-4 py-2.5 bg-foreground/[0.02] border-b border-foreground/[0.06]">
+        <div className="px-4 py-2.5 bg-foreground/2 border-b border-foreground/6">
           <p className="text-[11px] text-text-muted">
             {'Showing top 15 per rule. Additional matches: '}
             {Array.from(ruleOverflow.entries()).map(([ruleId, count], i) => (
@@ -87,12 +87,12 @@ export function IssueList({
         const sevCfg = SEVERITY_CONFIG[worstSeverity]
 
         return (
-          <div key={file} className="border-b border-foreground/[0.04]">
+          <div key={file} className="border-b border-foreground/4">
             {/* File header */}
             <button
               onClick={() => toggleGroup(file)}
               aria-expanded={isExpanded}
-              className="w-full flex items-center gap-2 px-4 py-2.5 hover:bg-foreground/[0.02] transition-colors text-left"
+              className="w-full flex items-center gap-2 px-4 py-2.5 hover:bg-foreground/2 transition-colors text-left"
             >
               {isExpanded
                 ? <ChevronDown className="h-3 w-3 text-text-muted shrink-0" />

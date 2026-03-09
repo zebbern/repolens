@@ -287,13 +287,13 @@ export function SymbolOutline({ symbols, onSymbolClick, activeSymbol }: SymbolOu
             className={cn(
               "w-full h-7 pl-7 pr-7 text-xs rounded-md bg-background border border-input",
               "placeholder:text-muted-foreground",
-              "focus:outline-none focus:ring-1 focus:ring-ring",
+              "focus:outline-hidden focus:ring-1 focus:ring-ring",
             )}
           />
           {searchQuery && (
             <button
               onClick={() => setSearchQuery("")}
-              className="absolute right-1.5 top-1/2 -translate-y-1/2 h-4 w-4 flex items-center justify-center rounded-sm hover:bg-foreground/10 text-text-muted"
+              className="absolute right-1.5 top-1/2 -translate-y-1/2 h-4 w-4 flex items-center justify-center rounded-xs hover:bg-foreground/10 text-text-muted"
               aria-label="Clear search"
             >
               <X className="h-3 w-3" />

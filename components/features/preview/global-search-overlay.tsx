@@ -176,7 +176,7 @@ function HighlightedText({ text, query, options }: {
       {parts.map((part, i) => {
         // Odd-index parts are the captured matches
         if (i % 2 === 1) {
-          return <mark key={i} className="bg-yellow-400/30 text-text-primary rounded-sm px-px">{part}</mark>
+          return <mark key={i} className="bg-yellow-400/30 text-text-primary rounded-xs px-px">{part}</mark>
         }
         return <span key={i}>{part}</span>
       })}
@@ -196,7 +196,7 @@ function FuzzyHighlight({ text, indices }: { text: string; indices: number[] }) 
       let end = i
       while (end < text.length && indexSet.has(end)) end++
       parts.push(
-        <mark key={i} className="bg-yellow-400/30 text-text-primary rounded-sm px-px">
+        <mark key={i} className="bg-yellow-400/30 text-text-primary rounded-xs px-px">
           {text.slice(i, end)}
         </mark>,
       )
@@ -509,7 +509,7 @@ export function GlobalSearchOverlay({
       className="absolute inset-0 z-50 flex items-start justify-center pt-[12%]"
       onClick={onClose}
     >
-      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-xs" />
       <div
         className="relative w-full max-w-lg bg-popover border border-foreground/10 rounded-lg shadow-2xl overflow-hidden"
         onClick={e => e.stopPropagation()}
@@ -521,18 +521,18 @@ export function GlobalSearchOverlay({
           <TabButton active={activeTab === 'code'} onClick={() => setActiveTab('code')} icon={Search} label="Code Search" shortcut="2" />
           <TabButton active={activeTab === 'symbols'} onClick={() => setActiveTab('symbols')} icon={Braces} label="Symbols" shortcut="3" />
           <div className="flex-1" />
-          <kbd className="text-[10px] text-text-muted/50 bg-foreground/[0.04] px-1.5 py-0.5 rounded font-mono">ESC</kbd>
+          <kbd className="text-[10px] text-text-muted/50 bg-foreground/4 px-1.5 py-0.5 rounded font-mono">ESC</kbd>
         </div>
 
         {/* Search input row */}
-        <div className="flex items-center gap-2 px-3 border-b border-foreground/[0.06]">
+        <div className="flex items-center gap-2 px-3 border-b border-foreground/6">
           <Search className="h-4 w-4 text-text-muted shrink-0" />
           <input
             ref={inputRef}
             value={query}
             onChange={e => setQuery(e.target.value)}
             placeholder={placeholder}
-            className="flex-1 h-10 bg-transparent text-sm text-text-primary placeholder:text-text-muted outline-none"
+            className="flex-1 h-10 bg-transparent text-sm text-text-primary placeholder:text-text-muted outline-hidden"
             role="combobox"
             aria-label="Search"
             aria-expanded={itemCount > 0}
@@ -542,7 +542,7 @@ export function GlobalSearchOverlay({
           {query && (
             <button
               onClick={() => setQuery("")}
-              className="flex items-center justify-center h-5 w-5 rounded-sm hover:bg-foreground/10 text-text-muted"
+              className="flex items-center justify-center h-5 w-5 rounded-xs hover:bg-foreground/10 text-text-muted"
               aria-label="Clear search"
             >
               <X className="h-3.5 w-3.5" />
@@ -562,7 +562,7 @@ export function GlobalSearchOverlay({
 
         {/* Symbol kind filter row */}
         {activeTab === 'symbols' && (
-          <div className="flex items-center gap-1 px-3 py-1.5 border-b border-foreground/[0.04]">
+          <div className="flex items-center gap-1 px-3 py-1.5 border-b border-foreground/4">
             {FILTERABLE_SYMBOL_KINDS.map(kind => {
               const Icon = SYMBOL_ICON_MAP[kind]
               const isActive = activeKinds.has(kind)
@@ -690,7 +690,7 @@ function FileResultsList({
               }}
               className={cn(
                 "flex items-center gap-2 px-3 text-left transition-colors duration-150",
-                "focus-visible:outline-none group",
+                "focus-visible:outline-hidden group",
                 i === selectedIndex ? "bg-foreground/10" : "hover:bg-foreground/5",
               )}
             >
@@ -708,7 +708,7 @@ function FileResultsList({
           )
         })}
       </div>
-      <div className="px-3 py-1.5 text-[10px] text-text-muted text-center border-t border-foreground/[0.04]">
+      <div className="px-3 py-1.5 text-[10px] text-text-muted text-center border-t border-foreground/4">
         {results.length} file{results.length !== 1 ? 's' : ''} found
       </div>
     </>
@@ -775,7 +775,7 @@ function CodeResultsList({
   return (
     <>
       {stats && (
-        <div className="px-3 py-1.5 text-[10px] text-text-muted text-center border-b border-foreground/[0.04]">
+        <div className="px-3 py-1.5 text-[10px] text-text-muted text-center border-b border-foreground/4">
           {stats.totalMatches} match{stats.totalMatches !== 1 ? 'es' : ''} in {stats.fileCount} file{stats.fileCount !== 1 ? 's' : ''}
         </div>
       )}
@@ -824,7 +824,7 @@ function CodeResultsList({
               }}
               className={cn(
                 "flex items-center gap-2 px-3 text-left transition-colors duration-150",
-                "focus-visible:outline-none",
+                "focus-visible:outline-hidden",
                 idx === selectedIndex ? "bg-foreground/10" : "hover:bg-foreground/5",
               )}
             >
@@ -920,7 +920,7 @@ function SymbolResultsList({
               }}
               className={cn(
                 "flex items-center gap-2 px-3 text-left transition-colors duration-150",
-                "focus-visible:outline-none group",
+                "focus-visible:outline-hidden group",
                 i === selectedIndex ? "bg-foreground/10" : "hover:bg-foreground/5",
               )}
             >
@@ -940,7 +940,7 @@ function SymbolResultsList({
           )
         })}
       </div>
-      <div className="px-3 py-1.5 text-[10px] text-text-muted text-center border-t border-foreground/[0.04]">
+      <div className="px-3 py-1.5 text-[10px] text-text-muted text-center border-t border-foreground/4">
         {results.length} symbol{results.length !== 1 ? 's' : ''} found
       </div>
     </>

@@ -80,7 +80,7 @@ export function IssueSummary({
           <div className="flex items-center gap-1.5 mb-1">
             <span className="text-[10px] text-text-muted">Risk Distribution</span>
           </div>
-          <div className="flex h-2 rounded-full overflow-hidden bg-foreground/5 border border-foreground/[0.06]">
+          <div className="flex h-2 rounded-full overflow-hidden bg-foreground/5 border border-foreground/6">
             {riskDist.critical > 0 && (
               <div
                 className="bg-red-500 transition-all"
@@ -151,7 +151,7 @@ export function IssueSummary({
           )
         })()}
         {/* Issues per KLOC */}
-        <div className="rounded-lg border border-foreground/[0.06] bg-foreground/[0.02] p-2 text-center">
+        <div className="rounded-lg border border-foreground/6 bg-foreground/2 p-2 text-center">
           <p className="text-lg font-bold leading-none text-text-primary tabular-nums">
             {results.issuesPerKloc.toFixed(1)}
           </p>
@@ -160,7 +160,7 @@ export function IssueSummary({
         {/* Suppressions */}
         <Tooltip>
           <TooltipTrigger asChild>
-            <div className="rounded-lg border border-foreground/[0.06] bg-foreground/[0.02] p-2 text-center cursor-default">
+            <div className="rounded-lg border border-foreground/6 bg-foreground/2 p-2 text-center cursor-default">
               <p className="text-lg font-bold leading-none text-text-primary tabular-nums">
                 {results.suppressionCount}
               </p>
@@ -183,9 +183,9 @@ export function IssueSummary({
               disabled={!hasValidApiKey || criticalCount === 0 || validationProgress.inProgress}
               className={cn(
                 'flex items-center gap-1.5 px-2.5 py-1.5 rounded-md border text-[11px] font-medium transition-colors',
-                'border-foreground/[0.06] bg-foreground/[0.02]',
-                'hover:bg-foreground/[0.06] hover:border-foreground/10',
-                'disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-foreground/[0.02]',
+                'border-foreground/6 bg-foreground/2',
+                'hover:bg-foreground/6 hover:border-foreground/10',
+                'disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-foreground/2',
               )}
             >
               {validationProgress.inProgress ? (
@@ -217,9 +217,9 @@ export function IssueSummary({
               disabled={filteredIssueCount === 0 || fixProgress.inProgress}
               className={cn(
                 'flex items-center gap-1.5 px-2.5 py-1.5 rounded-md border text-[11px] font-medium transition-colors',
-                'border-foreground/[0.06] bg-foreground/[0.02]',
-                'hover:bg-foreground/[0.06] hover:border-foreground/10',
-                'disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-foreground/[0.02]',
+                'border-foreground/6 bg-foreground/2',
+                'hover:bg-foreground/6 hover:border-foreground/10',
+                'disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-foreground/2',
               )}
             >
               {fixProgress.inProgress ? (

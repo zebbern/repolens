@@ -161,7 +161,7 @@ function ageToColor(age: number): string {
 export function AgeIndicator({ age }: AgeIndicatorProps) {
   return (
     <div
-      className="w-2 h-full min-h-[20px] rounded-sm shrink-0"
+      className="w-2 h-full min-h-[20px] rounded-xs shrink-0"
       style={{ backgroundColor: ageToColor(age) }}
       aria-label={`Commit age: ${age}`}
     />

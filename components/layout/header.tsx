@@ -35,12 +35,12 @@ export function Header({ className }: HeaderProps) {
 
   return (
     <>
-      <header className={`flex h-11 items-center bg-primary-background border-b border-foreground/[0.06] px-4 justify-between ${className || ''}`}>
+      <header className={`flex h-11 items-center bg-primary-background border-b border-foreground/6 px-4 justify-between ${className || ''}`}>
         <div className="flex items-center gap-2">
           <Image src="/repolens.svg" alt="RepoLens" width={24} height={20} className="dark:invert" />
           <Link
             href="/compare"
-            className="flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-text-secondary hover:text-text-primary hover:bg-foreground/5 transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className="flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-text-secondary hover:text-text-primary hover:bg-foreground/5 transition-colors duration-150 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
           >
             <GitCompareArrows className="h-3.5 w-3.5" />
             Compare

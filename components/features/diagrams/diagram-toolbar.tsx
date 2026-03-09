@@ -38,7 +38,7 @@ export function DiagramToolbar({
   const isOverview = viewMode === 'overview' && !focusTarget
 
   return (
-    <div className="flex items-center justify-between border-b border-foreground/[0.06] px-3 py-1.5 bg-card">
+    <div className="flex items-center justify-between border-b border-foreground/6 px-3 py-1.5 bg-card">
       <div className="flex items-center gap-0.5 overflow-x-auto">
         {/* Overview tab */}
         <Button

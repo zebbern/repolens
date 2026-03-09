@@ -29,7 +29,7 @@ function CustomTooltip({
   if (!active || !payload?.[0]) return null
   const { day, downloads } = payload[0].payload
   return (
-    <div className="rounded border bg-popover px-2 py-1 text-xs text-popover-foreground shadow-sm">
+    <div className="rounded border bg-popover px-2 py-1 text-xs text-popover-foreground shadow-xs">
       <span className="font-medium">{numberFormatter.format(downloads)}</span>
       <span className="ml-1.5 text-muted-foreground">{day}</span>
     </div>

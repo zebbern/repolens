@@ -22,12 +22,12 @@ export function CodeTabBar({
 }: CodeTabBarProps) {
   if (openTabs.length === 0) return null
   return (
-    <div className="h-9 flex items-end bg-muted border-b border-foreground/[0.06] overflow-x-auto">
+    <div className="h-9 flex items-end bg-muted border-b border-foreground/6 overflow-x-auto">
       {openTabs.map((tab) => (
         <div
           key={tab.path}
           className={cn(
-            'h-full flex items-center gap-2 px-3 border-r border-foreground/[0.06] cursor-pointer group',
+            'h-full flex items-center gap-2 px-3 border-r border-foreground/6 cursor-pointer group',
             tab.path === activeTabPath
               ? 'bg-background text-text-primary'
               : 'bg-surface-secondary text-text-secondary hover:bg-surface'
@@ -72,7 +72,7 @@ export function CodeBreadcrumb({
 }: CodeBreadcrumbProps) {
   const parts = path.split('/')
   return (
-    <div className="h-6 flex items-center px-4 bg-background border-b border-foreground/[0.06]">
+    <div className="h-6 flex items-center px-4 bg-background border-b border-foreground/6">
       <div className="flex items-center gap-1 text-xs text-text-muted">
         {parts.map((part, i) => {
           const isFile = i === parts.length - 1

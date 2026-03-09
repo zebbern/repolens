@@ -396,7 +396,7 @@ export function CodeBrowser({ navigateToFile, navigateToLine, onNavigateComplete
     return (
       <div className="flex h-full items-center justify-center bg-background">
         <div className="flex flex-col items-center gap-4 text-text-muted animate-in fade-in duration-300">
-          <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-foreground/[0.04] border border-foreground/[0.06]">
+          <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-foreground/4 border border-foreground/6">
             <Code2 className="h-6 w-6 text-text-secondary" />
           </div>
           <div className="flex flex-col items-center gap-1">
@@ -414,7 +414,7 @@ export function CodeBrowser({ navigateToFile, navigateToLine, onNavigateComplete
       <CodeActivityBar sidebarMode={sidebarMode} onModeChange={setSidebarMode} />
       
       {/* Sidebar */}
-      <div ref={sidebarRef} className="relative shrink-0 bg-background border-r border-foreground/[0.06] flex flex-col" style={{ width: sidebarWidth }}>
+      <div ref={sidebarRef} className="relative shrink-0 bg-background border-r border-foreground/6 flex flex-col" style={{ width: sidebarWidth }}>
         <div
           className="absolute right-0 top-0 h-full w-1 cursor-col-resize z-10 hover:bg-primary/20 active:bg-primary/30 transition-colors"
           onMouseDown={handleSidebarMouseDown}

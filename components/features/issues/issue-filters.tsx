@@ -78,7 +78,7 @@ export function IssueFilters({
             'text-[10px] px-2 py-0.5 rounded-full border transition-colors',
             filter === 'all'
               ? 'bg-foreground/10 border-foreground/20 text-text-primary'
-              : 'border-foreground/[0.06] text-text-muted hover:text-text-secondary hover:bg-foreground/5'
+              : 'border-foreground/6 text-text-muted hover:text-text-secondary hover:bg-foreground/5'
           )}
         >
           All ({filteredSummary.total})
@@ -96,7 +96,7 @@ export function IssueFilters({
                 'text-[10px] px-2 py-0.5 rounded-full border transition-colors flex items-center gap-1',
                 filter === cat
                   ? 'bg-foreground/10 border-foreground/20 text-text-primary'
-                  : 'border-foreground/[0.06] text-text-muted hover:text-text-secondary hover:bg-foreground/5'
+                  : 'border-foreground/6 text-text-muted hover:text-text-secondary hover:bg-foreground/5'
               )}
             >
               <cfg.icon className="h-2.5 w-2.5" />
@@ -107,7 +107,7 @@ export function IssueFilters({
       </div>
 
       {/* Visibility toggles */}
-      <div className="flex items-center gap-3 mt-2 pt-2 border-t border-foreground/[0.04]">
+      <div className="flex items-center gap-3 mt-2 pt-2 border-t border-foreground/4">
         <label className="flex items-center gap-1.5 cursor-pointer select-none">
           <input
             type="checkbox"

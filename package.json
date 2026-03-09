@@ -2,6 +2,7 @@
   "name": "repolens",
   "version": "0.1.0",
   "private": true,
+  "sideEffects": false,
   "scripts": {
     "build": "rimraf .next && next build",
     "dev": "next dev",
@@ -64,7 +65,7 @@
     "input-otp": "1.4.1",
     "lucide-react": "^0.454.0",
     "mermaid": "^11.4.0",
-    "next": "15.2.6",
+    "next": "15.5.12",
     "next-auth": "5.0.0-beta.30",
     "next-themes": "^0.4.6",
     "react": "^19",
@@ -102,5 +103,10 @@
     "tailwindcss": "^3.4.17",
     "typescript": "^5",
     "vitest": "^4.0.18"
+  },
+  "pnpm": {
+    "overrides": {
+      "dompurify": ">=3.3.2"
+    }
   }
 }

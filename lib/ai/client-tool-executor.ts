@@ -1,6 +1,5 @@
 import type { CodeIndex, IndexedFile } from '@/lib/code/code-index'
 import { createEmptyIndex, indexFile, searchIndex, getFileLines, getFileContent, getFileLinesAsync, getFileContentSync } from '@/lib/code/code-index'
-import { scanIssues } from '@/lib/code/scanner/scanner'
 import { LANG_EXTENSIONS } from '@/lib/code/scanner/constants'
 import { SYMBOL_PATTERNS } from '@/lib/ai/structural-index'
 import {
@@ -735,6 +734,7 @@ async function executeScanIssues(
   // Build a single-file CodeIndex and run the real scanner
   let miniIndex = createEmptyIndex()
   miniIndex = indexFile(miniIndex, file.path, content, detectLang(file.path))
+  const { scanIssues } = await import('@/lib/code/scanner/scanner')
   const result = scanIssues(miniIndex, null)
 
   // Map CodeIssue to backward-compatible output shape

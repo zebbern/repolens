@@ -21,7 +21,7 @@ import {
 import { toast } from 'sonner'
 import { useRepository } from '@/providers'
 import type { FullAnalysis } from '@/lib/code/import-parser'
-import { scanIssues, type ScanResults } from '@/lib/code/issue-scanner'
+import { scanInWorker, type ScanResults } from '@/lib/code/issue-scanner'
 import { generateProjectSummary } from '@/lib/diagrams/diagram-data'
 import type { ProjectSummary } from '@/lib/diagrams/types'
 import {
@@ -45,16 +45,16 @@ export function ExportMenu({ activeTab }: ExportMenuProps) {
   const hasData = Boolean(repo && codeIndex.totalFiles > 0)
 
   // Use provider-level analysis instead of computing locally.
-  const getAnalysisData = useCallback((): {
+  const getAnalysisData = useCallback(async (): Promise<{
     analysis: FullAnalysis | null
     scanResults: ScanResults | null
     summary: ProjectSummary | null
-  } => {
+  }> => {
     if (!codeIndex || codeIndex.totalFiles === 0 || !codebaseAnalysis) {
       return { analysis: null, scanResults: null, summary: null }
     }
 
-    const scanResults = scanIssues(codeIndex, codebaseAnalysis)
+    const scanResults = await scanInWorker(codeIndex, codebaseAnalysis)
     const summary = generateProjectSummary(codebaseAnalysis, codeIndex).data
     return { analysis: codebaseAnalysis, scanResults, summary }
   }, [codeIndex, codebaseAnalysis])
@@ -63,7 +63,7 @@ export function ExportMenu({ activeTab }: ExportMenuProps) {
     if (!repo) return
     setIsExporting(true)
     try {
-      const { analysis, scanResults } = getAnalysisData()
+      const { analysis, scanResults } = await getAnalysisData()
       const json = exportToJson(repo, codeIndex, analysis, scanResults)
       downloadFile({
         content: json,
@@ -83,7 +83,7 @@ export function ExportMenu({ activeTab }: ExportMenuProps) {
     if (!repo) return
     setIsExporting(true)
     try {
-      const { analysis, scanResults, summary } = getAnalysisData()
+      const { analysis, scanResults, summary } = await getAnalysisData()
       const md = exportToMarkdown(repo, codeIndex, analysis, scanResults, summary)
       downloadFile({
         content: md,
@@ -102,7 +102,7 @@ export function ExportMenu({ activeTab }: ExportMenuProps) {
   const handleCopySummary = useCallback(async () => {
     if (!repo) return
     try {
-      const { analysis, scanResults } = getAnalysisData()
+      const { analysis, scanResults } = await getAnalysisData()
       const text = exportSummaryClipboard(repo, codeIndex, analysis, scanResults)
       const ok = await copyToClipboard(text)
       if (ok) {

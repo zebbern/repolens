@@ -18,7 +18,7 @@ vi.mock('@/providers', () => ({
 }))
 
 vi.mock('@/lib/code/issue-scanner', () => ({
-  scanIssues: vi.fn(() => ({
+  scanInWorker: vi.fn(() => Promise.resolve({
     issues: [],
     summary: { total: 0, critical: 0, warning: 0, info: 0 },
   })),

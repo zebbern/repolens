@@ -17,11 +17,11 @@ const nextConfig = {
     // In the browser it uses fetch instead, so alias these to empty modules
     // on the client side.
     resolveAlias: {
-      fs: { browser: '' },
-      'fs/promises': { browser: '' },
-      module: { browser: '' },
-      path: { browser: '' },
-      url: { browser: '' },
+      fs: { browser: './lib/stubs/empty.js' },
+      'fs/promises': { browser: './lib/stubs/empty.js' },
+      module: { browser: './lib/stubs/empty.js' },
+      path: { browser: './lib/stubs/empty.js' },
+      url: { browser: './lib/stubs/empty.js' },
     },
   },
   async headers() {

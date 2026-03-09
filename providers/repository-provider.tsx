@@ -129,8 +129,11 @@ export function RepositoryProvider({ children }: { children: ReactNode }) {
   // Update content loading stats when indexing progress changes for lazy repos
   useEffect(() => {
     if (contentAvailability !== 'full' && codeIndex.contentStore instanceof LazyContentStore) {
+      const status = codeIndex.contentStore.getContentStatus()
       setContentLoadingStats({
-        ...codeIndex.contentStore.getContentStatus(),
+        completed: status.loaded,
+        pending: status.pending,
+        total: status.total,
         failed: fetchQueueRef.current?.stats.failed ?? 0,
       })
     }

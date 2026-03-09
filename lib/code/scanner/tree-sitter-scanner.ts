@@ -74,9 +74,12 @@ export async function scanWithTreeSitter(
     if (rules.length === 0) continue
 
     for (const [path, file] of langFiles) {
+      const content = file.content
+      if (!content) continue
+
       let tree
       try {
-        tree = await parseFile(file.content, language)
+        tree = await parseFile(content, language)
       } catch (err) {
         console.warn(`[tree-sitter-scanner] Parse failed for ${path}:`, err)
         continue

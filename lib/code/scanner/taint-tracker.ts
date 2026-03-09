@@ -248,14 +248,15 @@ export function trackTaint(
   const flows: TaintFlow[] = []
 
   if (!file.content) return flows
+  const content = file.content
 
   // Guard: skip taint analysis on very large files to avoid UI freezing
-  if (file.content.length > MAX_TAINT_FILE_BYTES || getFileLines(file).length > MAX_TAINT_FILE_LINES) {
+  if (content.length > MAX_TAINT_FILE_BYTES || getFileLines(file).length > MAX_TAINT_FILE_LINES) {
     return flows
   }
 
   // Quick check: does the file content contain any source patterns at all?
-  const hasAnySources = sources.some(s => s.pattern.test(file.content))
+  const hasAnySources = sources.some(s => s.pattern.test(content))
   if (!hasAnySources) return flows
 
   try {

@@ -5,8 +5,8 @@
 // O(n) scans when multiple components (code-browser, issues-panel) call it
 // with the same index.
 
-import type { CodeIndex, SearchResult, IndexedFile } from '../code-index'
-import { searchIndex, getFileLines } from '../code-index'
+import type { CodeIndex, IndexedFile } from '../code-index'
+import { buildSearchRegex, getFileLines } from '../code-index'
 import type { FullAnalysis } from '../import-parser'
 import type { ScanRule, CodeIssue, IssueSeverity, HealthGrade, ScanResults } from './types'
 import { SKIP_VENDORED, detectLanguages } from './constants'
@@ -118,96 +118,133 @@ interface RegexRulesResult {
 }
 
 // ---------------------------------------------------------------------------
-// D3: Regex rule scanning helper
+// D3: Regex rule scanning helper (single-pass architecture)
 // ---------------------------------------------------------------------------
 
-function runRegexRules(ctx: ScanContext): RegexRulesResult {
-  const { filesToScan, scanCodeIndex, isPartialScan, blockCommentCache, presentExtensions, filesByExtension } = ctx
-  const issues: CodeIssue[] = []
-  const seenIds = new Set<string>()
+/** Pre-compiled rule with its regex ready for matching. */
+interface CompiledRule {
+  rule: ScanRule
+  regex: RegExp
+  isSecurityCritical: boolean
+}
+
+/**
+ * Compile all RULES into RegExp objects upfront, grouped by applicable
+ * file extension.  Rules with no `fileFilter` go into `universalRules`.
+ */
+function buildCompiledRuleIndex(presentExtensions: Set<string>): {
+  /** Rules keyed by lowercased extension (e.g. ".ts") */
+  rulesForExtension: Map<string, CompiledRule[]>
+  /** Rules that apply to every file (no fileFilter) */
+  universalRules: CompiledRule[]
+  /** Total unique rules that were compiled */
+  rulesEvaluated: number
+} {
+  const rulesForExtension = new Map<string, CompiledRule[]>()
+  const universalRules: CompiledRule[] = []
   let rulesEvaluated = 0
-  let suppressionCount = 0
-  const ruleOverflow = new Map<string, number>()
 
   for (const rule of RULES) {
     if (!rule.pattern) continue
 
-    // Skip rules for languages not present in the codebase (O(1) Set lookup)
+    // Skip rules whose file filters don't match any extension in the codebase
     if (rule.fileFilter && rule.fileFilter.length > 0) {
       const hasMatchingFile = rule.fileFilter.some(ext => presentExtensions.has(ext.toLowerCase()))
       if (!hasMatchingFile) continue
     }
 
-    rulesEvaluated++
-    let ruleCount = 0
-
-    // Build ruleCodeIndex by merging relevant extension groups (avoids per-rule full filter)
-    let ruleCodeIndex: typeof scanCodeIndex
-    if (rule.fileFilter && rule.fileFilter.length > 0) {
-      const mergedFiles = new Map<string, FileEntry>()
-      for (const ext of rule.fileFilter) {
-        const group = filesByExtension.get(ext.toLowerCase())
-        if (group) {
-          for (const [path, file] of group) {
-            mergedFiles.set(path, file)
-          }
-        }
-      }
-      ruleCodeIndex = { ...scanCodeIndex, files: mergedFiles }
-    } else {
-      ruleCodeIndex = scanCodeIndex
-    }
-
-    const results: SearchResult[] = searchIndex(ruleCodeIndex, rule.pattern, {
+    const compiled = buildSearchRegex(rule.pattern, {
       caseSensitive: rule.patternOptions?.caseSensitive ?? false,
       regex: rule.patternOptions?.regex ?? false,
       wholeWord: rule.patternOptions?.wholeWord ?? false,
     })
+    if (!compiled) continue
 
-    const isSecurityCritical = rule.severity === 'critical' && rule.category === 'security'
+    rulesEvaluated++
+    const entry: CompiledRule = {
+      rule,
+      regex: compiled,
+      isSecurityCritical: rule.severity === 'critical' && rule.category === 'security',
+    }
 
-    for (const result of results) {
-      // Differential scan: only process files in the changed set
-      if (isPartialScan && !filesToScan.has(result.file)) continue
-
-      if (rule.fileFilter && rule.fileFilter.length > 0) {
-        const ext = '.' + (result.file.split('.').pop() || '')
-        if (!rule.fileFilter.includes(ext.toLowerCase())) continue
+    if (rule.fileFilter && rule.fileFilter.length > 0) {
+      for (const ext of rule.fileFilter) {
+        const key = ext.toLowerCase()
+        let list = rulesForExtension.get(key)
+        if (!list) {
+          list = []
+          rulesForExtension.set(key, list)
+        }
+        list.push(entry)
       }
+    } else {
+      universalRules.push(entry)
+    }
+  }
 
-      if (SKIP_VENDORED.test(result.file)) continue
-      if (rule.excludeFiles && rule.excludeFiles.test(result.file)) continue
+  return { rulesForExtension, universalRules, rulesEvaluated }
+}
 
-      // Get all lines for context classification
-      const indexedFile = scanCodeIndex.files.get(result.file)
-      const allLines = indexedFile ? getFileLines(indexedFile) : undefined
-      // Use cached block comment lines (computed once per file across all rules)
-      if (!blockCommentCache.has(result.file)) {
-        blockCommentCache.set(result.file, allLines ? computeBlockCommentLines(allLines) : undefined)
-      }
-      const blockCommentLines = blockCommentCache.get(result.file)
+function runRegexRules(ctx: ScanContext): RegexRulesResult {
+  const { filesToScan, scanCodeIndex, isPartialScan, blockCommentCache, presentExtensions } = ctx
+  const issues: CodeIssue[] = []
+  const seenIds = new Set<string>()
+  let suppressionCount = 0
+  const ruleOverflow = new Map<string, number>()
+  const ruleCounts = new Map<string, number>()
 
-      for (const match of result.matches) {
-        if (rule.excludePattern && rule.excludePattern.test(match.content)) continue
+  // --- Phase 1: Single-pass over files --------------------------------
+
+  const { rulesForExtension, universalRules, rulesEvaluated } =
+    buildCompiledRuleIndex(presentExtensions)
+
+  for (const [path, file] of filesToScan) {
+    if (!file.content) continue
+    if (SKIP_VENDORED.test(path)) continue
+
+    const ext = '.' + (path.split('.').pop() || '').toLowerCase()
+
+    // Merge universal rules with extension-specific rules for this file
+    const extRules = rulesForExtension.get(ext)
+    const applicableRules = extRules
+      ? [...universalRules, ...extRules]
+      : universalRules
+    if (applicableRules.length === 0) continue
+
+    const lines = getFileLines(file)
+
+    // Compute block comments once per file
+    if (!blockCommentCache.has(path)) {
+      blockCommentCache.set(path, computeBlockCommentLines(lines))
+    }
+    const blockCommentLines = blockCommentCache.get(path)
+
+    for (let i = 0; i < lines.length; i++) {
+      const lineContent = lines[i]
+      const lineNum = i + 1
+
+      for (const { rule, regex, isSecurityCritical } of applicableRules) {
+        // Per-rule file exclusion
+        if (rule.excludeFiles && rule.excludeFiles.test(path)) continue
+
+        // Test compiled regex against the line
+        regex.lastIndex = 0
+        if (!regex.test(lineContent)) continue
+
+        // Per-rule line exclusion
+        if (rule.excludePattern && rule.excludePattern.test(lineContent)) continue
 
         // --- Context-aware suppression ---
-        const ctx = classifyLine(match.content, result.file, blockCommentLines, match.line - 1)
+        const lineCtx = classifyLine(lineContent, path, blockCommentLines, i)
 
-        // Comment suppression (unless security-critical or comment-targeted like todo-fixme)
-        if (ctx.isComment && !isSecurityCritical && rule.id !== 'todo-fixme') continue
+        if (lineCtx.isComment && !isSecurityCritical && rule.id !== 'todo-fixme') continue
+        if ((lineCtx.isTestFile || lineCtx.isGeneratedFile || lineCtx.isExampleFile) && rule.category !== 'security') continue
+        if (lineCtx.isTypeAnnotation && SECRET_RULE_IDS.test(rule.id)) continue
+        if (lineCtx.isStringLiteral && STRING_LITERAL_SUPPRESSED_IDS.has(rule.id)) continue
 
-        // Test/generated/example file suppression (non-security only)
-        if ((ctx.isTestFile || ctx.isGeneratedFile || ctx.isExampleFile) && rule.category !== 'security') continue
-
-        // Type annotation suppression for credential patterns
-        if (ctx.isTypeAnnotation && SECRET_RULE_IDS.test(rule.id)) continue
-
-        // String literal suppression for eval/sql patterns
-        if (ctx.isStringLiteral && STRING_LITERAL_SUPPRESSED_IDS.has(rule.id)) continue
-
-        // --- Entropy check for secret rules (not password — passwords are inherently low-entropy) ---
+        // --- Entropy check for secret rules ---
         if (ENTROPY_CHECKED_RULE_IDS.test(rule.id)) {
-          const valueMatch = match.content.match(EXTRACT_SECRET_VALUE)
+          const valueMatch = lineContent.match(EXTRACT_SECRET_VALUE)
           if (valueMatch) {
             const secretValue = valueMatch[1]
             if (!isLikelyRealSecret(secretValue)) continue
@@ -215,20 +252,20 @@ function runRegexRules(ctx: ScanContext): RegexRulesResult {
         }
 
         // --- Inline suppression check ---
-        const prevLine = allLines && match.line >= 2 ? allLines[match.line - 2] : undefined
+        const prevLine = lineNum >= 2 ? lines[i - 1] : undefined
         const requireScoped = rule.severity === 'critical'
-        if (hasInlineSuppression(match.content, prevLine, rule.id, requireScoped)) {
+        if (hasInlineSuppression(lineContent, prevLine, rule.id, requireScoped)) {
           suppressionCount++
           continue
         }
 
         // --- Compute dynamic confidence ---
-        let issueConfidence = computeDynamicConfidence(rule.confidence, ctx, match.content)
+        let issueConfidence = computeDynamicConfidence(rule.confidence, lineCtx, lineContent)
 
         // --- Sanitizer proximity detection (security rules only) ---
         let issueDescription = rule.description
-        if (rule.category === 'security' && allLines) {
-          if (hasSanitizerNearby(allLines, match.line - 1)) {
+        if (rule.category === 'security') {
+          if (hasSanitizerNearby(lines, i)) {
             issueConfidence = issueConfidence === 'high' ? 'medium'
               : issueConfidence === 'medium' ? 'low'
               : 'low'
@@ -237,20 +274,28 @@ function runRegexRules(ctx: ScanContext): RegexRulesResult {
         }
 
         // --- Dynamic confidence boost for config files (secret rules) ---
-        if (SECRET_RULE_IDS.test(rule.id) && /\.(?:config|env)/i.test(result.file)) {
+        if (SECRET_RULE_IDS.test(rule.id) && /\.(?:config|env)/i.test(path)) {
           if (issueConfidence === 'low') issueConfidence = 'medium'
           else if (issueConfidence === 'medium') issueConfidence = 'high'
         }
 
-        const issueId = `${rule.id}-${result.file}-${match.line}`
+        // --- Dedup ---
+        const issueId = `${rule.id}-${path}-${lineNum}`
         if (seenIds.has(issueId)) continue
         seenIds.add(issueId)
 
-        ruleCount++
+        // --- Per-rule cap ---
+        const ruleCount = (ruleCounts.get(rule.id) || 0) + 1
+        ruleCounts.set(rule.id, ruleCount)
         if (ruleCount > MAX_PER_RULE) {
           ruleOverflow.set(rule.id, (ruleOverflow.get(rule.id) || 0) + 1)
           continue
         }
+
+        // --- Compute column from match position ---
+        regex.lastIndex = 0
+        const matchResult = regex.exec(lineContent)
+        const column = matchResult ? matchResult.index : 0
 
         issues.push({
           id: issueId,
@@ -259,10 +304,10 @@ function runRegexRules(ctx: ScanContext): RegexRulesResult {
           severity: rule.severity,
           title: rule.title,
           description: issueDescription,
-          file: result.file,
-          line: match.line,
-          column: match.column,
-          snippet: match.content.trim(),
+          file: path,
+          line: lineNum,
+          column,
+          snippet: lineContent.trim(),
           suggestion: rule.suggestion,
           cwe: rule.cwe,
           owasp: rule.owasp,
@@ -276,7 +321,7 @@ function runRegexRules(ctx: ScanContext): RegexRulesResult {
   }
 
   // ---------------------------------------------------------------------------
-  // Multi-line scanning pass — catch patterns spanning 2-3 consecutive lines
+  // Phase 2: Multi-line scanning pass — catch patterns spanning 2-3 lines
   // ---------------------------------------------------------------------------
   const MULTILINE_RULE_IDS = new Set([
     'sql-injection',
@@ -297,9 +342,9 @@ function runRegexRules(ctx: ScanContext): RegexRulesResult {
     }
 
     const flags = (rule.patternOptions?.caseSensitive ?? false) ? 'g' : 'gi'
-    let regex: RegExp
+    let multilineRegex: RegExp
     try {
-      regex = new RegExp(rule.pattern, flags)
+      multilineRegex = new RegExp(rule.pattern, flags)
     } catch {
       continue
     }
@@ -330,18 +375,18 @@ function runRegexRules(ctx: ScanContext): RegexRulesResult {
           ? lines[i] + ' ' + lines[i + 1] + ' ' + lines[i + 2]
           : lines[i] + ' ' + lines[i + 1]
 
-        regex.lastIndex = 0
-        if (!regex.test(joined)) continue
+        multilineRegex.lastIndex = 0
+        if (!multilineRegex.test(joined)) continue
 
         // Exclusions
         if (rule.excludePattern && rule.excludePattern.test(joined)) continue
 
         // Context-aware suppression on the first line
-        const ctx = classifyLine(lines[i], path, blockCommentLines, i)
-        if (ctx.isComment && !isSecurityCritical && rule.id !== 'todo-fixme') continue
-        if ((ctx.isTestFile || ctx.isGeneratedFile || ctx.isExampleFile) && rule.category !== 'security') continue
-        if (ctx.isTypeAnnotation && SECRET_RULE_IDS.test(rule.id)) continue
-        if (ctx.isStringLiteral && STRING_LITERAL_SUPPRESSED_IDS.has(rule.id)) continue
+        const lineCtx = classifyLine(lines[i], path, blockCommentLines, i)
+        if (lineCtx.isComment && !isSecurityCritical && rule.id !== 'todo-fixme') continue
+        if ((lineCtx.isTestFile || lineCtx.isGeneratedFile || lineCtx.isExampleFile) && rule.category !== 'security') continue
+        if (lineCtx.isTypeAnnotation && SECRET_RULE_IDS.test(rule.id)) continue
+        if (lineCtx.isStringLiteral && STRING_LITERAL_SUPPRESSED_IDS.has(rule.id)) continue
 
         // Inline suppression
         const prevLine = i >= 1 ? lines[i - 1] : undefined
@@ -350,7 +395,7 @@ function runRegexRules(ctx: ScanContext): RegexRulesResult {
           continue
         }
 
-        let issueConfidence = computeDynamicConfidence(rule.confidence, ctx, joined)
+        let issueConfidence = computeDynamicConfidence(rule.confidence, lineCtx, joined)
         let issueDescription = rule.description
         if (rule.category === 'security') {
           if (hasSanitizerNearby(lines, i)) {

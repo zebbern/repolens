@@ -37,7 +37,7 @@ const PARSER_PLUGINS: ParserPlugin[] = [
 const astCache = new Map<string, { contentLen: number; ast: ParseResult<File> | null }>()
 
 /** Maximum number of entries in the AST cache before evicting oldest */
-const AST_CACHE_MAX_SIZE = 200
+const AST_CACHE_MAX_SIZE = 500
 
 /** Clear the AST cache. Exported for testing purposes. */
 export function clearASTCache(): void {

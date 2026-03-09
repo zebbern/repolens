@@ -1,11 +1,12 @@
 import { useMemo } from "react"
 import {
-  ChevronRight, ChevronDown, File, Folder, FolderOpen, Download, Pin,
+  ChevronRight, ChevronDown, File, Folder, FolderOpen, Download, Pin, Circle,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { getLanguageColor } from "@/lib/code/language-colors"
 import type { FileNode } from "@/types/repository"
 import type { CodeIndex } from "@/lib/code/code-index"
+import type { ContentAvailability } from "@/lib/repository"
 
 /** Per-file issue severity counts. */
 export interface FileIssueCounts {
@@ -31,6 +32,8 @@ interface FileTreeNodeProps {
   isPinned?: (path: string) => boolean
   /** Toggle pin/unpin for a file or directory. */
   onPinToggle?: (path: string, type: 'file' | 'directory') => void
+  /** Whether content is fully loaded or lazy (metadata-only). */
+  contentAvailability?: ContentAvailability
 }
 
 /** Format a line count for compact display (e.g. 1200 → "1.2k"). */
@@ -140,6 +143,7 @@ export function FileTreeNode({
   issueCountByFile,
   isPinned,
   onPinToggle,
+  contentAvailability,
 }: FileTreeNodeProps) {
   return (
     <>
@@ -153,6 +157,8 @@ export function FileTreeNode({
         const lineCount = isFile
           ? (indexed?.lineCount ?? 0)
           : 0
+        // In lazy repos, files without loaded content are dimmed
+        const isContentPending = isFile && contentAvailability !== 'full' && indexed && !indexed.content
 
         return (
           <div key={node.path}>
@@ -195,7 +201,15 @@ export function FileTreeNode({
               )}
 
               {/* Filename — truncated to leave room for badges */}
-              <span className="text-sm text-text-primary truncate min-w-0 flex-1">{node.name}</span>
+              <span className={cn("text-sm truncate min-w-0 flex-1", isContentPending ? "text-text-muted/60" : "text-text-primary")}>{node.name}</span>
+
+              {/* Unloaded content indicator for lazy repos */}
+              {isContentPending && (
+                <Circle
+                  className="h-[6px] w-[6px] text-text-muted/40 shrink-0"
+                  aria-label="Content not yet loaded"
+                />
+              )}
 
               {/* Metadata badges — compact, right-aligned */}
               <span className="flex items-center gap-1.5 shrink-0 opacity-60 group-hover/tree-item:opacity-100 transition-opacity">
@@ -268,6 +282,7 @@ export function FileTreeNode({
                 issueCountByFile={issueCountByFile}
                 isPinned={isPinned}
                 onPinToggle={onPinToggle}
+                contentAvailability={contentAvailability}
               />
             )}
           </div>

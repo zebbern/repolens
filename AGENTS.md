@@ -148,7 +148,8 @@ workproject/                    # Next.js application root
 │   │   └── index.ts            # Barrel exports
 │   ├── code/                   # Code analysis engine
 │   │   ├── code-index.ts       # In-memory file index (search, symbol lookup)
-│   │   ├── content-store.ts    # ContentStore abstraction (InMemory + IDB-backed)
+│   │   ├── content-store.ts    # ContentStore abstraction (InMemory + IDB + Lazy)
+│   │   ├── fetch-queue.ts      # Priority-based fetch queue for lazy content loading
 │   │   ├── import-parser.ts    # Dependency graph analysis
 │   │   ├── issue-scanner.ts    # Issue scanning orchestrator
 │   │   ├── parser/             # Language-specific AST parsers
@@ -325,7 +326,7 @@ Security headers (`X-Frame-Options`, `X-Content-Type-Options`, `Referrer-Policy`
 
 ### ContentStore (Tiered Content Storage)
 
-Large repositories (≥50 MB) use `IDBContentStore` to keep file content in IndexedDB instead of the JS heap. Smaller repos use `InMemoryContentStore` (zero-overhead `Map` wrapper). Both implement the `ContentStore` interface (`lib/code/content-store.ts`). `CodeIndex` holds `CodeIndexMeta` records (path, name, language, lineCount) for all files regardless of store type. Size-based routing is controlled by `IDB_CONTENT_STORE_THRESHOLD_KB` in `config/constants.ts`. Search and scanner workers use IDB directly for large repos.
+Three-tier content storage routes repos by size: <50 MB → `InMemoryContentStore` (zero-overhead `Map`), 50–200 MB → `IDBContentStore` (IndexedDB-backed), >200 MB → `LazyContentStore` (on-demand fetching via `FetchQueue`). All three implement the `ContentStore` interface (`lib/code/content-store.ts`). `CodeIndex` holds `CodeIndexMeta` records (path, name, language, lineCount) for all files regardless of store type. Thresholds are configured via `IDB_CONTENT_STORE_THRESHOLD_KB` (50 MB) and `LAZY_CONTENT_THRESHOLD_KB` (200 MB) in `config/constants.ts`. Search and scanner workers use IDB directly for large repos. For lazy repos, `batchIndexMetadataOnly()` creates a metadata-only `CodeIndex` with `content: ''`, and `searchIndexPartial()` separates searched vs. unsearched files.
 
 ### Scanner Architecture
 

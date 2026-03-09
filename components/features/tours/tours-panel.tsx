@@ -50,7 +50,7 @@ export function ToursPanel({ className, onNavigateToFile }: ToursPanelProps) {
 
       setIsGenerating(true)
       try {
-        const result = executeToolLocally(
+        const result = await executeToolLocally(
           "generateTour",
           {
             repoKey: repo.fullName,

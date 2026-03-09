@@ -1,7 +1,7 @@
 import { useState, useMemo, useCallback, useRef, useEffect } from "react"
 import type { FileNode } from "@/types/repository"
 import type { CodeIndex, SearchResult } from "@/lib/code/code-index"
-import { searchIndex, flattenFiles } from "@/lib/code/code-index"
+import { searchIndexPartial, flattenFiles } from "@/lib/code/code-index"
 import type { SidebarMode, SearchOptions } from "../types"
 
 interface UseSearchOptions {
@@ -36,12 +36,13 @@ export function useSearch({
   const resultsContainerRef = useRef<HTMLDivElement>(null)
 
   // Compute search results
-  const searchResults = useMemo(() => {
+  const { searchResults, unsearchedCount } = useMemo(() => {
     if (!debouncedSearchQuery.trim() || !isIndexingComplete) {
-      return []
+      return { searchResults: [] as SearchResult[], unsearchedCount: 0 }
     }
 
-    let results = searchIndex(codeIndex, debouncedSearchQuery, searchOptions)
+    const partial = searchIndexPartial(codeIndex, debouncedSearchQuery, searchOptions)
+    let results = partial.results
 
     if (fileFilter.trim()) {
       const filters = fileFilter.split(',').map(f => f.trim().toLowerCase()).filter(Boolean)
@@ -59,7 +60,7 @@ export function useSearch({
       })
     }
 
-    return results
+    return { searchResults: results, unsearchedCount: partial.unsearchedPaths.length }
   }, [debouncedSearchQuery, codeIndex, searchOptions, isIndexingComplete, fileFilter])
 
   // Go to search result
@@ -97,6 +98,7 @@ export function useSearch({
 
   return {
     searchResults,
+    unsearchedCount,
     goToSearchResult,
     highlightedLine,
     setHighlightedLine,

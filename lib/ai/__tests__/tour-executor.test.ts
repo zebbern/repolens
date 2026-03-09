@@ -144,29 +144,29 @@ function buildMockIndex(): CodeIndex {
 // ---------------------------------------------------------------------------
 
 describe('executeToolLocally — generateTour', () => {
-  it('returns error JSON for null codeIndex', () => {
-    const raw = executeToolLocally('generateTour', { repoKey: 'owner/repo' }, null)
+  it('returns error JSON for null codeIndex', async () => {
+    const raw = await executeToolLocally('generateTour', { repoKey: 'owner/repo' }, null)
     const result = JSON.parse(raw)
     expect(result).toHaveProperty('error')
   })
 
-  it('returns error JSON for codeIndex with 0 files', () => {
+  it('returns error JSON for codeIndex with 0 files', async () => {
     const empty = createEmptyIndex()
-    const raw = executeToolLocally('generateTour', { repoKey: 'owner/repo' }, empty)
+    const raw = await executeToolLocally('generateTour', { repoKey: 'owner/repo' }, empty)
     const result = JSON.parse(raw)
     expect(result).toHaveProperty('error')
   })
 
-  it('returns error JSON for invalid input (missing repoKey)', () => {
+  it('returns error JSON for invalid input (missing repoKey)', async () => {
     const index = buildMockIndex()
-    const raw = executeToolLocally('generateTour', {}, index)
+    const raw = await executeToolLocally('generateTour', {}, index)
     const result = JSON.parse(raw)
     expect(result).toHaveProperty('error')
   })
 
-  it('returns a valid Tour-shaped object with all required fields', () => {
+  it('returns a valid Tour-shaped object with all required fields', async () => {
     const index = buildMockIndex()
-    const raw = executeToolLocally('generateTour', { repoKey: 'owner/repo' }, index)
+    const raw = await executeToolLocally('generateTour', { repoKey: 'owner/repo' }, index)
     const result = JSON.parse(raw)
 
     expect(result).toHaveProperty('tour')
@@ -183,10 +183,10 @@ describe('executeToolLocally — generateTour', () => {
     expect(tour.stops.length).toBeGreaterThan(0)
   })
 
-  it('returned tour has stops that reference real files from the mock codeIndex', () => {
+  it('returned tour has stops that reference real files from the mock codeIndex', async () => {
     const index = buildMockIndex()
     const knownPaths = Array.from(index.files.keys())
-    const raw = executeToolLocally('generateTour', { repoKey: 'owner/repo' }, index)
+    const raw = await executeToolLocally('generateTour', { repoKey: 'owner/repo' }, index)
     const { tour } = JSON.parse(raw)
 
     for (const stop of tour.stops) {
@@ -194,9 +194,9 @@ describe('executeToolLocally — generateTour', () => {
     }
   })
 
-  it('respects maxStops limit', () => {
+  it('respects maxStops limit', async () => {
     const index = buildMockIndex()
-    const raw = executeToolLocally(
+    const raw = await executeToolLocally(
       'generateTour',
       { repoKey: 'owner/repo', maxStops: 3 },
       index,
@@ -206,9 +206,9 @@ describe('executeToolLocally — generateTour', () => {
     expect(tour.stops.length).toBeLessThanOrEqual(3)
   })
 
-  it('each stop has valid startLine and endLine (positive integers, startLine <= endLine)', () => {
+  it('each stop has valid startLine and endLine (positive integers, startLine <= endLine)', async () => {
     const index = buildMockIndex()
-    const raw = executeToolLocally('generateTour', { repoKey: 'owner/repo' }, index)
+    const raw = await executeToolLocally('generateTour', { repoKey: 'owner/repo' }, index)
     const { tour } = JSON.parse(raw)
 
     for (const stop of tour.stops) {
@@ -220,9 +220,9 @@ describe('executeToolLocally — generateTour', () => {
     }
   })
 
-  it('each stop has a non-empty annotation string', () => {
+  it('each stop has a non-empty annotation string', async () => {
     const index = buildMockIndex()
-    const raw = executeToolLocally('generateTour', { repoKey: 'owner/repo' }, index)
+    const raw = await executeToolLocally('generateTour', { repoKey: 'owner/repo' }, index)
     const { tour } = JSON.parse(raw)
 
     for (const stop of tour.stops) {
@@ -231,9 +231,9 @@ describe('executeToolLocally — generateTour', () => {
     }
   })
 
-  it('each stop has a non-empty id', () => {
+  it('each stop has a non-empty id', async () => {
     const index = buildMockIndex()
-    const raw = executeToolLocally('generateTour', { repoKey: 'owner/repo' }, index)
+    const raw = await executeToolLocally('generateTour', { repoKey: 'owner/repo' }, index)
     const { tour } = JSON.parse(raw)
 
     for (const stop of tour.stops) {
@@ -242,9 +242,9 @@ describe('executeToolLocally — generateTour', () => {
     }
   })
 
-  it('returned tour id is a valid UUID string', () => {
+  it('returned tour id is a valid UUID string', async () => {
     const index = buildMockIndex()
-    const raw = executeToolLocally('generateTour', { repoKey: 'owner/repo' }, index)
+    const raw = await executeToolLocally('generateTour', { repoKey: 'owner/repo' }, index)
     const { tour } = JSON.parse(raw)
 
     // UUID v4 regex
@@ -252,17 +252,17 @@ describe('executeToolLocally — generateTour', () => {
     expect(tour.id).toMatch(uuidRegex)
   })
 
-  it('general tour (no theme) has name "Architecture Tour"', () => {
+  it('general tour (no theme) has name "Architecture Tour"', async () => {
     const index = buildMockIndex()
-    const raw = executeToolLocally('generateTour', { repoKey: 'owner/repo' }, index)
+    const raw = await executeToolLocally('generateTour', { repoKey: 'owner/repo' }, index)
     const { tour } = JSON.parse(raw)
 
     expect(tour.name).toBe('Architecture Tour')
   })
 
-  it('themed tour includes the theme in the tour name', () => {
+  it('themed tour includes the theme in the tour name', async () => {
     const index = buildMockIndex()
-    const raw = executeToolLocally(
+    const raw = await executeToolLocally(
       'generateTour',
       { repoKey: 'owner/repo', theme: 'authentication' },
       index,
@@ -272,16 +272,16 @@ describe('executeToolLocally — generateTour', () => {
     expect(tour.name.toLowerCase()).toContain('authentication')
   })
 
-  it('also returns stopCount alongside tour', () => {
+  it('also returns stopCount alongside tour', async () => {
     const index = buildMockIndex()
-    const raw = executeToolLocally('generateTour', { repoKey: 'owner/repo' }, index)
+    const raw = await executeToolLocally('generateTour', { repoKey: 'owner/repo' }, index)
     const result = JSON.parse(raw)
 
     expect(result).toHaveProperty('stopCount')
     expect(result.stopCount).toBe(result.tour.stops.length)
   })
 
-  it('excludes test files from generated tour stops', () => {
+  it('excludes test files from generated tour stops', async () => {
     let index = buildMockIndex()
     // Add a test file
     index = indexFile(
@@ -296,7 +296,7 @@ describe('executeToolLocally — generateTour', () => {
       'typescript',
     )
 
-    const raw = executeToolLocally('generateTour', { repoKey: 'owner/repo' }, index)
+    const raw = await executeToolLocally('generateTour', { repoKey: 'owner/repo' }, index)
     const { tour } = JSON.parse(raw)
 
     for (const stop of tour.stops) {

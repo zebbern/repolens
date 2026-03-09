@@ -15,7 +15,7 @@ import { useRepository } from '@/providers'
 import { useAPIKeys } from '@/providers/api-keys-provider'
 import { useBatchOperations } from '@/hooks/use-batch-operations'
 import { cn } from '@/lib/utils'
-import { Shield, Bug, ShieldCheck } from 'lucide-react'
+import { Shield, Bug, ShieldCheck, AlertTriangle } from 'lucide-react'
 import { ComplianceDashboard } from './compliance-dashboard'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import type { FilterMode, ViewMode } from './issue-types'
@@ -273,6 +273,15 @@ export function IssuesPanel({ codeIndex, onNavigateToFile }: IssuesPanelProps) {
             totalIssueCount={results.summary.total}
           />
         </div>
+        {/* Unscanned files notice for lazy repos */}
+        {results.unscannedFileCount != null && results.unscannedFileCount > 0 && (
+          <div className="mx-4 mt-2 flex items-start gap-2 rounded-md bg-amber-500/10 px-3 py-2" role="status">
+            <AlertTriangle className="h-3.5 w-3.5 text-amber-400 shrink-0 mt-0.5" />
+            <span className="text-[11px] text-amber-300/90 leading-snug">
+              Quick scan complete. {results.unscannedFileCount} {results.unscannedFileCount === 1 ? 'file' : 'files'} pending content-based analysis.
+            </span>
+          </div>
+        )}
         <div className="flex-1 overflow-y-auto">
           <IssueList
             groupedByFile={groupedByFile}

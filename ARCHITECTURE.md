@@ -46,25 +46,33 @@ graph LR
 
 ## ContentStore (Tiered Content Storage)
 
-For small repos (< 50 MB), file content lives in-memory via `InMemoryContentStore` — a zero-overhead `Map<string, string>` wrapper. For larger repos (≥ 50 MB), `IDBContentStore` stores file content in a dedicated IndexedDB database (`repolens-content`), keeping the JS heap lean.
+File content storage uses a three-tier routing strategy based on repository size. All tiers implement the `ContentStore` interface defined in `lib/code/content-store.ts`. The `CodeIndex` always holds `CodeIndexMeta` records (path, name, language, lineCount) in-memory for fast metadata access regardless of which store backs the content.
 
-Both stores implement the `ContentStore` interface defined in `lib/code/content-store.ts`. The `CodeIndex` always holds `CodeIndexMeta` records (path, name, language, lineCount) in-memory for fast metadata access regardless of which store backs the content.
-
-### Size-Based Routing
+### Three-Tier Size-Based Routing
 
 ```mermaid
 graph TD
-  A["Repo fetched"] --> B{"size ≥ 50 MB?"}
-  B -->|Yes| C["IDBContentStore"]
-  B -->|No| D["InMemoryContentStore"]
-  C --> E["CodeIndex with CodeIndexMeta only in heap"]
-  D --> E
-  E --> F["Content reads via store.get()"]
+  A["Repo fetched"] --> B{"size ≥ 200 MB?"}
+  B -->|Yes| C["LazyContentStore"]
+  B -->|No| D{"size ≥ 50 MB?"}
+  D -->|Yes| E["IDBContentStore"]
+  D -->|No| F["InMemoryContentStore"]
+  C --> G["Metadata-only CodeIndex + on-demand fetch"]
+  E --> H["CodeIndex with CodeIndexMeta only in heap"]
+  F --> H
+  G --> I["Content reads via FetchQueue"]
+  H --> J["Content reads via store.get()"]
 ```
 
-- The threshold is configured via `IDB_CONTENT_STORE_THRESHOLD_KB` (50,000 KB) in `config/constants.ts`.
-- `RepositoryProvider` and `indexing-pipeline.ts` both check repo size to choose the store.
-- During indexing, content is written to the chosen store. `CodeIndex.files` holds metadata-only `CodeIndexMeta` entries when IDB is active.
+| Tier | Store | Size Range | Content Strategy |
+| ---- | ----- | ---------- | ---------------- |
+| In-Memory | `InMemoryContentStore` | < 50 MB | Zero-overhead `Map<string, string>` wrapper. All content in JS heap |
+| IDB | `IDBContentStore` | 50–200 MB | Content in IndexedDB (`repolens-content`), metadata in heap |
+| Lazy | `LazyContentStore` | > 200 MB | Metadata indexed immediately, content fetched on demand via `FetchQueue` |
+
+- Thresholds are configured via `IDB_CONTENT_STORE_THRESHOLD_KB` (50,000 KB) and `LAZY_CONTENT_THRESHOLD_KB` (200,000 KB) in `config/constants.ts`.
+- `indexing-pipeline.ts` checks repo size to choose the store tier.
+- During indexing, content is written to the chosen store. `CodeIndex.files` holds metadata-only `CodeIndexMeta` entries when IDB or Lazy is active.
 
 ### Worker Optimization
 
@@ -75,9 +83,12 @@ Search and scanner workers use `IDBContentStore` directly for large repos, readi
 | Type | Location | Purpose |
 | ---- | -------- | ------- |
 | `ContentStore` | `lib/code/content-store.ts` | Interface for content storage (get, getSync, getBatch, put, has, delete) |
-| `InMemoryContentStore` | `lib/code/content-store.ts` | Map-backed store for small repos |
-| `IDBContentStore` | `lib/code/content-store.ts` | IndexedDB-backed store for large repos |
+| `InMemoryContentStore` | `lib/code/content-store.ts` | Map-backed store for small repos (< 50 MB) |
+| `IDBContentStore` | `lib/code/content-store.ts` | IndexedDB-backed store for medium repos (50–200 MB) |
+| `LazyContentStore` | `lib/code/content-store.ts` | On-demand fetch store for large repos (> 200 MB) |
+| `FetchQueue` | `lib/code/fetch-queue.ts` | Priority-based concurrency-limited fetch queue |
 | `CodeIndexMeta` | `lib/code/content-store.ts` | Metadata-only file record (path, name, language, lineCount) |
+| `ContentAvailability` | `lib/repository/repo-state.ts` | UI state: `'full'` or `'metadata-only'` |
 
 ## Provider Architecture
 
@@ -472,6 +483,7 @@ graph TD
   subgraph LibCode["lib/code"]
     C1["code-index.ts"]
     C1b["content-store.ts"]
+    C1c["fetch-queue.ts"]
     C2["import-parser.ts"]
     C3["parser/analyzer.ts"]
     C4["scanner/scanner.ts"]
@@ -562,6 +574,7 @@ graph TD
   C4 --> C1
   C4 --> C2
   C1 --> C1b
+  C1b --> C1c
   D1 --> C2
   D1 --> C1
   G3 --> CA3
@@ -572,6 +585,70 @@ graph TD
   R10 --> G1
   R11 --> EXT1
 ```
+
+## Lazy Content Loading (Phase 4)
+
+For repositories exceeding 200 MB, downloading all file content upfront is impractical. Phase 4 introduces **lazy content loading**: the tree structure and file metadata are indexed immediately, and file content is fetched on demand as consumers request it.
+
+### Lazy Loading Architecture
+
+```mermaid
+graph TD
+  A["indexing-pipeline detects repo > 200MB"] --> B["Create FetchQueue + LazyContentStore"]
+  B --> C["batchIndexMetadataOnly: files with content=''"]
+  C --> D["CodeIndex ready (metadata-only)"]
+  D --> E{"Consumer requests content"}
+  E -->|"AI readFile"| F["LazyContentStore.get() → FetchQueue.enqueue(high)"]
+  E -->|"Code browser"| G["LazyContentStore.get() → FetchQueue.enqueue(normal)"]
+  E -->|"Search"| H["searchIndexPartial: search loaded files, report unsearched"]
+  E -->|"Scanner"| I["metadataOnly mode: structural rules only"]
+  F --> J["Fetched content persisted to IDB via inner IDBContentStore"]
+  G --> J
+```
+
+### LazyContentStore
+
+`LazyContentStore` uses composition over inheritance: it wraps a private `IDBContentStore` for persistence and a `FetchQueue` for on-demand fetching.
+
+- `get(path)` checks IDB first; on miss, enqueues a fetch via `FetchQueue` and persists the result to IDB.
+- `getBatch(paths)` reads from IDB only — does not trigger fetches (avoids uncontrolled concurrency).
+- `getSync()` always returns `null` (async-only store).
+- `registerPaths(paths)` records all known file paths from the Git tree for metadata tracking.
+- `hasContent(path)` reports whether content has been fetched and stored.
+- `getContentStatus()` returns `{ total, loaded, pending }` for UI progress indicators.
+
+### FetchQueue
+
+Priority-based, concurrency-limited queue for fetching file content from GitHub's raw content API.
+
+| Feature | Detail |
+| ------- | ------ |
+| Priority levels | `critical` (0) > `high` (1) > `normal` (2) > `low` (3), FIFO within same level |
+| Dedup | Completed → return cached; in-flight → return existing Promise; else → enqueue |
+| Concurrency | Default 10 concurrent fetches |
+| Abort | Rejects all queued entries; in-flight fetches complete but results are discarded |
+| Batch | `enqueueBatch()` for multiple files; individual failures don't fail the batch |
+| Progress | `onProgress` callback with `{ completed, pending, failed, total }` stats |
+
+### Metadata-Only Indexing
+
+`batchIndexMetadataOnly()` creates `CodeIndex` entries with `content: ''` (empty string matches nothing in search). The `meta` map holds `CodeIndexMeta` entries for fast metadata access. This preserves `totalFiles` count for UI display while avoiding content download.
+
+### Consumer Adaptations
+
+| Consumer | Adaptation |
+| -------- | ---------- |
+| **Search** | `searchIndexPartial()` separates results from unsearched files (content=''). UI shows count of unsearchable files |
+| **Scanner** | `metadataOnly` mode runs structural rules only (circular deps, coupling, dead modules) without file content |
+| **AI tools** | `readFile` / `readFiles` call `contentStore.get()` which triggers on-demand fetch via `FetchQueue` |
+| **Code browser** | On file selection, content is fetched lazily. Loading indicator shown while pending |
+| **UI state** | `ContentAvailability` (`'full'` or `'metadata-only'`) in `RepositoryProvider` drives conditional UI |
+
+### Security
+
+- `buildRawContentUrl()` in `lib/github/parser.ts` URL-encodes path segments to prevent injection.
+- `FetchQueue` rejects paths with path traversal patterns (`..`, absolute paths).
+- Abort signal integration prevents orphaned fetches on repo disconnect.
 
 ## Key Design Patterns
 

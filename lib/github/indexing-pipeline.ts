@@ -3,18 +3,19 @@ import type { GitHubRepo, FileNode } from '@/types/repository'
 import { detectLanguage } from '@/lib/github/fetcher'
 import { fetchFileViaProxy } from '@/lib/github/client'
 import type { CodeIndex } from '@/lib/code/code-index'
-import { createEmptyIndex, createEmptyIndexWithStore, batchIndexFiles, flattenFiles } from '@/lib/code/code-index'
-import { IDBContentStore } from '@/lib/code/content-store'
+import { createEmptyIndex, createEmptyIndexWithStore, batchIndexFiles, batchIndexMetadataOnly, flattenFiles } from '@/lib/code/code-index'
+import { IDBContentStore, LazyContentStore } from '@/lib/code/content-store'
+import { FetchQueue } from '@/lib/code/fetch-queue'
 import { fetchRepoZipball, isFileIndexable } from '@/lib/github/zipball'
 import { setCachedRepo } from '@/lib/cache/repo-cache'
 import { fetchWithConcurrency } from './fetch-utils'
-import { IDB_CONTENT_STORE_THRESHOLD_KB } from '@/config/constants'
+import { IDB_CONTENT_STORE_THRESHOLD_KB, LAZY_CONTENT_THRESHOLD_KB } from '@/config/constants'
 import { toast } from 'sonner'
 
 const CONCURRENCY_LIMIT = 10
 
 /** Subset of LoadingStage relevant during indexing. */
-type IndexingStage = 'downloading' | 'extracting' | 'indexing' | 'ready'
+type IndexingStage = 'downloading' | 'extracting' | 'indexing' | 'lazy-indexing' | 'ready'
 
 interface IndexingProgress {
   current: number
@@ -55,6 +56,43 @@ export async function startIndexing(
   if (indexableFiles.length === 0) {
     setIndexingProgress({ current: 0, total: 0, isComplete: true })
     setLoadingStage('ready')
+    return
+  }
+
+  // Phase 4: Lazy content loading for repos >= 200 MB
+  if (repoData.size != null && repoData.size >= LAZY_CONTENT_THRESHOLD_KB) {
+    setLoadingStage('lazy-indexing')
+
+    const fetchQueue = new FetchQueue({
+      fetchFn: (path) => fetchFileViaProxy(
+        repoData.owner, repoData.name, repoData.defaultBranch, path,
+      ),
+      concurrency: CONCURRENCY_LIMIT,
+      onProgress: (stats) => setIndexingProgress({
+        current: stats.completed,
+        total: stats.total,
+        isComplete: false,
+      }),
+      signal,
+    })
+
+    const repoKey = `${repoData.owner}/${repoData.name}`
+    const lazyStore = new LazyContentStore(repoKey, fetchQueue)
+    lazyStore.registerPaths(indexableFiles.map(f => f.path))
+
+    const metadataEntries = indexableFiles.map(f => ({
+      path: f.path,
+      language: f.language ?? detectLanguage(f.name),
+      lineCount: undefined,
+    }))
+
+    const baseIndex = createEmptyIndexWithStore(lazyStore)
+    const finalIndex = batchIndexMetadataOnly(baseIndex, metadataEntries)
+
+    setCodeIndex(finalIndex)
+    setIndexingProgress({ current: 0, total: indexableFiles.length, isComplete: false })
+    setLoadingStage('ready')
+    // FetchQueue accessible via codeIndex.contentStore (LazyContentStore.getFetchQueue())
     return
   }
 

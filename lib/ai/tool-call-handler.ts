@@ -146,7 +146,7 @@ export async function handleToolCall(
   }
 
   try {
-    const result = executeToolLocally(
+    const result = await executeToolLocally(
       toolCall.toolName,
       toolCall.input as Record<string, unknown>,
       codeIndexRef.current,

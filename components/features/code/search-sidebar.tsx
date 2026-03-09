@@ -4,7 +4,7 @@ import React from "react"
 import {
   Search, ChevronRight,
   CaseSensitive, Regex, WholeWord, Replace, Filter,
-  ReplaceAll, HelpCircle, AlertTriangle,
+  ReplaceAll, HelpCircle, AlertTriangle, FileWarning,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -52,6 +52,8 @@ export interface SearchSidebarProps {
   replaceAllInAllFiles: () => void
   expandAllMatches: boolean
   setExpandAllMatches: (v: boolean | ((p: boolean) => boolean)) => void
+  /** Number of files not searched due to unloaded content (lazy repos). */
+  unsearchedCount?: number
 }
 
 export function SearchSidebar({
@@ -82,6 +84,7 @@ export function SearchSidebar({
   replaceAllInAllFiles,
   expandAllMatches,
   setExpandAllMatches,
+  unsearchedCount,
 }: SearchSidebarProps) {
   return (
     <>
@@ -313,6 +316,15 @@ export function SearchSidebar({
                 >
                   Showing {visibleResultCount} of {searchResults.length} files - click to load more
                 </button>
+              </div>
+            )}
+            {/* Unsearched files notice for lazy repos */}
+            {unsearchedCount != null && unsearchedCount > 0 && (
+              <div className="mx-2 mt-2 mb-1 flex items-start gap-2 rounded-md bg-amber-500/10 px-3 py-2" role="status">
+                <FileWarning className="h-3.5 w-3.5 text-amber-400 shrink-0 mt-0.5" />
+                <span className="text-[11px] text-amber-300/90 leading-snug">
+                  {unsearchedCount} {unsearchedCount === 1 ? 'file' : 'files'} not yet searched &mdash; content still loading
+                </span>
               </div>
             )}
           </div>

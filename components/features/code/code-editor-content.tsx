@@ -5,6 +5,7 @@ import { Loader2 } from 'lucide-react'
 import { CodeEditor } from './code-editor'
 import type { CodeIssue } from '@/lib/code/issue-scanner'
 import type { SearchOptions, SymbolRange, InlineActionType } from './types'
+import type { ContentAvailability } from '@/lib/repository'
 
 interface CodeEditorContentProps {
   /** Indexing progress state */
@@ -37,6 +38,8 @@ interface CodeEditorContentProps {
   hasApiKey?: boolean
   /** Multi-line range highlight for tour stops */
   highlightedRange?: { startLine: number; endLine: number } | null
+  /** Whether content is fully loaded or lazy (metadata-only). */
+  contentAvailability?: ContentAvailability
 }
 
 export function CodeEditorContent({
@@ -58,6 +61,7 @@ export function CodeEditorContent({
   onAction,
   hasApiKey,
   highlightedRange,
+  contentAvailability,
 }: CodeEditorContentProps) {
   const editorRef = useRef<HTMLDivElement>(null)
 
@@ -104,9 +108,15 @@ export function CodeEditorContent({
 
   if (activeTab) {
     if (activeTab.isLoading) {
+      const isLazy = contentAvailability !== 'full'
       return (
         <div className="flex h-full items-center justify-center">
-          <Loader2 className="h-6 w-6 animate-spin text-text-secondary" />
+          <div className="flex flex-col items-center gap-3">
+            <Loader2 className="h-6 w-6 animate-spin text-text-secondary" />
+            {isLazy && (
+              <p className="text-xs text-text-muted">Loading file content…</p>
+            )}
+          </div>
         </div>
       )
     }

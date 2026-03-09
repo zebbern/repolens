@@ -68,6 +68,8 @@ export interface ScanRule {
   fix?: string
   /** Description of the fix approach */
   fixDescription?: string
+  /** When false, the rule can run on metadata-only files (no content required). Defaults to true. */
+  requiresContent?: boolean
 }
 
 export type HealthGrade = 'A' | 'B' | 'C' | 'D' | 'F'
@@ -100,6 +102,10 @@ export interface ScanResults {
   issuesPerKloc: number
   /** True when only a subset of files were scanned (differential scan) */
   isPartialScan: boolean
+  /** Number of files with content not yet loaded (content === ''). */
+  unscannedFileCount?: number
+  /** True when only metadata-only rules were evaluated (no content parsing). */
+  isMetadataOnly?: boolean
   /** Number of issues suppressed by inline comments */
   suppressionCount: number
   /** CVSS-like project risk score (0.0–10.0), weighted average of issue scores */
@@ -136,6 +142,8 @@ export interface CompositeRule {
   fix?: string
   /** Description of the fix approach */
   fixDescription?: string
+  /** When false, the rule can run on metadata-only files. Defaults to true. */
+  requiresContent?: boolean
   /** If ANY of these patterns match, suppress the rule entirely (hard suppression) */
   mustNotContain?: RegExp[]
   /** When true, requiredPatterns[0] must appear on an earlier line than requiredPatterns[1] */

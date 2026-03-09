@@ -20,11 +20,12 @@ describe('LoadingStage', () => {
       'downloading',
       'extracting',
       'indexing',
+      'lazy-indexing',
       'ready',
       'cached',
     ]
     // TypeScript ensures these are valid — runtime check confirms the array
-    expect(stages).toHaveLength(8)
+    expect(stages).toHaveLength(9)
   })
 })
 

@@ -10,8 +10,8 @@ import { applyRateLimit } from "@/lib/api/rate-limit"
 const fileQuerySchema = z.object({
   owner: z.string().min(1).regex(GITHUB_NAME_RE, 'Invalid owner name'),
   name: z.string().min(1).regex(GITHUB_NAME_RE, 'Invalid repo name'),
-  branch: z.string().min(1),
-  path: z.string().min(1),
+  branch: z.string().min(1).refine(s => !s.includes('..'), 'Invalid branch name'),
+  path: z.string().min(1).refine(s => !s.includes('..'), 'Invalid path'),
 })
 
 export async function GET(request: NextRequest) {

@@ -1,5 +1,6 @@
-import { describe, it, expect, beforeEach } from 'vitest'
-import { InMemoryContentStore, IDBContentStore } from '../content-store'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { InMemoryContentStore, IDBContentStore, LazyContentStore } from '../content-store'
+import { FetchQueue, type FetchQueueOptions } from '../fetch-queue'
 import { IDBFactory, IDBKeyRange } from 'fake-indexeddb'
 import {
   createEmptyIndex,
@@ -395,6 +396,220 @@ describe('IDBContentStore', () => {
 
     expect(await storeA.get('file.ts')).toBe('alice-content')
     expect(await storeB.get('file.ts')).toBe('bob-content')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// LazyContentStore
+// ---------------------------------------------------------------------------
+
+describe('LazyContentStore', () => {
+  let mockFetchFn: ReturnType<typeof vi.fn>
+  let fetchQueue: FetchQueue
+
+  beforeEach(() => {
+    globalThis.indexedDB = new IDBFactory()
+    globalThis.IDBKeyRange = IDBKeyRange
+    mockFetchFn = vi.fn(async (path: string) => `fetched:${path}`)
+    fetchQueue = new FetchQueue({ fetchFn: mockFetchFn })
+  })
+
+  it('constructor initializes with empty metadataPaths and loadedPaths', () => {
+    const store = new LazyContentStore('owner/repo', fetchQueue)
+
+    expect(store.size).toBe(0)
+    expect(store.hasContent('any.ts')).toBe(false)
+    expect(store.getContentStatus()).toEqual({ total: 0, loaded: 0, pending: 0 })
+  })
+
+  it('registerPaths() adds paths to metadataPaths', () => {
+    const store = new LazyContentStore('owner/repo', fetchQueue)
+
+    store.registerPaths(['a.ts', 'b.ts', 'c.ts'])
+
+    expect(store.size).toBe(3)
+    expect(store.has('a.ts')).toBe(true)
+    expect(store.has('b.ts')).toBe(true)
+    expect(store.has('c.ts')).toBe(true)
+  })
+
+  it('registerPaths() is additive', () => {
+    const store = new LazyContentStore('owner/repo', fetchQueue)
+
+    store.registerPaths(['a.ts'])
+    store.registerPaths(['b.ts', 'c.ts'])
+
+    expect(store.size).toBe(3)
+  })
+
+  it('has() returns true for metadata paths, false for unknown', () => {
+    const store = new LazyContentStore('owner/repo', fetchQueue)
+    store.registerPaths(['known.ts'])
+
+    expect(store.has('known.ts')).toBe(true)
+    expect(store.has('unknown.ts')).toBe(false)
+  })
+
+  it('hasContent() returns false before content is loaded', () => {
+    const store = new LazyContentStore('owner/repo', fetchQueue)
+    store.registerPaths(['file.ts'])
+
+    expect(store.hasContent('file.ts')).toBe(false)
+  })
+
+  it('put() stores content and marks path as loaded', async () => {
+    const store = new LazyContentStore('owner/repo', fetchQueue)
+    store.registerPaths(['file.ts'])
+
+    store.put('file.ts', 'content-data')
+
+    expect(store.hasContent('file.ts')).toBe(true)
+
+    // Wait for IDB write to settle
+    await new Promise((r) => setTimeout(r, 10))
+    const result = await store.get('file.ts')
+    expect(result).toBe('content-data')
+  })
+
+  it('putBatch() stores multiple files and marks all as loaded', async () => {
+    const store = new LazyContentStore('owner/repo', fetchQueue)
+    store.registerPaths(['a.ts', 'b.ts'])
+
+    store.putBatch([
+      { path: 'a.ts', content: 'aaa' },
+      { path: 'b.ts', content: 'bbb' },
+    ])
+
+    expect(store.hasContent('a.ts')).toBe(true)
+    expect(store.hasContent('b.ts')).toBe(true)
+
+    await new Promise((r) => setTimeout(r, 10))
+    expect(await store.get('a.ts')).toBe('aaa')
+    expect(await store.get('b.ts')).toBe('bbb')
+  })
+
+  it('get() returns content from IDB for loaded files', async () => {
+    const store = new LazyContentStore('owner/repo', fetchQueue)
+    store.registerPaths(['file.ts'])
+    store.put('file.ts', 'stored-content')
+
+    await new Promise((r) => setTimeout(r, 10))
+
+    const result = await store.get('file.ts')
+    expect(result).toBe('stored-content')
+    // Should NOT call fetchFn since content is in IDB
+    expect(mockFetchFn).not.toHaveBeenCalled()
+  })
+
+  it('get() triggers FetchQueue for unloaded metadata paths', async () => {
+    const store = new LazyContentStore('owner/repo', fetchQueue)
+    store.registerPaths(['lazy.ts'])
+
+    const result = await store.get('lazy.ts')
+
+    expect(result).toBe('fetched:lazy.ts')
+    expect(mockFetchFn).toHaveBeenCalledWith('lazy.ts')
+    // After fetch, content should be loaded
+    expect(store.hasContent('lazy.ts')).toBe(true)
+  })
+
+  it('get() returns null for completely unknown paths', async () => {
+    const store = new LazyContentStore('owner/repo', fetchQueue)
+
+    const result = await store.get('unknown.ts')
+
+    expect(result).toBeNull()
+    expect(mockFetchFn).not.toHaveBeenCalled()
+  })
+
+  it('get() returns null when fetch fails', async () => {
+    mockFetchFn.mockRejectedValue(new Error('Network error'))
+    const failQueue = new FetchQueue({ fetchFn: mockFetchFn })
+    const store = new LazyContentStore('owner/repo', failQueue)
+    store.registerPaths(['fail.ts'])
+
+    const result = await store.get('fail.ts')
+
+    expect(result).toBeNull()
+  })
+
+  it('getSync() always returns null', () => {
+    const store = new LazyContentStore('owner/repo', fetchQueue)
+    store.registerPaths(['file.ts'])
+    store.put('file.ts', 'content')
+
+    expect(store.getSync('file.ts')).toBeNull()
+  })
+
+  it('getBatch() reads from IDB only — does not trigger fetches', async () => {
+    const store = new LazyContentStore('owner/repo', fetchQueue)
+    store.registerPaths(['loaded.ts', 'unloaded.ts'])
+    store.put('loaded.ts', 'data')
+
+    await new Promise((r) => setTimeout(r, 10))
+
+    const result = await store.getBatch(['loaded.ts', 'unloaded.ts'])
+
+    expect(result.size).toBe(1)
+    expect(result.get('loaded.ts')).toBe('data')
+    expect(result.has('unloaded.ts')).toBe(false)
+    expect(mockFetchFn).not.toHaveBeenCalled()
+  })
+
+  it('getContentStatus() returns correct counts', () => {
+    const store = new LazyContentStore('owner/repo', fetchQueue)
+    store.registerPaths(['a.ts', 'b.ts', 'c.ts'])
+    store.put('a.ts', 'content-a')
+
+    const status = store.getContentStatus()
+
+    expect(status.total).toBe(3)
+    expect(status.loaded).toBe(1)
+    expect(status.pending).toBe(0)
+  })
+
+  it('delete() removes from all internal sets and IDB', async () => {
+    const store = new LazyContentStore('owner/repo', fetchQueue)
+    store.registerPaths(['file.ts'])
+    store.put('file.ts', 'content')
+
+    expect(store.has('file.ts')).toBe(true)
+    expect(store.hasContent('file.ts')).toBe(true)
+
+    store.delete('file.ts')
+
+    expect(store.has('file.ts')).toBe(false)
+    expect(store.hasContent('file.ts')).toBe(false)
+    expect(store.size).toBe(0)
+  })
+
+  it('size returns metadataPaths count', () => {
+    const store = new LazyContentStore('owner/repo', fetchQueue)
+    expect(store.size).toBe(0)
+
+    store.registerPaths(['a.ts', 'b.ts'])
+    expect(store.size).toBe(2)
+
+    store.delete('a.ts')
+    expect(store.size).toBe(1)
+  })
+
+  it('getFetchQueue() returns the underlying FetchQueue', () => {
+    const store = new LazyContentStore('owner/repo', fetchQueue)
+    expect(store.getFetchQueue()).toBe(fetchQueue)
+  })
+
+  it('clear() resets all state and aborts pending fetches', async () => {
+    const store = new LazyContentStore('owner/repo', fetchQueue)
+    store.registerPaths(['a.ts', 'b.ts'])
+    store.put('a.ts', 'content')
+
+    await store.clear()
+
+    expect(store.size).toBe(0)
+    expect(store.has('a.ts')).toBe(false)
+    expect(store.hasContent('a.ts')).toBe(false)
+    expect(store.getContentStatus()).toEqual({ total: 0, loaded: 0, pending: 0 })
   })
 })
 

@@ -3,6 +3,7 @@ import type { FileNode } from "@/types/repository"
 import type { CodeIndex } from "@/lib/code/code-index"
 import { flattenFiles } from "@/lib/code/code-index"
 import { fetchFileViaProxy } from "@/lib/github/client"
+import type { ContentAvailability } from "@/lib/repository"
 import type { OpenTab } from "../types"
 
 interface UseFileOperationsOptions {
@@ -12,6 +13,10 @@ interface UseFileOperationsOptions {
   modifiedContents: Map<string, string>
   navigateToFile?: string | null
   onNavigateComplete?: () => void
+  /** On-demand content loader for lazy repos. */
+  loadFileContent?: (path: string) => Promise<string | null>
+  /** Whether file content is fully available or metadata-only. */
+  contentAvailability?: ContentAvailability
 }
 
 /**
@@ -25,6 +30,8 @@ export function useFileOperations({
   modifiedContents,
   navigateToFile,
   onNavigateComplete,
+  loadFileContent,
+  contentAvailability,
 }: UseFileOperationsOptions) {
   const [openTabs, setOpenTabs] = useState<OpenTab[]>([])
   const [activeTabPath, setActiveTabPath] = useState<string | null>(null)
@@ -71,9 +78,23 @@ export function useFileOperations({
               : t
           ))
         } else if (indexed) {
-          setOpenTabs(prev => prev.map(t =>
-            t.path === file.path ? { ...t, content: indexed.content, originalContent: indexed.content, isLoading: false } : t
-          ))
+          if (!indexed.content && contentAvailability !== 'full' && loadFileContent) {
+            // Lazy repo: content not loaded yet — fetch on demand
+            try {
+              const content = await loadFileContent(file.path)
+              setOpenTabs(prev => prev.map(t =>
+                t.path === file.path ? { ...t, content, originalContent: content, isLoading: false } : t
+              ))
+            } catch {
+              setOpenTabs(prev => prev.map(t =>
+                t.path === file.path ? { ...t, error: 'Failed to load file content', isLoading: false } : t
+              ))
+            }
+          } else {
+            setOpenTabs(prev => prev.map(t =>
+              t.path === file.path ? { ...t, content: indexed.content, originalContent: indexed.content, isLoading: false } : t
+            ))
+          }
         } else {
           const content = await fetchFileViaProxy(repo.owner, repo.name, repo.defaultBranch, file.path)
           setOpenTabs(prev => prev.map(t =>
@@ -86,7 +107,7 @@ export function useFileOperations({
         ))
       }
     }
-  }, [repo, codeIndex, modifiedContents])
+  }, [repo, codeIndex, modifiedContents, loadFileContent, contentAvailability])
 
   // Navigate-to-file effect (e.g. from diagram clicks)
   const lastNavigatedRef = useRef<string | null>(null)

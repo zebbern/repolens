@@ -326,9 +326,9 @@ describe('AI tool bridge: executeScanIssues via executeToolLocally', () => {
     return index
   }
 
-  it('returns issues with critical severity for eval()', () => {
+  it('returns issues with critical severity for eval()', async () => {
     const index = buildIndex()
-    const raw = executeToolLocally('scanIssues', { path: 'src/danger.ts' }, index)
+    const raw = await executeToolLocally('scanIssues', { path: 'src/danger.ts' }, index)
     const result = JSON.parse(raw)
 
     expect(result.issueCount).toBeGreaterThanOrEqual(1)
@@ -339,9 +339,9 @@ describe('AI tool bridge: executeScanIssues via executeToolLocally', () => {
     expect(evalIssues[0].severity).toBe('critical')
   })
 
-  it('returns backward-compatible fields: path, issueCount, issues[].line, severity, message', () => {
+  it('returns backward-compatible fields: path, issueCount, issues[].line, severity, message', async () => {
     const index = buildIndex()
-    const raw = executeToolLocally('scanIssues', { path: 'src/danger.ts' }, index)
+    const raw = await executeToolLocally('scanIssues', { path: 'src/danger.ts' }, index)
     const result = JSON.parse(raw)
 
     expect(result.path).toBe('src/danger.ts')
@@ -355,9 +355,9 @@ describe('AI tool bridge: executeScanIssues via executeToolLocally', () => {
     }
   })
 
-  it('returns new fields: issues[].ruleId, issues[].confidence', () => {
+  it('returns new fields: issues[].ruleId, issues[].confidence', async () => {
     const index = buildIndex()
-    const raw = executeToolLocally('scanIssues', { path: 'src/danger.ts' }, index)
+    const raw = await executeToolLocally('scanIssues', { path: 'src/danger.ts' }, index)
     const result = JSON.parse(raw)
 
     expect(result.issues.length).toBeGreaterThanOrEqual(1)
@@ -366,29 +366,29 @@ describe('AI tool bridge: executeScanIssues via executeToolLocally', () => {
     expect(issue.confidence).toBeTruthy()
   })
 
-  it('returns error for non-existent file', () => {
+  it('returns error for non-existent file', async () => {
     const index = buildIndex()
-    const raw = executeToolLocally('scanIssues', { path: 'src/nonexistent.ts' }, index)
+    const raw = await executeToolLocally('scanIssues', { path: 'src/nonexistent.ts' }, index)
     const result = JSON.parse(raw)
 
     expect(result.error).toContain('File not found')
   })
 
-  it('caps issues at 50', () => {
+  it('caps issues at 50', async () => {
     let index = createEmptyIndex()
     // Create a file with many many issues
     const lines = Array.from({ length: 60 }, (_, i) => `console.log("line${i}")`)
     index = indexFile(index, 'src/verbose.ts', lines.join('\n'), 'typescript')
 
-    const raw = executeToolLocally('scanIssues', { path: 'src/verbose.ts' }, index)
+    const raw = await executeToolLocally('scanIssues', { path: 'src/verbose.ts' }, index)
     const result = JSON.parse(raw)
 
     expect(result.issues.length).toBeLessThanOrEqual(50)
   })
 
-  it('returns empty issues for clean file', () => {
+  it('returns empty issues for clean file', async () => {
     const index = buildIndex()
-    const raw = executeToolLocally('scanIssues', { path: 'src/clean.ts' }, index)
+    const raw = await executeToolLocally('scanIssues', { path: 'src/clean.ts' }, index)
     const result = JSON.parse(raw)
 
     expect(result.issueCount).toBe(0)

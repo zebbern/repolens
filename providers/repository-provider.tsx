@@ -8,8 +8,9 @@ import { parseGitHubUrl } from "@/lib/github/parser"
 import { buildFileTree } from "@/lib/github/fetcher"
 import { fetchRepoViaProxy, fetchTreeViaProxy, fetchFileViaProxy } from "@/lib/github/client"
 import type { CodeIndex } from "@/lib/code/code-index"
-import { createEmptyIndex, createEmptyIndexWithStore, batchIndexFiles } from '@/lib/code/code-index'
-import { IDBContentStore } from '@/lib/code/content-store'
+import { createEmptyIndex, createEmptyIndexWithStore, batchIndexFiles, invalidateLinesCache } from '@/lib/code/code-index'
+import { IDBContentStore, LazyContentStore } from '@/lib/code/content-store'
+import type { FetchQueue } from '@/lib/code/fetch-queue'
 import { getCachedRepo } from "@/lib/cache/repo-cache"
 import { analyzeCodebase, type FullAnalysis } from "@/lib/code/import-parser"
 import { startIndexing as runIndexingPipeline } from "@/lib/github/indexing-pipeline"
@@ -17,13 +18,16 @@ import { useGitHubToken } from "@/providers/github-token-provider"
 import {
   DEFAULT_SEARCH_STATE,
   DEFAULT_INDEXING_PROGRESS,
+  DEFAULT_CONTENT_LOADING_STATS,
   type IndexingProgress,
   type SearchState,
   type LoadingStage,
+  type ContentAvailability,
+  type ContentLoadingStats,
 } from '@/lib/repository'
 
 // Re-export for backward compatibility
-export type { LoadingStage, SearchState } from '@/lib/repository'
+export type { LoadingStage, SearchState, ContentAvailability, ContentLoadingStats } from '@/lib/repository'
 
 interface RepositoryContextType extends RepositoryContext {
   connectRepository: (url: string) => Promise<boolean>
@@ -64,6 +68,10 @@ interface RepositoryContextType extends RepositoryContext {
   getTabCache: <T>(key: string) => T | undefined
   /** Store tab data in cache by key. */
   setTabCache: (key: string, value: unknown) => void
+  /** Whether file content is fully available or metadata-only (lazy repos). */
+  contentAvailability: ContentAvailability
+  /** On-demand content loading progress for lazy repos. */
+  contentLoadingStats: ContentLoadingStats
 }
 
 const RepositoryContextDefault: RepositoryContext = {
@@ -93,6 +101,9 @@ export function RepositoryProvider({ children }: { children: ReactNode }) {
   const [loadingStage, setLoadingStage] = useState<LoadingStage>('idle')
   const [pinnedFiles, setPinnedFiles] = useState<Map<string, PinnedFile>>(new Map())
   const tabCacheRef = useRef<Record<string, unknown>>({})
+  const [contentAvailability, setContentAvailability] = useState<ContentAvailability>('full')
+  const [contentLoadingStats, setContentLoadingStats] = useState<ContentLoadingStats>(DEFAULT_CONTENT_LOADING_STATS)
+  const fetchQueueRef = useRef<FetchQueue | null>(null)
 
   const { token: githubToken } = useGitHubToken()
 
@@ -102,6 +113,27 @@ export function RepositoryProvider({ children }: { children: ReactNode }) {
     const indexed = codeIndex.files.get(path)
     return indexed ? indexed.content : null
   }, [modifiedContents, codeIndex])
+
+  // Detect lazy content store and wire up progress tracking
+  useEffect(() => {
+    if (codeIndex.contentStore instanceof LazyContentStore) {
+      const fq = codeIndex.contentStore.getFetchQueue()
+      fetchQueueRef.current = fq
+      setContentAvailability('metadata-only')
+    } else {
+      fetchQueueRef.current = null
+    }
+  }, [codeIndex])
+
+  // Update content loading stats when indexing progress changes for lazy repos
+  useEffect(() => {
+    if (contentAvailability !== 'full' && codeIndex.contentStore instanceof LazyContentStore) {
+      setContentLoadingStats({
+        ...codeIndex.contentStore.getContentStatus(),
+        failed: fetchQueueRef.current?.stats.failed ?? 0,
+      })
+    }
+  }, [indexingProgress, contentAvailability, codeIndex])
 
   // Start indexing files in background (delegated to indexing-pipeline)
   const startIndexing = useCallback((
@@ -124,10 +156,14 @@ export function RepositoryProvider({ children }: { children: ReactNode }) {
     if (indexingAbortRef.current) {
       indexingAbortRef.current.abort()
     }
+    // Clean up existing FetchQueue reference
+    fetchQueueRef.current = null
     
     setIsLoading(true)
     setError(null)
     setCodeIndex(createEmptyIndex())
+    setContentAvailability('full')
+    setContentLoadingStats(DEFAULT_CONTENT_LOADING_STATS)
     setIndexingProgress(DEFAULT_INDEXING_PROGRESS)
     setFailedFiles([])
     tabCacheRef.current = {}
@@ -197,6 +233,8 @@ export function RepositoryProvider({ children }: { children: ReactNode }) {
       indexingAbortRef.current.abort()
       indexingAbortRef.current = null
     }
+    // Clean up FetchQueue for lazy repos
+    fetchQueueRef.current = null
     
     setRepo(null)
     setFiles([])
@@ -211,6 +249,8 @@ export function RepositoryProvider({ children }: { children: ReactNode }) {
     setIsCacheHit(false)
     setLoadingStage('idle')
     setPinnedFiles(new Map())
+    setContentAvailability('full')
+    setContentLoadingStats(DEFAULT_CONTENT_LOADING_STATS)
     tabCacheRef.current = {}
   }, [])
   
@@ -223,6 +263,24 @@ export function RepositoryProvider({ children }: { children: ReactNode }) {
     const existingFile = codeIndex?.files?.get(path)
     if (existingFile?.content) return existingFile.content
 
+    // Lazy repo: file exists in index with empty content — fetch on demand with critical priority
+    if (existingFile && contentAvailability !== 'full' && codeIndex.contentStore instanceof LazyContentStore) {
+      try {
+        const fq = codeIndex.contentStore.getFetchQueue()
+        const content = await fq.enqueue(path, 'critical')
+        // Update IndexedFile content in-place for subsequent sync access
+        existingFile.content = content
+        existingFile.lineCount = content.split('\n').length
+        invalidateLinesCache(existingFile)
+        codeIndex.contentStore.put(path, content)
+        return content
+      } catch (err) {
+        if (err instanceof DOMException && err.name === 'AbortError') return null
+        console.error('Failed to lazy-load file content:', err)
+        return null
+      }
+    }
+
     if (!repo) return null
 
     try {
@@ -232,7 +290,7 @@ export function RepositoryProvider({ children }: { children: ReactNode }) {
       console.error('Failed to load file content:', err)
       return null
     }
-  }, [repo, codeIndex])
+  }, [repo, codeIndex, contentAvailability])
 
   const getFileByPath = useCallback((path: string): FileNode | null => {
     function findNode(nodes: FileNode[], targetPath: string): FileNode | null {
@@ -300,7 +358,7 @@ export function RepositoryProvider({ children }: { children: ReactNode }) {
         resolvedPaths.add(pin.path)
 
         const file = codeIndex.files.get(pin.path)
-        if (!file) continue
+        if (!file || !file.content) continue
 
         if (file.content.length > MAX_SINGLE_FILE_BYTES) {
           skipped.push(pin.path)
@@ -322,6 +380,8 @@ export function RepositoryProvider({ children }: { children: ReactNode }) {
           if (!filePath.startsWith(prefix)) continue
           if (resolvedPaths.has(filePath)) continue
           resolvedPaths.add(filePath)
+
+          if (!file.content) continue
 
           if (file.content.length > MAX_SINGLE_FILE_BYTES) {
             skipped.push(filePath)
@@ -385,6 +445,8 @@ export function RepositoryProvider({ children }: { children: ReactNode }) {
     getPinnedContents,
     getTabCache,
     setTabCache,
+    contentAvailability,
+    contentLoadingStats,
   }), [
     repo, files, parsedFiles, isLoading, error,
     connectRepository, disconnectRepository, loadFileContent, getFileByPath,
@@ -394,6 +456,7 @@ export function RepositoryProvider({ children }: { children: ReactNode }) {
     codebaseAnalysis, failedFiles, isCacheHit, loadingStage,
     pinnedFiles, pinFile, unpinFile, clearPins, isPinned, getPinnedContents,
     getTabCache, setTabCache,
+    contentAvailability, contentLoadingStats,
   ])
 
   return (

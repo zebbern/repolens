@@ -1,5 +1,8 @@
 // Content store abstraction for Phase 3 tiered repo loading.
 // Wave 1: InMemoryContentStore only. Wave 2 adds IDBContentStore.
+// Phase 4: LazyContentStore for >200MB repos (on-demand content loading).
+
+import type { FetchQueue } from './fetch-queue'
 
 /**
  * Metadata-only file record — no content field.
@@ -268,5 +271,117 @@ export class IDBContentStore implements ContentStore {
   /** Reset cached DB connection (for testing). */
   _resetDBConnection(): void {
     this.dbPromise = null
+  }
+}
+
+/**
+ * Lazy content store for repos >200MB.
+ * Uses composition: wraps a private IDBContentStore for persistence and
+ * a FetchQueue for on-demand content loading.
+ *
+ * - `get(path)` triggers a fetch if content is not in IDB and path is known
+ * - `getBatch` reads from IDB only (no fetch trigger)
+ * - `getSync` always returns null (async-only store)
+ */
+export class LazyContentStore implements ContentStore {
+  readonly repoKey: string
+  private readonly idbStore: IDBContentStore
+  private readonly fetchQueue: FetchQueue
+  private readonly metadataPaths = new Set<string>()
+  private readonly loadedPaths = new Set<string>()
+
+  constructor(
+    repoKey: string,
+    fetchQueue: FetchQueue,
+  ) {
+    this.repoKey = repoKey
+    this.idbStore = new IDBContentStore(repoKey)
+    this.fetchQueue = fetchQueue
+  }
+
+  async get(path: string): Promise<string | null> {
+    const stored = await this.idbStore.get(path)
+    if (stored !== null) return stored
+
+    if (this.metadataPaths.has(path)) {
+      try {
+        const content = await this.fetchQueue.enqueue(path, 'normal')
+        this.put(path, content)
+        return content
+      } catch {
+        return null
+      }
+    }
+
+    return null
+  }
+
+  getSync(_path: string): string | null {
+    return null
+  }
+
+  /** Reads from IDB only — does NOT trigger fetches for missing files. */
+  getBatch(paths: string[]): Promise<Map<string, string>> {
+    return this.idbStore.getBatch(paths)
+  }
+
+  put(path: string, content: string): void {
+    this.idbStore.put(path, content)
+    this.loadedPaths.add(path)
+  }
+
+  putBatch(entries: Array<{ path: string; content: string }>): void {
+    this.idbStore.putBatch(entries)
+    for (const { path } of entries) {
+      this.loadedPaths.add(path)
+    }
+  }
+
+  has(path: string): boolean {
+    return this.metadataPaths.has(path)
+  }
+
+  delete(path: string): void {
+    this.idbStore.delete(path)
+    this.loadedPaths.delete(path)
+    this.metadataPaths.delete(path)
+  }
+
+  get size(): number {
+    return this.metadataPaths.size
+  }
+
+  /** Whether content has been loaded (fetched + stored in IDB) for this path. */
+  hasContent(path: string): boolean {
+    return this.loadedPaths.has(path)
+  }
+
+  /** Current content loading status. */
+  getContentStatus(): { total: number; loaded: number; pending: number } {
+    return {
+      total: this.metadataPaths.size,
+      loaded: this.loadedPaths.size,
+      pending: this.fetchQueue.stats.pending,
+    }
+  }
+
+  /** Register known file paths from the Git tree (metadata indexing). */
+  registerPaths(paths: string[]): void {
+    for (const p of paths) {
+      this.metadataPaths.add(p)
+    }
+  }
+
+  /** Clear all content and abort pending fetches. */
+  async clear(): Promise<void> {
+    this.metadataPaths.clear()
+    this.loadedPaths.clear()
+    this.fetchQueue.abort()
+    await this.idbStore.clear()
+  }
+
+  /** Access the underlying FetchQueue (e.g., for progress tracking). */
+  getFetchQueue(): FetchQueue {
+    return this.fetchQueue
   }
 }

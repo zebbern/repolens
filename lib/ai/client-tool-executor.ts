@@ -33,6 +33,8 @@ export interface ToolExecutorOptions {
   repoName?: string
   /** Repository info for GitHub fetch fallback when files are missing from the index. */
   repoInfo?: { owner: string; name: string; defaultBranch: string; token?: string }
+  /** Callback to fetch content for files not in the in-memory index (lazy repos). */
+  fetchFileContent?: (paths: string[]) => Promise<Map<string, string>>
 }
 
 /** Maximum characters returned for a full file read (F5). */
@@ -53,15 +55,16 @@ function formatZodError(issues: Array<{ message: string }>): string {
 
 /**
  * Executes tool calls locally using the client-side CodeIndex.
+ * Async to support on-demand content fetching for lazy repos.
  */
-export function executeToolLocally(
+export async function executeToolLocally(
   toolName: string,
   input: Record<string, unknown>,
   codeIndex: CodeIndex | null,
   allFilePaths?: string[],
   options?: ToolExecutorOptions,
-): string {
-  if (!codeIndex?.files || codeIndex.files.size === 0) {
+): Promise<string> {
+  if (!codeIndex?.files || (codeIndex.files.size === 0 && (!codeIndex.meta || codeIndex.meta.size === 0))) {
     return JSON.stringify({ error: 'No codebase loaded' })
   }
 
@@ -80,13 +83,13 @@ export function executeToolLocally(
     case 'readFile': {
       const result = readFileSchema.safeParse(input)
       if (!result.success) { output = { error: formatZodError(result.error.issues) }; break }
-      output = executeReadFile(result.data, codeIndex)
+      output = await executeReadFile(result.data, codeIndex, options?.fetchFileContent)
       break
     }
     case 'readFiles': {
       const result = readFilesSchema.safeParse(input)
       if (!result.success) { output = { error: formatZodError(result.error.issues) }; break }
-      output = executeReadFiles(result.data, codeIndex)
+      output = await executeReadFiles(result.data, codeIndex, options?.fetchFileContent)
       break
     }
     case 'searchFiles': {
@@ -157,7 +160,11 @@ export function executeToolLocally(
 // ---------------------------------------------------------------------------
 
 function allPaths(codeIndex: CodeIndex): string[] {
-  return Array.from(codeIndex.files.keys()).sort()
+  const keys = new Set(codeIndex.files.keys())
+  if (codeIndex.meta) {
+    for (const k of codeIndex.meta.keys()) keys.add(k)
+  }
+  return Array.from(keys).sort()
 }
 
 function getContent(codeIndex: CodeIndex, path: string): string | undefined {
@@ -178,27 +185,46 @@ function findFile(codeIndex: CodeIndex, path: string): IndexedFile | undefined {
   return suffixMatch
 }
 
+/**
+ * Resolve a user-provided path to the canonical path in the index,
+ * checking both `files` and `meta` maps with fuzzy matching.
+ */
+function resolvePath(codeIndex: CodeIndex, path: string): string | undefined {
+  if (codeIndex.files.has(path) || codeIndex.meta?.has(path)) return path
+
+  const allKeys = [...codeIndex.files.keys(), ...(codeIndex.meta?.keys() ?? [])]
+  let suffixMatch: string | undefined
+  for (const p of allKeys) {
+    if (p.endsWith('/' + path)) return p
+    if (!suffixMatch && p.endsWith(path)) suffixMatch = p
+  }
+  return suffixMatch
+}
+
 // ---------------------------------------------------------------------------
 // Tool implementations
 // ---------------------------------------------------------------------------
 
-function executeReadFile(
+async function executeReadFile(
   input: { path: string; startLine?: number; endLine?: number },
   codeIndex: CodeIndex,
-): Record<string, unknown> {
-  const resolvedPath = input.path
-  let content = getContent(codeIndex, resolvedPath)
-  let usedPath = resolvedPath
+  fetchContent?: (paths: string[]) => Promise<Map<string, string>>,
+): Promise<Record<string, unknown>> {
+  const usedPath = resolvePath(codeIndex, input.path)
+  if (!usedPath) {
+    return { error: `File not found: ${input.path}. Use searchFiles or check the file tree.` }
+  }
+
+  let content = getContent(codeIndex, usedPath)
+
+  // On-demand fetch for lazy repos when content is not in memory
+  if (!content && fetchContent) {
+    const fetched = await fetchContent([usedPath])
+    content = fetched.get(usedPath)
+  }
 
   if (!content) {
-    const paths = allPaths(codeIndex)
-    const match = paths.find(p => p.endsWith('/' + resolvedPath)) ?? paths.find(p => p.endsWith(resolvedPath))
-    if (match) {
-      content = getContent(codeIndex, match)!
-      usedPath = match
-    } else {
-      return { error: `File not found: ${resolvedPath}. Use searchFiles or check the file tree.` }
-    }
+    return { error: `File content not available for: ${usedPath}. Content has not been loaded yet.` }
   }
 
   const lines = content.split('\n')
@@ -225,11 +251,46 @@ function executeReadFile(
   return { path: usedPath, content, lineCount: totalLines, totalLines }
 }
 
-function executeReadFiles(
+async function executeReadFiles(
   input: { paths: string[] },
   codeIndex: CodeIndex,
-): Record<string, unknown> {
-  const results = input.paths.map(p => executeReadFile({ path: p }, codeIndex))
+  fetchContent?: (paths: string[]) => Promise<Map<string, string>>,
+): Promise<Record<string, unknown>> {
+  // Resolve all paths and identify which need fetching (batch, no N+1)
+  const resolved = input.paths.map(p => ({ original: p, resolved: resolvePath(codeIndex, p) }))
+  const needFetch = resolved
+    .filter(r => r.resolved && !getContent(codeIndex, r.resolved))
+    .map(r => r.resolved!)
+
+  let fetched = new Map<string, string>()
+  if (needFetch.length > 0 && fetchContent) {
+    fetched = await fetchContent(needFetch)
+  }
+
+  const results = resolved.map(({ original, resolved: rp }) => {
+    if (!rp) {
+      return { error: `File not found: ${original}. Use searchFiles or check the file tree.` }
+    }
+    let content = getContent(codeIndex, rp)
+    if (!content) content = fetched.get(rp)
+    if (!content) {
+      return { error: `File content not available for: ${rp}. Content has not been loaded yet.` }
+    }
+
+    const lines = content.split('\n')
+    const totalLines = lines.length
+    if (content.length > MAX_FILE_CONTENT_CHARS) {
+      return {
+        path: rp,
+        content: content.slice(0, MAX_FILE_CONTENT_CHARS),
+        lineCount: totalLines,
+        totalLines,
+        warning: `File truncated from ${content.length} to ${MAX_FILE_CONTENT_CHARS} characters. Use startLine/endLine to read specific sections.`,
+      }
+    }
+    return { path: rp, content, lineCount: totalLines, totalLines }
+  })
+
   return { files: results }
 }
 
@@ -317,7 +378,21 @@ function executeSearchFiles(
     return (b.totalMatches ?? 0) - (a.totalMatches ?? 0)
   })
 
-  return { totalFiles: paths.length, matchCount: results.length, results, ...(warning ? { warning } : {}) }
+  const output: Record<string, unknown> = { totalFiles: paths.length, matchCount: results.length, results }
+  if (warning) output.warning = warning
+
+  // Partial coverage: when meta has paths not in files, content search is incomplete
+  const metaSize = codeIndex.meta?.size ?? 0
+  const filesWithContent = codeIndex.files.size
+  if (metaSize > 0 && filesWithContent < metaSize) {
+    output.contentCoverage = {
+      searchedFiles: filesWithContent,
+      totalFiles: metaSize,
+      note: `Content search covered ${filesWithContent}/${metaSize} files. Path matching covers all files.`,
+    }
+  }
+
+  return output
 }
 
 function executeListDirectory(
@@ -394,6 +469,16 @@ function executeFindSymbol(
   // F3: Warn when index is partial
   if (allFilePaths && allFilePaths.length > 0 && codeIndex.files.size < allFilePaths.length) {
     output.warning = `Index covers ${codeIndex.files.size}/${allFilePaths.length} files. Some symbols may be missing.`
+  }
+
+  // Warn about lazy repos where content is not loaded for all metadata paths
+  const metaSize = codeIndex.meta?.size ?? 0
+  if (metaSize > 0 && codeIndex.files.size < metaSize) {
+    output.contentCoverage = {
+      searchedFiles: codeIndex.files.size,
+      totalFiles: metaSize,
+      note: `Symbol search covered ${codeIndex.files.size}/${metaSize} files with loaded content.`,
+    }
   }
 
   return output

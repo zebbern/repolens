@@ -66,15 +66,15 @@ function buildMockIndex() {
 // ---------------------------------------------------------------------------
 
 describe('executeToolLocally — empty index', () => {
-  it('returns error JSON for null codeIndex', () => {
-    const result = JSON.parse(executeToolLocally('readFile', { path: 'foo' }, null))
+  it('returns error JSON for null codeIndex', async () => {
+    const result = JSON.parse(await executeToolLocally('readFile', { path: 'foo' }, null))
     expect(result).toHaveProperty('error')
     expect(result.error).toContain('No codebase loaded')
   })
 
-  it('returns error JSON for codeIndex with 0 files', () => {
+  it('returns error JSON for codeIndex with 0 files', async () => {
     const empty = createEmptyIndex()
-    const result = JSON.parse(executeToolLocally('readFile', { path: 'foo' }, empty))
+    const result = JSON.parse(await executeToolLocally('readFile', { path: 'foo' }, empty))
     expect(result).toHaveProperty('error')
   })
 })
@@ -84,24 +84,24 @@ describe('executeToolLocally — empty index', () => {
 // ---------------------------------------------------------------------------
 
 describe('executeToolLocally — readFile', () => {
-  it('returns file content for a valid path', () => {
+  it('returns file content for a valid path', async () => {
     const index = buildMockIndex()
-    const result = JSON.parse(executeToolLocally('readFile', { path: 'src/utils.ts' }, index))
+    const result = JSON.parse(await executeToolLocally('readFile', { path: 'src/utils.ts' }, index))
     expect(result.path).toBe('src/utils.ts')
     expect(result.content).toContain('export function greet')
   })
 
-  it('returns error for a missing file path', () => {
+  it('returns error for a missing file path', async () => {
     const index = buildMockIndex()
-    const result = JSON.parse(executeToolLocally('readFile', { path: 'nonexistent.ts' }, index))
+    const result = JSON.parse(await executeToolLocally('readFile', { path: 'nonexistent.ts' }, index))
     expect(result).toHaveProperty('error')
     expect(result.error).toContain('File not found')
   })
 
-  it('respects startLine / endLine range', () => {
+  it('respects startLine / endLine range', async () => {
     const index = buildMockIndex()
     const result = JSON.parse(
-      executeToolLocally('readFile', { path: 'src/utils.ts', startLine: 1, endLine: 3 }, index),
+      await executeToolLocally('readFile', { path: 'src/utils.ts', startLine: 1, endLine: 3 }, index),
     )
     expect(result.startLine).toBe(1)
     expect(result.endLine).toBe(3)
@@ -116,20 +116,20 @@ describe('executeToolLocally — readFile', () => {
 // ---------------------------------------------------------------------------
 
 describe('executeToolLocally — readFiles', () => {
-  it('returns multiple files', () => {
+  it('returns multiple files', async () => {
     const index = buildMockIndex()
     const result = JSON.parse(
-      executeToolLocally('readFiles', { paths: ['src/utils.ts', 'src/types.ts'] }, index),
+      await executeToolLocally('readFiles', { paths: ['src/utils.ts', 'src/types.ts'] }, index),
     )
     expect(result.files).toHaveLength(2)
     expect(result.files[0].path).toBe('src/utils.ts')
     expect(result.files[1].path).toBe('src/types.ts')
   })
 
-  it('returns error entries for invalid paths', () => {
+  it('returns error entries for invalid paths', async () => {
     const index = buildMockIndex()
     const result = JSON.parse(
-      executeToolLocally('readFiles', { paths: ['missing.ts'] }, index),
+      await executeToolLocally('readFiles', { paths: ['missing.ts'] }, index),
     )
     expect(result.files[0]).toHaveProperty('error')
   })
@@ -140,10 +140,10 @@ describe('executeToolLocally — readFiles', () => {
 // ---------------------------------------------------------------------------
 
 describe('executeToolLocally — searchFiles', () => {
-  it('finds path matches', () => {
+  it('finds path matches', async () => {
     const index = buildMockIndex()
     const result = JSON.parse(
-      executeToolLocally('searchFiles', { query: 'utils' }, index),
+      await executeToolLocally('searchFiles', { query: 'utils' }, index),
     )
     expect(result.matchCount).toBeGreaterThan(0)
     const pathMatches = result.results.filter(
@@ -153,25 +153,25 @@ describe('executeToolLocally — searchFiles', () => {
     expect(pathMatches[0].path).toContain('utils')
   })
 
-  it('finds content matches', () => {
+  it('finds content matches', async () => {
     const index = buildMockIndex()
     const result = JSON.parse(
-      executeToolLocally('searchFiles', { query: 'greet' }, index),
+      await executeToolLocally('searchFiles', { query: 'greet' }, index),
     )
     expect(result.matchCount).toBeGreaterThan(0)
   })
 
-  it('respects maxResults', () => {
+  it('respects maxResults', async () => {
     const index = buildMockIndex()
     const result = JSON.parse(
-      executeToolLocally('searchFiles', { query: 'export', maxResults: 1 }, index),
+      await executeToolLocally('searchFiles', { query: 'export', maxResults: 1 }, index),
     )
     expect(result.results.length).toBeLessThanOrEqual(1)
   })
 
-  it('returns validation error for missing query', () => {
+  it('returns validation error for missing query', async () => {
     const index = buildMockIndex()
-    const result = JSON.parse(executeToolLocally('searchFiles', {}, index))
+    const result = JSON.parse(await executeToolLocally('searchFiles', {}, index))
     expect(result).toHaveProperty('error')
     expect(result.error).toContain('Validation failed')
   })
@@ -182,40 +182,40 @@ describe('executeToolLocally — searchFiles', () => {
 // ---------------------------------------------------------------------------
 
 describe('executeToolLocally — searchFiles with isRegex', () => {
-  it('works with a valid regex', () => {
+  it('works with a valid regex', async () => {
     const index = buildMockIndex()
     const result = JSON.parse(
-      executeToolLocally('searchFiles', { query: 'greet|add', isRegex: true }, index),
+      await executeToolLocally('searchFiles', { query: 'greet|add', isRegex: true }, index),
     )
     expect(result.matchCount).toBeGreaterThan(0)
   })
 
-  it('falls back gracefully for invalid regex', () => {
+  it('falls back gracefully for invalid regex', async () => {
     const index = buildMockIndex()
     // Invalid regex — searchIndex falls back to escaped literal
     const result = JSON.parse(
-      executeToolLocally('searchFiles', { query: '[invalid(', isRegex: true }, index),
+      await executeToolLocally('searchFiles', { query: '[invalid(', isRegex: true }, index),
     )
     // Should not throw; result may have 0 matches but no error property
     expect(result).toHaveProperty('matchCount')
     expect(result.warning).toContain('Invalid regex')
   })
 
-  it('falls back for ReDoS-length regex (> 200 chars)', () => {
+  it('falls back for ReDoS-length regex (> 200 chars)', async () => {
     const index = buildMockIndex()
     const longPattern = 'a'.repeat(201)
     const result = JSON.parse(
-      executeToolLocally('searchFiles', { query: longPattern, isRegex: true }, index),
+      await executeToolLocally('searchFiles', { query: longPattern, isRegex: true }, index),
     )
     expect(result).toHaveProperty('matchCount')
     expect(result.warning).toContain('200 characters')
   })
 
-  it('uses regex for path matching when isRegex is true', () => {
+  it('uses regex for path matching when isRegex is true', async () => {
     const index = buildMockIndex()
     // Regex that matches paths containing "types" or "utils"
     const result = JSON.parse(
-      executeToolLocally('searchFiles', { query: 'types|utils', isRegex: true }, index),
+      await executeToolLocally('searchFiles', { query: 'types|utils', isRegex: true }, index),
     )
     expect(result.matchCount).toBeGreaterThanOrEqual(2)
     const pathMatches = result.results.filter(
@@ -227,10 +227,10 @@ describe('executeToolLocally — searchFiles with isRegex', () => {
     expect(matchedPaths.some((p: string) => p.includes('utils'))).toBe(true)
   })
 
-  it('regex path matching is case-insensitive', () => {
+  it('regex path matching is case-insensitive', async () => {
     const index = buildMockIndex()
     const result = JSON.parse(
-      executeToolLocally('searchFiles', { query: 'UTILS', isRegex: true }, index),
+      await executeToolLocally('searchFiles', { query: 'UTILS', isRegex: true }, index),
     )
     const pathMatches = result.results.filter(
       (r: { matchType: string }) => r.matchType === 'path',
@@ -239,10 +239,10 @@ describe('executeToolLocally — searchFiles with isRegex', () => {
     expect(pathMatches[0].path).toContain('utils')
   })
 
-  it('no warning field when regex is valid and short', () => {
+  it('no warning field when regex is valid and short', async () => {
     const index = buildMockIndex()
     const result = JSON.parse(
-      executeToolLocally('searchFiles', { query: 'greet', isRegex: true }, index),
+      await executeToolLocally('searchFiles', { query: 'greet', isRegex: true }, index),
     )
     expect(result.warning).toBeUndefined()
   })
@@ -253,10 +253,10 @@ describe('executeToolLocally — searchFiles with isRegex', () => {
 // ---------------------------------------------------------------------------
 
 describe('executeToolLocally — listDirectory', () => {
-  it('returns entries for a valid directory', () => {
+  it('returns entries for a valid directory', async () => {
     const index = buildMockIndex()
     const result = JSON.parse(
-      executeToolLocally('listDirectory', { path: 'src' }, index),
+      await executeToolLocally('listDirectory', { path: 'src' }, index),
     )
     expect(result.entries).toBeDefined()
     expect(result.entries.length).toBeGreaterThan(0)
@@ -265,10 +265,10 @@ describe('executeToolLocally — listDirectory', () => {
     expect(result.entries).toContain('types.ts')
   })
 
-  it('returns error for a nonexistent directory', () => {
+  it('returns error for a nonexistent directory', async () => {
     const index = buildMockIndex()
     const result = JSON.parse(
-      executeToolLocally('listDirectory', { path: 'nonexistent' }, index),
+      await executeToolLocally('listDirectory', { path: 'nonexistent' }, index),
     )
     expect(result).toHaveProperty('error')
   })
@@ -279,56 +279,56 @@ describe('executeToolLocally — listDirectory', () => {
 // ---------------------------------------------------------------------------
 
 describe('executeToolLocally — findSymbol', () => {
-  it('finds function definitions', () => {
+  it('finds function definitions', async () => {
     const index = buildMockIndex()
     const result = JSON.parse(
-      executeToolLocally('findSymbol', { name: 'greet' }, index),
+      await executeToolLocally('findSymbol', { name: 'greet' }, index),
     )
     expect(result.matchCount).toBeGreaterThan(0)
     expect(result.results[0].kind).toBe('function')
   })
 
-  it('finds class definitions', () => {
+  it('finds class definitions', async () => {
     const index = buildMockIndex()
     const result = JSON.parse(
-      executeToolLocally('findSymbol', { name: 'Calculator' }, index),
+      await executeToolLocally('findSymbol', { name: 'Calculator' }, index),
     )
     expect(result.matchCount).toBeGreaterThan(0)
     expect(result.results[0].kind).toBe('class')
   })
 
-  it('finds interface definitions', () => {
+  it('finds interface definitions', async () => {
     const index = buildMockIndex()
     const result = JSON.parse(
-      executeToolLocally('findSymbol', { name: 'User' }, index),
+      await executeToolLocally('findSymbol', { name: 'User' }, index),
     )
     expect(result.matchCount).toBeGreaterThan(0)
     expect(result.results[0].kind).toBe('interface')
   })
 
-  it('finds type alias definitions', () => {
+  it('finds type alias definitions', async () => {
     const index = buildMockIndex()
     const result = JSON.parse(
-      executeToolLocally('findSymbol', { name: 'UserId' }, index),
+      await executeToolLocally('findSymbol', { name: 'UserId' }, index),
     )
     expect(result.matchCount).toBeGreaterThan(0)
     expect(result.results[0].kind).toBe('type')
   })
 
-  it('finds enum definitions', () => {
+  it('finds enum definitions', async () => {
     const index = buildMockIndex()
     const result = JSON.parse(
-      executeToolLocally('findSymbol', { name: 'Role' }, index),
+      await executeToolLocally('findSymbol', { name: 'Role' }, index),
     )
     expect(result.matchCount).toBeGreaterThan(0)
     expect(result.results[0].kind).toBe('enum')
   })
 
-  it('filters by kind correctly', () => {
+  it('filters by kind correctly', async () => {
     const index = buildMockIndex()
     // 'User' exists as both an interface and an enum member line — filter to interface only
     const result = JSON.parse(
-      executeToolLocally('findSymbol', { name: 'greet', kind: 'class' }, index),
+      await executeToolLocally('findSymbol', { name: 'greet', kind: 'class' }, index),
     )
     // greet is a function, not a class, so 0 matches expected
     expect(result.matchCount).toBe(0)
@@ -340,10 +340,10 @@ describe('executeToolLocally — findSymbol', () => {
 // ---------------------------------------------------------------------------
 
 describe('executeToolLocally — getFileStats', () => {
-  it('returns line count, language, import and export counts', () => {
+  it('returns line count, language, import and export counts', async () => {
     const index = buildMockIndex()
     const result = JSON.parse(
-      executeToolLocally('getFileStats', { path: 'src/utils.ts' }, index),
+      await executeToolLocally('getFileStats', { path: 'src/utils.ts' }, index),
     )
     expect(result.path).toBe('src/utils.ts')
     expect(result.lineCount).toBeGreaterThan(0)
@@ -352,10 +352,10 @@ describe('executeToolLocally — getFileStats', () => {
     expect(result.exportCount).toBeGreaterThanOrEqual(1)
   })
 
-  it('returns error for missing file', () => {
+  it('returns error for missing file', async () => {
     const index = buildMockIndex()
     const result = JSON.parse(
-      executeToolLocally('getFileStats', { path: 'nope.ts' }, index),
+      await executeToolLocally('getFileStats', { path: 'nope.ts' }, index),
     )
     expect(result).toHaveProperty('error')
   })
@@ -366,9 +366,9 @@ describe('executeToolLocally — getFileStats', () => {
 // ---------------------------------------------------------------------------
 
 describe('executeToolLocally — getProjectOverview', () => {
-  it('returns totalFiles, totalLines, and languages', () => {
+  it('returns totalFiles, totalLines, and languages', async () => {
     const index = buildMockIndex()
-    const result = JSON.parse(executeToolLocally('getProjectOverview', {}, index))
+    const result = JSON.parse(await executeToolLocally('getProjectOverview', {}, index))
     expect(result.totalFiles).toBe(3)
     expect(result.totalLines).toBeGreaterThan(0)
     expect(Array.isArray(result.languages)).toBe(true)
@@ -381,9 +381,9 @@ describe('executeToolLocally — getProjectOverview', () => {
 // ---------------------------------------------------------------------------
 
 describe('executeToolLocally — unknown tool', () => {
-  it('returns error JSON for unknown tool name', () => {
+  it('returns error JSON for unknown tool name', async () => {
     const index = buildMockIndex()
-    const result = JSON.parse(executeToolLocally('nonexistentTool', {}, index))
+    const result = JSON.parse(await executeToolLocally('nonexistentTool', {}, index))
     expect(result).toHaveProperty('error')
     expect(result.error).toContain('Unknown tool')
   })
@@ -394,23 +394,23 @@ describe('executeToolLocally — unknown tool', () => {
 // ---------------------------------------------------------------------------
 
 describe('executeToolLocally — Zod validation', () => {
-  it('returns actionable error when readFile is called without path', () => {
+  it('returns actionable error when readFile is called without path', async () => {
     const index = buildMockIndex()
-    const result = JSON.parse(executeToolLocally('readFile', {}, index))
+    const result = JSON.parse(await executeToolLocally('readFile', {}, index))
     expect(result).toHaveProperty('error')
     expect(result.error).toContain('Validation failed')
   })
 
-  it('returns actionable error when searchFiles is called with empty object', () => {
+  it('returns actionable error when searchFiles is called with empty object', async () => {
     const index = buildMockIndex()
-    const result = JSON.parse(executeToolLocally('searchFiles', {}, index))
+    const result = JSON.parse(await executeToolLocally('searchFiles', {}, index))
     expect(result).toHaveProperty('error')
     expect(result.error).toContain('Validation failed')
   })
 
-  it('returns actionable error when findSymbol is called without name', () => {
+  it('returns actionable error when findSymbol is called without name', async () => {
     const index = buildMockIndex()
-    const result = JSON.parse(executeToolLocally('findSymbol', {}, index))
+    const result = JSON.parse(await executeToolLocally('findSymbol', {}, index))
     expect(result).toHaveProperty('error')
     expect(result.error).toContain('Validation failed')
   })
@@ -430,14 +430,14 @@ function buildIndex(files: Record<string, string>) {
 }
 
 /** Parse the JSON string returned by executeToolLocally. */
-function exec(
+async function exec(
   toolName: string,
   input: Record<string, unknown>,
   codeIndex: ReturnType<typeof createEmptyIndex>,
   allFilePaths?: string[],
   options?: ToolExecutorOptions,
 ) {
-  return JSON.parse(executeToolLocally(toolName, input, codeIndex, allFilePaths, options)) as Record<string, unknown>
+  return JSON.parse(await executeToolLocally(toolName, input, codeIndex, allFilePaths, options)) as Record<string, unknown>
 }
 
 const BASIC_INDEX = buildIndex({
@@ -452,8 +452,8 @@ const BASIC_INDEX = buildIndex({
 // ---------------------------------------------------------------------------
 
 describe('F4: indexing progress warnings', () => {
-  it('returns indexWarning when indexing is incomplete', () => {
-    const result = exec('getProjectOverview', {}, BASIC_INDEX, undefined, {
+  it('returns indexWarning when indexing is incomplete', async () => {
+    const result = await exec('getProjectOverview', {}, BASIC_INDEX, undefined, {
       indexingProgress: { filesIndexed: 5, totalFiles: 20 },
     })
 
@@ -462,16 +462,16 @@ describe('F4: indexing progress warnings', () => {
     )
   })
 
-  it('does NOT return indexWarning when indexing is complete', () => {
-    const result = exec('getProjectOverview', {}, BASIC_INDEX, undefined, {
+  it('does NOT return indexWarning when indexing is complete', async () => {
+    const result = await exec('getProjectOverview', {}, BASIC_INDEX, undefined, {
       indexingProgress: { filesIndexed: 20, totalFiles: 20 },
     })
 
     expect(result.indexWarning).toBeUndefined()
   })
 
-  it('does NOT return indexWarning when indexingProgress is omitted', () => {
-    const result = exec('getProjectOverview', {}, BASIC_INDEX)
+  it('does NOT return indexWarning when indexingProgress is omitted', async () => {
+    const result = await exec('getProjectOverview', {}, BASIC_INDEX)
 
     expect(result.indexWarning).toBeUndefined()
   })
@@ -491,14 +491,14 @@ describe('F1: getProjectOverview with repoMeta', () => {
     language: 'TypeScript',
   }
 
-  it('includes repoMeta fields when repoMeta is provided', () => {
-    const result = exec('getProjectOverview', {}, BASIC_INDEX, undefined, { repoMeta: META })
+  it('includes repoMeta fields when repoMeta is provided', async () => {
+    const result = await exec('getProjectOverview', {}, BASIC_INDEX, undefined, { repoMeta: META })
 
     expect(result.repoMeta).toEqual(META)
   })
 
-  it('omits repoMeta when not provided', () => {
-    const result = exec('getProjectOverview', {}, BASIC_INDEX)
+  it('omits repoMeta when not provided', async () => {
+    const result = await exec('getProjectOverview', {}, BASIC_INDEX)
 
     expect(result.repoMeta).toBeUndefined()
     expect(result.totalFiles).toBe(4)
@@ -511,7 +511,7 @@ describe('F1: getProjectOverview with repoMeta', () => {
 // ---------------------------------------------------------------------------
 
 describe('F2: searchFiles with allFilePaths', () => {
-  it('uses allFilePaths for path matching — finds files not in CodeIndex', () => {
+  it('uses allFilePaths for path matching — finds files not in CodeIndex', async () => {
     const allPaths = [
       'src/index.ts',
       'src/utils.ts',
@@ -520,14 +520,14 @@ describe('F2: searchFiles with allFilePaths', () => {
       'src/extra/hidden-feature.ts',
     ]
 
-    const result = exec('searchFiles', { query: 'hidden-feature' }, BASIC_INDEX, allPaths)
+    const result = await exec('searchFiles', { query: 'hidden-feature' }, BASIC_INDEX, allPaths)
 
     const paths = (result.results as Array<{ path: string }>).map(r => r.path)
     expect(paths).toContain('src/extra/hidden-feature.ts')
   })
 
-  it('falls back to CodeIndex paths when allFilePaths is omitted', () => {
-    const result = exec('searchFiles', { query: 'utils' }, BASIC_INDEX)
+  it('falls back to CodeIndex paths when allFilePaths is omitted', async () => {
+    const result = await exec('searchFiles', { query: 'utils' }, BASIC_INDEX)
 
     const paths = (result.results as Array<{ path: string }>).map(r => r.path)
     expect(paths).toContain('src/utils.ts')
@@ -546,8 +546,8 @@ describe('F5: readFile truncation at MAX_FILE_CONTENT_CHARS', () => {
     'src/small.ts': 'console.log("hi")',
   })
 
-  it('truncates content and returns warning for files exceeding 100K chars', () => {
-    const result = exec('readFile', { path: 'src/big-file.ts' }, LARGE_INDEX)
+  it('truncates content and returns warning for files exceeding 100K chars', async () => {
+    const result = await exec('readFile', { path: 'src/big-file.ts' }, LARGE_INDEX)
 
     expect((result.content as string).length).toBe(100_000)
     expect(result.warning).toBeDefined()
@@ -555,8 +555,8 @@ describe('F5: readFile truncation at MAX_FILE_CONTENT_CHARS', () => {
     expect(result.warning as string).toContain('150000')
   })
 
-  it('does NOT truncate when startLine/endLine are specified', () => {
-    const result = exec(
+  it('does NOT truncate when startLine/endLine are specified', async () => {
+    const result = await exec(
       'readFile',
       { path: 'src/big-file.ts', startLine: 1, endLine: 1 },
       LARGE_INDEX,
@@ -567,8 +567,8 @@ describe('F5: readFile truncation at MAX_FILE_CONTENT_CHARS', () => {
     expect(result.endLine).toBe(1)
   })
 
-  it('does NOT truncate files smaller than the limit', () => {
-    const result = exec('readFile', { path: 'src/small.ts' }, LARGE_INDEX)
+  it('does NOT truncate files smaller than the limit', async () => {
+    const result = await exec('readFile', { path: 'src/small.ts' }, LARGE_INDEX)
 
     expect(result.content).toBe('console.log("hi")')
     expect(result.warning).toBeUndefined()
@@ -580,29 +580,29 @@ describe('F5: readFile truncation at MAX_FILE_CONTENT_CHARS', () => {
 // ---------------------------------------------------------------------------
 
 describe('F7: generateDiagram totalEdges vs edgeCount', () => {
-  it('returns both edgeCount and totalEdges for topology diagrams', () => {
+  it('returns both edgeCount and totalEdges for topology diagrams', async () => {
     const index = buildIndex({
       'src/a.ts': "import { b } from './b'",
       'src/b.ts': "import { c } from '../lib/c'",
       'lib/c.ts': 'export const c = 1',
     })
-    const result = exec('generateDiagram', { type: 'topology' }, index)
+    const result = await exec('generateDiagram', { type: 'topology' }, index)
 
     expect(result.edgeCount).toBeDefined()
     expect(result.totalEdges).toBeDefined()
   })
 
-  it('totalEdges equals edgeCount when under the 30-edge limit', () => {
+  it('totalEdges equals edgeCount when under the 30-edge limit', async () => {
     const index = buildIndex({
       'src/a.ts': "import { b } from '../lib/b'",
       'lib/b.ts': 'export const b = 1',
     })
-    const result = exec('generateDiagram', { type: 'topology' }, index)
+    const result = await exec('generateDiagram', { type: 'topology' }, index)
 
     expect(result.totalEdges).toBe(result.edgeCount)
   })
 
-  it('totalEdges exceeds edgeCount when edges are truncated', () => {
+  it('totalEdges exceeds edgeCount when edges are truncated', async () => {
     const files: Record<string, string> = {}
     for (let i = 0; i < 35; i++) {
       const dirA = `src/dir${i}`
@@ -611,7 +611,7 @@ describe('F7: generateDiagram totalEdges vs edgeCount', () => {
       files[`${dirB}/mod.ts`] = `export const x = ${i}`
     }
     const index = buildIndex(files)
-    const result = exec('generateDiagram', { type: 'topology' }, index)
+    const result = await exec('generateDiagram', { type: 'topology' }, index)
 
     expect(result.totalEdges).toBeGreaterThan(30)
     expect(result.edgeCount).toBeLessThanOrEqual(30)
@@ -624,7 +624,7 @@ describe('F7: generateDiagram totalEdges vs edgeCount', () => {
 // ---------------------------------------------------------------------------
 
 describe('F3: findSymbol partial-index warning', () => {
-  it('returns warning when allFilePaths.length > codeIndex.files.size', () => {
+  it('returns warning when allFilePaths.length > codeIndex.files.size', async () => {
     const allPaths = [
       'src/index.ts',
       'src/utils.ts',
@@ -634,14 +634,14 @@ describe('F3: findSymbol partial-index warning', () => {
       'src/extra/also-not-indexed.ts',
     ]
 
-    const result = exec('findSymbol', { name: 'main' }, BASIC_INDEX, allPaths)
+    const result = await exec('findSymbol', { name: 'main' }, BASIC_INDEX, allPaths)
 
     expect(result.warning).toBeDefined()
     expect(result.warning as string).toContain('4/6 files')
   })
 
-  it('returns no warning when allFilePaths is not provided', () => {
-    const result = exec('findSymbol', { name: 'main' }, BASIC_INDEX)
+  it('returns no warning when allFilePaths is not provided', async () => {
+    const result = await exec('findSymbol', { name: 'main' }, BASIC_INDEX)
 
     expect(result.warning).toBeUndefined()
   })
@@ -656,22 +656,22 @@ describe('F11: getProjectOverview uses allFilePaths for pattern detection', () =
     'src/index.ts': 'export const x = 1',
   })
 
-  it('hasTests detects test files from allFilePaths not in CodeIndex', () => {
+  it('hasTests detects test files from allFilePaths not in CodeIndex', async () => {
     const allPaths = ['src/index.ts', 'tests/app.test.ts']
-    const result = exec('getProjectOverview', {}, BARE_INDEX, allPaths)
+    const result = await exec('getProjectOverview', {}, BARE_INDEX, allPaths)
 
     expect(result.hasTests).toBe(true)
   })
 
-  it('hasConfig detects config files from allFilePaths not in CodeIndex', () => {
+  it('hasConfig detects config files from allFilePaths not in CodeIndex', async () => {
     const allPaths = ['src/index.ts', 'tsconfig.json']
-    const result = exec('getProjectOverview', {}, BARE_INDEX, allPaths)
+    const result = await exec('getProjectOverview', {}, BARE_INDEX, allPaths)
 
     expect(result.hasConfig).toBe(true)
   })
 
-  it('hasTests is false when neither CodeIndex nor allFilePaths contain test files', () => {
-    const result = exec('getProjectOverview', {}, BARE_INDEX)
+  it('hasTests is false when neither CodeIndex nor allFilePaths contain test files', async () => {
+    const result = await exec('getProjectOverview', {}, BARE_INDEX)
 
     expect(result.hasTests).toBe(false)
   })
@@ -682,8 +682,8 @@ describe('F11: getProjectOverview uses allFilePaths for pattern detection', () =
 // ---------------------------------------------------------------------------
 
 describe('F12: generateTour repoKey override', () => {
-  it('uses repoContext.name when provided', () => {
-    const result = exec(
+  it('uses repoContext.name when provided', async () => {
+    const result = await exec(
       'generateTour',
       { repoKey: 'user-input/repo' },
       BASIC_INDEX,
@@ -695,8 +695,8 @@ describe('F12: generateTour repoKey override', () => {
     expect(tour.repoKey).toBe('validated/repo-name')
   })
 
-  it('falls back to input.repoKey when no repoName option is provided', () => {
-    const result = exec(
+  it('falls back to input.repoKey when no repoName option is provided', async () => {
+    const result = await exec(
       'generateTour',
       { repoKey: 'user-input/repo' },
       BASIC_INDEX,

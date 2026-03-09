@@ -28,7 +28,7 @@ import { TourPlayerBar } from "./tour-player-bar"
 import { TourStopOverlay } from "./tour-stop-overlay"
 
 export function CodeBrowser({ navigateToFile, navigateToLine, onNavigateComplete }: CodeBrowserProps) {
-  const { repo, files, codeIndex, updateCodeIndex, indexingProgress: sharedIndexingProgress, modifiedContents, setModifiedContents, getFileContent, codebaseAnalysis } = useRepository()
+  const { repo, files, codeIndex, updateCodeIndex, indexingProgress: sharedIndexingProgress, modifiedContents, setModifiedContents, getFileContent, codebaseAnalysis, contentAvailability, contentLoadingStats, loadFileContent } = useRepository()
 
   // Tours
   const {
@@ -128,6 +128,8 @@ export function CodeBrowser({ navigateToFile, navigateToLine, onNavigateComplete
     modifiedContents,
     navigateToFile,
     onNavigateComplete,
+    loadFileContent,
+    contentAvailability,
   })
 
   // Sync activeTabPath to app-level selectedFilePath for Git History tab
@@ -137,6 +139,7 @@ export function CodeBrowser({ navigateToFile, navigateToLine, onNavigateComplete
 
   const {
     searchResults,
+    unsearchedCount,
     goToSearchResult,
     highlightedLine,
     setHighlightedLine,
@@ -431,6 +434,8 @@ export function CodeBrowser({ navigateToFile, navigateToLine, onNavigateComplete
             onDownloadAllModified={downloadAllModified}
             onRevertFile={revertFile}
             onDownloadFile2={downloadFile}
+            contentAvailability={contentAvailability}
+            contentLoadingStats={contentLoadingStats}
           />
         ) : sidebarMode === 'search' ? (
           <SearchSidebar
@@ -461,6 +466,7 @@ export function CodeBrowser({ navigateToFile, navigateToLine, onNavigateComplete
             replaceAllInAllFiles={replaceAllInAllFiles}
             expandAllMatches={expandAllMatches}
             setExpandAllMatches={setExpandAllMatches}
+            unsearchedCount={unsearchedCount}
           />
         ) : sidebarMode === 'outline' ? (
           <SymbolOutline
@@ -539,6 +545,7 @@ export function CodeBrowser({ navigateToFile, navigateToLine, onNavigateComplete
                 onAction={onAction}
                 hasApiKey={hasApiKey}
                 highlightedRange={tourHighlightedRange}
+                contentAvailability={contentAvailability}
               />
             </div>
             {isPlaying && activeTour && activeTour.stops[activeStopIndex] && (

@@ -7,6 +7,28 @@ import type { CodeIssue } from './types'
 
 export function scanStructuralIssues(codeIndex: CodeIndex, analysis: FullAnalysis | null): CodeIssue[] {
   const issues: CodeIssue[] = []
+
+  // Large files (> 400 lines) — metadata-only safe (uses lineCount, not content)
+  for (const [path, file] of codeIndex.files) {
+    if (file.lineCount > 400) {
+      issues.push({
+        id: `large-file-${path}`,
+        ruleId: 'large-file',
+        category: 'reliability',
+        severity: file.lineCount > 800 ? 'warning' : 'info',
+        title: 'Large File',
+        description: `${file.lineCount} lines. Large files are harder to navigate, test, review, and maintain. They tend to accumulate unrelated concerns.`,
+        file: path,
+        line: 1,
+        column: 0,
+        snippet: `${file.lineCount} lines of code`,
+        suggestion: 'Split into smaller, focused modules with clear responsibilities (aim for < 300 lines)',
+        cwe: 'CWE-1080',
+        confidence: 'medium',
+      })
+    }
+  }
+
   if (!analysis) return issues
 
   // Circular dependencies
@@ -26,27 +48,6 @@ export function scanStructuralIssues(codeIndex: CodeIndex, analysis: FullAnalysi
       cwe: 'CWE-1047',
       confidence: 'high',
     })
-  }
-
-  // Large files (> 400 lines)
-  for (const [path, file] of codeIndex.files) {
-    if (file.lineCount > 400) {
-      issues.push({
-        id: `large-file-${path}`,
-        ruleId: 'large-file',
-        category: 'reliability',
-        severity: file.lineCount > 800 ? 'warning' : 'info',
-        title: 'Large File',
-        description: `${file.lineCount} lines. Large files are harder to navigate, test, review, and maintain. They tend to accumulate unrelated concerns.`,
-        file: path,
-        line: 1,
-        column: 0,
-        snippet: `${file.lineCount} lines of code`,
-        suggestion: 'Split into smaller, focused modules with clear responsibilities (aim for < 300 lines)',
-        cwe: 'CWE-1080',
-        confidence: 'medium',
-      })
-    }
   }
 
   // High coupling — files imported by 15+ others

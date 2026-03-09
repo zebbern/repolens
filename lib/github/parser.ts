@@ -100,5 +100,6 @@ export function buildTreeApiUrl(owner: string, repo: string, sha: string = 'HEAD
  * Get the raw content URL for a file
  */
 export function buildRawContentUrl(owner: string, repo: string, branch: string, path: string): string {
-  return `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${path}`
+  const encodedPath = path.split('/').map(encodeURIComponent).join('/')
+  return `https://raw.githubusercontent.com/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${encodeURIComponent(branch)}/${encodedPath}`
 }

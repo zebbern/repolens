@@ -2,6 +2,24 @@
 // Repository state types & defaults
 // ---------------------------------------------------------------------------
 
+/** Whether file content is fully available, metadata-only (lazy), or loading. */
+export type ContentAvailability = 'full' | 'metadata-only'
+
+/** Progress stats for on-demand content loading in lazy repos. */
+export interface ContentLoadingStats {
+  completed: number
+  pending: number
+  failed: number
+  total: number
+}
+
+export const DEFAULT_CONTENT_LOADING_STATS: ContentLoadingStats = {
+  completed: 0,
+  pending: 0,
+  failed: 0,
+  total: 0,
+}
+
 export type LoadingStage =
   | 'idle'
   | 'metadata'
@@ -9,6 +27,7 @@ export type LoadingStage =
   | 'downloading'
   | 'extracting'
   | 'indexing'
+  | 'lazy-indexing'
   | 'ready'
   | 'cached'
 

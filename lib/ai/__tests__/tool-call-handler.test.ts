@@ -55,7 +55,7 @@ describe('handleToolCall', () => {
     addToolOutput = vi.fn()
   })
 
-  it('calls addToolOutput with output on successful tool execution', () => {
+  it('calls addToolOutput with output on successful tool execution', async () => {
     const codeIndexRef = createMockRef(buildMockIndex())
     const toolCall: ToolCallInfo = {
       toolName: 'readFile',
@@ -63,7 +63,7 @@ describe('handleToolCall', () => {
       toolCallId: 'call_1',
     }
 
-    handleToolCall(toolCall, addToolOutput as unknown as AddToolOutputFn, codeIndexRef)
+    await handleToolCall(toolCall, addToolOutput as unknown as AddToolOutputFn, codeIndexRef)
 
     expect(addToolOutput).toHaveBeenCalledOnce()
     const call = addToolOutput.mock.calls[0][0]
@@ -75,7 +75,7 @@ describe('handleToolCall', () => {
     expect(parsed.path).toBe('src/hello.ts')
   })
 
-  it('calls addToolOutput with state output-error and errorText when tool throws', () => {
+  it('calls addToolOutput with state output-error and errorText when tool throws', async () => {
     // Pass a ref with null index — executeToolLocally won't throw but returns error.
     // To test actual throw, mock executeToolLocally to throw.
     const codeIndexRef = createMockRef(null)
@@ -97,7 +97,7 @@ describe('handleToolCall', () => {
       toolCallId: 'call_err',
     }
 
-    handleToolCall(toolCall, addToolOutput as unknown as AddToolOutputFn, badRef)
+    await handleToolCall(toolCall, addToolOutput as unknown as AddToolOutputFn, badRef)
 
     expect(addToolOutput).toHaveBeenCalledOnce()
     const call = addToolOutput.mock.calls[0][0]
@@ -106,7 +106,7 @@ describe('handleToolCall', () => {
     expect(call.errorText).toContain('Index unavailable')
   })
 
-  it('returns early (no addToolOutput call) when toolCall.dynamic is true', () => {
+  it('returns early (no addToolOutput call) when toolCall.dynamic is true', async () => {
     const codeIndexRef = createMockRef(buildMockIndex())
     const toolCall: ToolCallInfo = {
       dynamic: true,
@@ -115,7 +115,7 @@ describe('handleToolCall', () => {
       toolCallId: 'call_dyn',
     }
 
-    handleToolCall(toolCall, addToolOutput as unknown as AddToolOutputFn, codeIndexRef)
+    await handleToolCall(toolCall, addToolOutput as unknown as AddToolOutputFn, codeIndexRef)
 
     expect(addToolOutput).not.toHaveBeenCalled()
   })
@@ -377,7 +377,7 @@ describe('handleToolCall', () => {
 
   // ── Regression: existing readFile still works ──
 
-  it('still handles readFile correctly after getGitHistory addition', () => {
+  it('still handles readFile correctly after getGitHistory addition', async () => {
     const codeIndexRef = createMockRef(buildMockIndex())
     const toolCall: ToolCallInfo = {
       toolName: 'readFile',
@@ -385,7 +385,7 @@ describe('handleToolCall', () => {
       toolCallId: 'call_regression',
     }
 
-    handleToolCall(toolCall, addToolOutput as unknown as AddToolOutputFn, codeIndexRef)
+    await handleToolCall(toolCall, addToolOutput as unknown as AddToolOutputFn, codeIndexRef)
 
     expect(addToolOutput).toHaveBeenCalledOnce()
     const call = addToolOutput.mock.calls[0][0]

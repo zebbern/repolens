@@ -113,7 +113,7 @@ export function ChatSidebar({ className }: { className?: string }) {
 
       if (toolCall.toolName === 'generateTour' && !toolCall.dynamic) {
         try {
-          const resultStr = executeToolLocally(
+          const resultStr = await executeToolLocally(
             toolCall.toolName,
             toolCall.input as Record<string, unknown>,
             indexRef.current,

@@ -566,17 +566,43 @@ function deduplicateIssues(
 }
 
 // ---------------------------------------------------------------------------
+// Scan options
+// ---------------------------------------------------------------------------
+
+/** Options for scanIssues and scanIssuesAsync. */
+export interface ScanOptions {
+  /** When true, only metadata-only rules run (no content parsing). */
+  metadataOnly?: boolean
+  /** Differential scan: only check these files. */
+  changedFiles?: string[]
+}
+
+/** Count files in the index that have no content loaded (content === ''). */
+function countUnscannedFiles(codeIndex: CodeIndex): number {
+  let count = 0
+  for (const file of codeIndex.files.values()) {
+    if (file.content === '') count++
+  }
+  return count
+}
+
+// ---------------------------------------------------------------------------
 // Main scan orchestrator
 // ---------------------------------------------------------------------------
 
 export function scanIssues(
   codeIndex: CodeIndex,
   analysis: FullAnalysis | null,
-  changedFiles?: string[],
+  changedFilesOrOptions?: string[] | ScanOptions,
 ): ScanResults {
+  const options: ScanOptions = Array.isArray(changedFilesOrOptions)
+    ? { changedFiles: changedFilesOrOptions }
+    : changedFilesOrOptions ?? {}
+  const { metadataOnly = false, changedFiles } = options
+
   // Return cached result if the same codeIndex instance + analysis is requested.
-  // Only applies to full scans (no changedFiles) since partial scans are cheap.
-  if (!changedFiles && lastScanRef && lastScanResult) {
+  // Only applies to full scans (no changedFiles, no metadataOnly) since partial scans are cheap.
+  if (!changedFiles && !metadataOnly && lastScanRef && lastScanResult) {
     const cachedRef = lastScanRef.deref()
     if (cachedRef === codeIndex && lastScanAnalysis === analysis) {
       return lastScanResult
@@ -619,52 +645,62 @@ export function scanIssues(
     group.set(path, file)
   }
 
-  // 1. Regex-based rules
-  const regexResult = runRegexRules({
-    filesToScan, scanCodeIndex, isPartialScan,
-    blockCommentCache, presentExtensions, filesByExtension,
-  })
-  for (const issue of regexResult.issues) {
-    if (!seenIds.has(issue.id)) {
-      seenIds.add(issue.id)
-      issues.push(issue)
-    }
-  }
-  let rulesEvaluated = regexResult.rulesEvaluated
-  const suppressionCount = regexResult.suppressionCount
-  const ruleOverflow = regexResult.ruleOverflow
+  // 1. Regex-based rules (content-required)
+  let rulesEvaluated = 0
+  let suppressionCount = 0
+  let ruleOverflow = new Map<string, number>()
 
-  // 2. AST-based analysis
-  for (const issue of runAstAnalysis(filesToScan)) {
-    if (!seenIds.has(issue.id)) {
-      seenIds.add(issue.id)
-      issues.push(issue)
+  if (!metadataOnly) {
+    const regexResult = runRegexRules({
+      filesToScan, scanCodeIndex, isPartialScan,
+      blockCommentCache, presentExtensions, filesByExtension,
+    })
+    for (const issue of regexResult.issues) {
+      if (!seenIds.has(issue.id)) {
+        seenIds.add(issue.id)
+        issues.push(issue)
+      }
     }
+    rulesEvaluated = regexResult.rulesEvaluated
+    suppressionCount = regexResult.suppressionCount
+    ruleOverflow = regexResult.ruleOverflow
   }
 
-  // 2b. Taint tracking
-  for (const issue of runTaintAnalysis(filesToScan)) {
-    if (!seenIds.has(issue.id)) {
-      seenIds.add(issue.id)
-      issues.push(issue)
+  // 2. AST-based analysis (content-required)
+  if (!metadataOnly) {
+    for (const issue of runAstAnalysis(filesToScan)) {
+      if (!seenIds.has(issue.id)) {
+        seenIds.add(issue.id)
+        issues.push(issue)
+      }
+    }
+
+    // 2b. Taint tracking
+    for (const issue of runTaintAnalysis(filesToScan)) {
+      if (!seenIds.has(issue.id)) {
+        seenIds.add(issue.id)
+        issues.push(issue)
+      }
+    }
+
+    // 2c–2d. Deduplicate AST vs regex overlapping findings
+    deduplicateIssues(issues, scanCodeIndex, ruleOverflow)
+  }
+
+  // 3. Composite file-level rules (content-required)
+  if (!metadataOnly) {
+    const compositeIssues = scanCompositeRules(codeIndex)
+    rulesEvaluated += COMPOSITE_RULES.length
+    for (const issue of compositeIssues) {
+      if (isPartialScan && !filesToScan.has(issue.file)) continue
+      if (!seenIds.has(issue.id)) {
+        seenIds.add(issue.id)
+        issues.push(issue)
+      }
     }
   }
 
-  // 2c–2d. Deduplicate AST vs regex overlapping findings
-  deduplicateIssues(issues, scanCodeIndex, ruleOverflow)
-
-  // 3. Composite file-level rules
-  const compositeIssues = scanCompositeRules(codeIndex)
-  rulesEvaluated += COMPOSITE_RULES.length
-  for (const issue of compositeIssues) {
-    if (isPartialScan && !filesToScan.has(issue.file)) continue
-    if (!seenIds.has(issue.id)) {
-      seenIds.add(issue.id)
-      issues.push(issue)
-    }
-  }
-
-  // 4. Structural rules
+  // 4. Structural rules (metadata-safe — large-file check works without content)
   const structuralIssues = scanStructuralIssues(codeIndex, analysis)
   const structuralRuleIds = new Set(structuralIssues.map(i => i.ruleId))
   rulesEvaluated += structuralRuleIds.size
@@ -676,15 +712,17 @@ export function scanIssues(
     }
   }
 
-  // 5. Supply chain rules
-  const supplyChainIssues = scanSupplyChain(scanCodeIndex)
-  const supplyChainRuleIds = new Set(supplyChainIssues.map(i => i.ruleId))
-  rulesEvaluated += supplyChainRuleIds.size
-  for (const issue of supplyChainIssues) {
-    if (isPartialScan && !filesToScan.has(issue.file)) continue
-    if (!seenIds.has(issue.id)) {
-      seenIds.add(issue.id)
-      issues.push(issue)
+  // 5. Supply chain rules (content-required)
+  if (!metadataOnly) {
+    const supplyChainIssues = scanSupplyChain(scanCodeIndex)
+    const supplyChainRuleIds = new Set(supplyChainIssues.map(i => i.ruleId))
+    rulesEvaluated += supplyChainRuleIds.size
+    for (const issue of supplyChainIssues) {
+      if (isPartialScan && !filesToScan.has(issue.file)) continue
+      if (!seenIds.has(issue.id)) {
+        seenIds.add(issue.id)
+        issues.push(issue)
+      }
     }
   }
 
@@ -742,13 +780,15 @@ export function scanIssues(
     qualityGrade: grades.qualityGrade,
     issuesPerKloc: grades.issuesPerKloc,
     isPartialScan,
+    unscannedFileCount: countUnscannedFiles(codeIndex),
+    isMetadataOnly: metadataOnly,
     suppressionCount,
     projectRiskScore,
     riskDistribution,
   }
 
-  // Cache full scan results for memoization
-  if (!changedFiles) {
+  // Cache full scan results for memoization (not cached for partial or metadata-only scans)
+  if (!changedFiles && !metadataOnly) {
     lastScanRef = new WeakRef(codeIndex)
     lastScanAnalysis = analysis
     lastScanResult = result
@@ -781,13 +821,15 @@ export async function scanIssuesAsync(
   options?: {
     changedFiles?: string[]
     isStale?: () => boolean
+    metadataOnly?: boolean
   },
 ): Promise<ScanResults | null> {
   const changedFiles = options?.changedFiles
   const isStale = options?.isStale
+  const metadataOnly = options?.metadataOnly ?? false
 
   // Return cached result if the same codeIndex instance + analysis is requested.
-  if (!changedFiles && lastScanRef && lastScanResult) {
+  if (!changedFiles && !metadataOnly && lastScanRef && lastScanResult) {
     const cachedRef = lastScanRef.deref()
     if (cachedRef === codeIndex && lastScanAnalysis === analysis) {
       return lastScanResult
@@ -818,10 +860,12 @@ async function scanIssuesAsyncImpl(
   options?: {
     changedFiles?: string[]
     isStale?: () => boolean
+    metadataOnly?: boolean
   },
 ): Promise<ScanResults | null> {
   const changedFiles = options?.changedFiles
   const isStale = options?.isStale
+  const metadataOnly = options?.metadataOnly ?? false
 
   const issues: CodeIssue[] = []
   const seenIds = new Set<string>()
@@ -859,57 +903,67 @@ async function scanIssuesAsyncImpl(
     group.set(path, file)
   }
 
-  // --- Phase 1: Regex-based rules ---
-  const regexResult = runRegexRules({
-    filesToScan, scanCodeIndex, isPartialScan,
-    blockCommentCache, presentExtensions, filesByExtension,
-  })
-  for (const issue of regexResult.issues) {
-    if (!seenIds.has(issue.id)) {
-      seenIds.add(issue.id)
-      issues.push(issue)
-    }
-  }
-  let rulesEvaluated = regexResult.rulesEvaluated
-  const suppressionCount = regexResult.suppressionCount
-  const ruleOverflow = regexResult.ruleOverflow
+  // --- Phase 1: Regex-based rules (content-required) ---
+  let rulesEvaluated = 0
+  let suppressionCount = 0
+  let ruleOverflow = new Map<string, number>()
 
-  await yieldToMain()
-  if (isStale?.()) return null
-
-  // --- Phase 2: AST analysis + taint tracking ---
-  for (const issue of runAstAnalysis(filesToScan)) {
-    if (!seenIds.has(issue.id)) {
-      seenIds.add(issue.id)
-      issues.push(issue)
+  if (!metadataOnly) {
+    const regexResult = runRegexRules({
+      filesToScan, scanCodeIndex, isPartialScan,
+      blockCommentCache, presentExtensions, filesByExtension,
+    })
+    for (const issue of regexResult.issues) {
+      if (!seenIds.has(issue.id)) {
+        seenIds.add(issue.id)
+        issues.push(issue)
+      }
     }
-  }
-  for (const issue of runTaintAnalysis(filesToScan)) {
-    if (!seenIds.has(issue.id)) {
-      seenIds.add(issue.id)
-      issues.push(issue)
-    }
-  }
-  deduplicateIssues(issues, scanCodeIndex, ruleOverflow)
-
-  await yieldToMain()
-  if (isStale?.()) return null
-
-  // --- Phase 3: Composite rules ---
-  const compositeIssues = scanCompositeRules(codeIndex)
-  rulesEvaluated += COMPOSITE_RULES.length
-  for (const issue of compositeIssues) {
-    if (isPartialScan && !filesToScan.has(issue.file)) continue
-    if (!seenIds.has(issue.id)) {
-      seenIds.add(issue.id)
-      issues.push(issue)
-    }
+    rulesEvaluated = regexResult.rulesEvaluated
+    suppressionCount = regexResult.suppressionCount
+    ruleOverflow = regexResult.ruleOverflow
   }
 
   await yieldToMain()
   if (isStale?.()) return null
 
-  // --- Phase 4: Structural rules ---
+  // --- Phase 2: AST analysis + taint tracking (content-required) ---
+  if (!metadataOnly) {
+    for (const issue of runAstAnalysis(filesToScan)) {
+      if (!seenIds.has(issue.id)) {
+        seenIds.add(issue.id)
+        issues.push(issue)
+      }
+    }
+    for (const issue of runTaintAnalysis(filesToScan)) {
+      if (!seenIds.has(issue.id)) {
+        seenIds.add(issue.id)
+        issues.push(issue)
+      }
+    }
+    deduplicateIssues(issues, scanCodeIndex, ruleOverflow)
+  }
+
+  await yieldToMain()
+  if (isStale?.()) return null
+
+  // --- Phase 3: Composite rules (content-required) ---
+  if (!metadataOnly) {
+    const compositeIssues = scanCompositeRules(codeIndex)
+    rulesEvaluated += COMPOSITE_RULES.length
+    for (const issue of compositeIssues) {
+      if (isPartialScan && !filesToScan.has(issue.file)) continue
+      if (!seenIds.has(issue.id)) {
+        seenIds.add(issue.id)
+        issues.push(issue)
+      }
+    }
+  }
+
+  await yieldToMain()
+  if (isStale?.()) return null
+
+  // --- Phase 4: Structural rules (metadata-safe) ---
   const structuralIssues = scanStructuralIssues(codeIndex, analysis)
   const structuralRuleIds = new Set(structuralIssues.map(i => i.ruleId))
   rulesEvaluated += structuralRuleIds.size
@@ -924,33 +978,37 @@ async function scanIssuesAsyncImpl(
   await yieldToMain()
   if (isStale?.()) return null
 
-  // --- Phase 5: Supply chain rules ---
-  const supplyChainIssues = scanSupplyChain(scanCodeIndex)
-  const supplyChainRuleIds = new Set(supplyChainIssues.map(i => i.ruleId))
-  rulesEvaluated += supplyChainRuleIds.size
-  for (const issue of supplyChainIssues) {
-    if (isPartialScan && !filesToScan.has(issue.file)) continue
-    if (!seenIds.has(issue.id)) {
-      seenIds.add(issue.id)
-      issues.push(issue)
-    }
-  }
-
-  await yieldToMain()
-  if (isStale?.()) return null
-
-  // --- Phase 5b: Tree-sitter multi-language analysis (async) ---
-  try {
-    const treeSitterIssues = await scanWithTreeSitter(filesToScan)
-    for (const issue of treeSitterIssues) {
+  // --- Phase 5: Supply chain rules (content-required) ---
+  if (!metadataOnly) {
+    const supplyChainIssues = scanSupplyChain(scanCodeIndex)
+    const supplyChainRuleIds = new Set(supplyChainIssues.map(i => i.ruleId))
+    rulesEvaluated += supplyChainRuleIds.size
+    for (const issue of supplyChainIssues) {
       if (isPartialScan && !filesToScan.has(issue.file)) continue
       if (!seenIds.has(issue.id)) {
         seenIds.add(issue.id)
         issues.push(issue)
       }
     }
-  } catch (err) {
-    console.warn('[scanner] Tree-sitter analysis failed:', err)
+  }
+
+  await yieldToMain()
+  if (isStale?.()) return null
+
+  // --- Phase 5b: Tree-sitter multi-language analysis (content-required, async) ---
+  if (!metadataOnly) {
+    try {
+      const treeSitterIssues = await scanWithTreeSitter(filesToScan)
+      for (const issue of treeSitterIssues) {
+        if (isPartialScan && !filesToScan.has(issue.file)) continue
+        if (!seenIds.has(issue.id)) {
+          seenIds.add(issue.id)
+          issues.push(issue)
+        }
+      }
+    } catch (err) {
+      console.warn('[scanner] Tree-sitter analysis failed:', err)
+    }
   }
 
   await yieldToMain()
@@ -1007,17 +1065,129 @@ async function scanIssuesAsyncImpl(
     qualityGrade: grades.qualityGrade,
     issuesPerKloc: grades.issuesPerKloc,
     isPartialScan,
+    unscannedFileCount: countUnscannedFiles(codeIndex),
+    isMetadataOnly: metadataOnly,
     suppressionCount,
     projectRiskScore,
     riskDistribution,
   }
 
-  // Cache full scan results for memoization
-  if (!changedFiles) {
+  // Cache full scan results for memoization (not cached for partial or metadata-only scans)
+  if (!changedFiles && !metadataOnly) {
     lastScanRef = new WeakRef(codeIndex)
     lastScanAnalysis = analysis
     lastScanResult = result
   }
 
   return result
+}
+
+// ---------------------------------------------------------------------------
+// On-demand single-file scanning
+// ---------------------------------------------------------------------------
+
+/**
+ * Scan a single file against all rules. Used when lazy-loaded content
+ * becomes available for a file that was previously metadata-only.
+ * Does NOT use scan memoization (partial scans bypass the cache).
+ */
+export function scanOnDemand(
+  codeIndex: CodeIndex,
+  analysis: FullAnalysis | null,
+  filePath: string,
+): ScanResults {
+  return scanIssues(codeIndex, analysis, { changedFiles: [filePath] })
+}
+
+// ---------------------------------------------------------------------------
+// Merge scan results
+// ---------------------------------------------------------------------------
+
+/**
+ * Merge two ScanResults (e.g. metadata-only base + on-demand content scan).
+ * Deduplicates issues by id. Recomputes summary and health grades.
+ */
+export function mergeScanResults(
+  base: ScanResults,
+  addition: ScanResults,
+): ScanResults {
+  const seenIds = new Set<string>()
+  const mergedIssues: CodeIssue[] = []
+
+  for (const issue of base.issues) {
+    if (!seenIds.has(issue.id)) {
+      seenIds.add(issue.id)
+      mergedIssues.push(issue)
+    }
+  }
+  for (const issue of addition.issues) {
+    if (!seenIds.has(issue.id)) {
+      seenIds.add(issue.id)
+      mergedIssues.push(issue)
+    }
+  }
+
+  // Sort by severity then file
+  const sevOrder: Record<IssueSeverity, number> = { critical: 0, warning: 1, info: 2 }
+  mergedIssues.sort((a, b) => {
+    const sev = sevOrder[a.severity] - sevOrder[b.severity]
+    return sev !== 0 ? sev : a.file.localeCompare(b.file)
+  })
+
+  // Merge rule overflow maps
+  const mergedOverflow = new Map(base.ruleOverflow)
+  for (const [ruleId, count] of addition.ruleOverflow) {
+    mergedOverflow.set(ruleId, (mergedOverflow.get(ruleId) ?? 0) + count)
+  }
+
+  // Merge languages
+  const mergedLangs = [...new Set([...base.languagesDetected, ...addition.languagesDetected])]
+
+  // Compute unscanned file count: base count minus newly scanned files
+  const additionScannedFiles = new Set(addition.issues.map(i => i.file))
+  const unscannedFileCount = Math.max(
+    0,
+    (base.unscannedFileCount ?? 0) - (addition.isPartialScan ? additionScannedFiles.size : addition.scannedFiles),
+  )
+
+  // Recompute summary
+  const summary = computeScanSummary(mergedIssues)
+
+  // Estimate SLOC for health grade computation
+  const totalScanned = base.scannedFiles + (addition.isPartialScan ? additionScannedFiles.size : addition.scannedFiles)
+  const estimatedSloc = base.issuesPerKloc > 0
+    ? Math.round((base.issues.length / base.issuesPerKloc) * 1000)
+    : totalScanned * 100
+  const grades = computeHealthGrades(mergedIssues, estimatedSloc)
+
+  // Re-score risk for newly added issues
+  for (const issue of mergedIssues) {
+    if (issue.riskScore == null) {
+      issue.riskScore = scoreIssue(issue)
+      issue.cvssVector = buildCvssVector(issue)
+    }
+  }
+  const projectRiskScore = scoreProject(mergedIssues)
+  const riskDistribution = getRiskDistribution(mergedIssues)
+
+  return {
+    issues: mergedIssues,
+    summary,
+    healthGrade: grades.healthGrade,
+    healthScore: grades.healthScore,
+    ruleOverflow: mergedOverflow,
+    languagesDetected: mergedLangs,
+    rulesEvaluated: base.rulesEvaluated + addition.rulesEvaluated,
+    scannedFiles: totalScanned,
+    scannedAt: new Date(),
+    securityGrade: grades.securityGrade,
+    qualityGrade: grades.qualityGrade,
+    issuesPerKloc: grades.issuesPerKloc,
+    isPartialScan: false,
+    unscannedFileCount,
+    isMetadataOnly: false,
+    suppressionCount: base.suppressionCount + addition.suppressionCount,
+    projectRiskScore,
+    riskDistribution,
+  }
 }

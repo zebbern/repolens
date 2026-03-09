@@ -13,6 +13,7 @@ import { useRepository } from '@/providers'
 import type { FileNode } from '@/types/repository'
 import type { CodeIndex } from '@/lib/code/code-index'
 import type { OpenTab } from './types'
+import type { ContentAvailability, ContentLoadingStats } from '@/lib/repository'
 
 interface CodeExplorerSidebarProps {
   files: FileNode[]
@@ -29,6 +30,10 @@ interface CodeExplorerSidebarProps {
   onDownloadAllModified: () => void
   onRevertFile: (path: string) => void
   onDownloadFile2: (tab: OpenTab) => void
+  /** Whether content is fully loaded or lazy (metadata-only). */
+  contentAvailability?: ContentAvailability
+  /** On-demand content loading progress for lazy repos. */
+  contentLoadingStats?: ContentLoadingStats
 }
 
 export function CodeExplorerSidebar({
@@ -46,6 +51,8 @@ export function CodeExplorerSidebar({
   onDownloadAllModified,
   onRevertFile,
   onDownloadFile2,
+  contentAvailability,
+  contentLoadingStats,
 }: CodeExplorerSidebarProps) {
   const { isPinned, pinFile, unpinFile } = useRepository()
 
@@ -80,6 +87,22 @@ export function CodeExplorerSidebar({
         </TooltipProvider>
       </div>
 
+      {/* Content Loading Progress — only visible for lazy repos */}
+      {contentAvailability !== 'full' && contentLoadingStats && contentLoadingStats.total > 0 && (
+        <div className="px-3 pb-2" aria-label="Content loading progress">
+          <div className="flex items-center justify-between text-[10px] text-text-muted mb-1">
+            <span>Loaded {contentLoadingStats.completed} / {contentLoadingStats.total} files</span>
+            <span>{Math.round((contentLoadingStats.completed / contentLoadingStats.total) * 100)}%</span>
+          </div>
+          <div className="h-1 w-full bg-foreground/[0.06] rounded-full overflow-hidden">
+            <div
+              className="h-full bg-blue-500/60 rounded-full transition-all duration-300"
+              style={{ width: `${(contentLoadingStats.completed / contentLoadingStats.total) * 100}%` }}
+            />
+          </div>
+        </div>
+      )}
+
       {/* File Tree */}
       <div className="flex-1 overflow-auto">
         <div className="px-2 py-1">
@@ -96,6 +119,7 @@ export function CodeExplorerSidebar({
             issueCountByFile={issueCountByFile}
             isPinned={isPinned}
             onPinToggle={handlePinToggle}
+            contentAvailability={contentAvailability}
           />
         </div>
       </div>

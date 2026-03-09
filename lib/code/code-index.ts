@@ -13,7 +13,7 @@ function cloneContentStore(store: ContentStore | undefined): InMemoryContentStor
 }
 
 export type { ContentStore, CodeIndexMeta } from './content-store'
-export { InMemoryContentStore, IDBContentStore } from './content-store'
+export { InMemoryContentStore, IDBContentStore, LazyContentStore } from './content-store'
 
 export interface IndexedFile {
   path: string
@@ -32,6 +32,10 @@ export function getFileLines(file: IndexedFile): string[] {
     linesCache.set(file, lines)
   }
   return lines
+}
+
+export function invalidateLinesCache(file: IndexedFile): void {
+  linesCache.delete(file)
 }
 
 export interface SearchResult {
@@ -200,6 +204,38 @@ export function batchIndexFiles(
 }
 
 /**
+ * Create a metadata-only CodeIndex for lazy-loaded repos (>200MB).
+ * Populates `files` with empty content and `meta` with metadata entries.
+ * Does NOT write to contentStore — content is fetched on demand.
+ *
+ * `content: ''` preserves totalFiles counting for UI and is search-safe
+ * (empty string matches nothing).
+ */
+export function batchIndexMetadataOnly(
+  index: CodeIndex,
+  entries: Array<{ path: string; language?: string; lineCount?: number }>,
+): CodeIndex {
+  const newFiles = new Map(index.files)
+  const newMeta = new Map(index.meta ?? new Map())
+
+  for (const { path, language, lineCount } of entries) {
+    const name = path.split('/').pop() || path
+    const lc = lineCount ?? 0
+    newFiles.set(path, { path, name, content: '', language, lineCount: lc })
+    newMeta.set(path, { path, name, language, lineCount: lc })
+  }
+
+  return {
+    ...index,
+    files: newFiles,
+    totalFiles: newFiles.size,
+    totalLines: 0,
+    meta: newMeta,
+    contentStore: index.contentStore,
+  }
+}
+
+/**
  * Build a search RegExp from a query string and options.
  * Centralizes all regex construction so every call site behaves identically.
  *
@@ -284,6 +320,134 @@ export function searchIndex(
   results.sort((a, b) => b.matches.length - a.matches.length)
   
   return results
+}
+
+/** Result of a partial search over a lazy-loaded index. */
+export interface PartialSearchResult {
+  results: SearchResult[]
+  /** Paths that had no content (content === '') and were skipped. */
+  unsearchedPaths: string[]
+}
+
+/**
+ * Search indexed files, separating results from unsearched (empty-content) files.
+ * Use this for lazy-loaded repos where some files have content='' (metadata only).
+ * The original `searchIndex` is unchanged and still available for full indexes.
+ */
+export function searchIndexPartial(
+  index: CodeIndex,
+  query: string,
+  options: { caseSensitive?: boolean; regex?: boolean; wholeWord?: boolean } = {},
+): PartialSearchResult {
+  const searchPattern = buildSearchRegex(query, options)
+  if (!searchPattern) return { results: [], unsearchedPaths: [] }
+
+  const results: SearchResult[] = []
+  const unsearchedPaths: string[] = []
+
+  for (const [path, file] of index.files) {
+    if (file.content === '') {
+      unsearchedPaths.push(path)
+      continue
+    }
+
+    const matches: SearchMatch[] = []
+    const lines = getFileLines(file)
+    lines.forEach((line, lineIndex) => {
+      searchPattern.lastIndex = 0
+      let match: RegExpExecArray | null
+      while ((match = searchPattern.exec(line)) !== null) {
+        matches.push({
+          line: lineIndex + 1,
+          content: line,
+          column: match.index,
+          length: match[0].length,
+        })
+        if (match[0].length === 0) break
+      }
+    })
+
+    if (matches.length > 0) {
+      results.push({ file: path, language: file.language, matches })
+    }
+  }
+
+  results.sort((a, b) => b.matches.length - a.matches.length)
+  return { results, unsearchedPaths }
+}
+
+/**
+ * Search additional files whose content has been loaded into a ContentStore.
+ * Pure utility — no React/provider imports. Caller is responsible for ensuring
+ * content is available in the store before calling.
+ *
+ * @param contentStore  Store to read content from (via getBatch)
+ * @param paths         Unsearched paths to attempt
+ * @param query         Search query string
+ * @param options       Search options (caseSensitive, regex, wholeWord)
+ * @param meta          Optional metadata map for language info
+ * @param batchSize     Max paths to search in one call (default 100)
+ * @returns results found + paths that still had no content + paths not attempted
+ */
+export async function searchMore(
+  contentStore: ContentStore,
+  paths: string[],
+  query: string,
+  options: { caseSensitive?: boolean; regex?: boolean; wholeWord?: boolean } = {},
+  meta?: Map<string, CodeIndexMeta>,
+  batchSize = 100,
+): Promise<{
+  results: SearchResult[]
+  searchedPaths: string[]
+  remainingPaths: string[]
+}> {
+  const searchPattern = buildSearchRegex(query, options)
+  if (!searchPattern) return { results: [], searchedPaths: [], remainingPaths: paths }
+
+  const batch = paths.slice(0, batchSize)
+  const notAttempted = paths.slice(batchSize)
+
+  const contents = await contentStore.getBatch(batch)
+
+  const results: SearchResult[] = []
+  const searchedPaths: string[] = []
+  const stillMissing: string[] = []
+
+  for (const path of batch) {
+    const content = contents.get(path)
+    if (content == null || content === '') {
+      stillMissing.push(path)
+      continue
+    }
+
+    searchedPaths.push(path)
+    const matches: SearchMatch[] = []
+    const lines = content.split('\n')
+    lines.forEach((line, lineIndex) => {
+      searchPattern.lastIndex = 0
+      let match: RegExpExecArray | null
+      while ((match = searchPattern.exec(line)) !== null) {
+        matches.push({
+          line: lineIndex + 1,
+          content: line,
+          column: match.index,
+          length: match[0].length,
+        })
+        if (match[0].length === 0) break
+      }
+    })
+
+    if (matches.length > 0) {
+      results.push({
+        file: path,
+        language: meta?.get(path)?.language,
+        matches,
+      })
+    }
+  }
+
+  results.sort((a, b) => b.matches.length - a.matches.length)
+  return { results, searchedPaths, remainingPaths: [...stillMissing, ...notAttempted] }
 }
 
 /**

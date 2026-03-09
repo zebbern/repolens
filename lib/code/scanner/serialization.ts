@@ -2,6 +2,7 @@
 // Maps and Sets are converted to entry arrays; Date to ISO string.
 
 import type { CodeIndex, IndexedFile } from '../code-index'
+import { InMemoryContentStore } from '../content-store'
 import type { FullAnalysis, FileAnalysis, DependencyGraph, TopologyAnalysis } from '../parser/types'
 import type { ScanResults } from './types'
 
@@ -96,6 +97,8 @@ export function deserializeCodeIndex(data: SerializedCodeIndex): CodeIndex {
     totalFiles: data.totalFiles,
     totalLines: data.totalLines,
     isIndexing: data.isIndexing,
+    meta: new Map(),
+    contentStore: new InMemoryContentStore(),
   }
 }
 

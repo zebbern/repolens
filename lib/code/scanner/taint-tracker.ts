@@ -247,6 +247,8 @@ export function trackTaint(
 
   const flows: TaintFlow[] = []
 
+  if (!file.content) return flows
+
   // Guard: skip taint analysis on very large files to avoid UI freezing
   if (file.content.length > MAX_TAINT_FILE_BYTES || getFileLines(file).length > MAX_TAINT_FILE_LINES) {
     return flows

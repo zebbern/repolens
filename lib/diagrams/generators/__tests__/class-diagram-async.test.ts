@@ -1,5 +1,6 @@
 import { generateDiagramAsync, generateDiagram } from '../index'
 import type { CodeIndex } from '@/lib/code/code-index'
+import { InMemoryContentStore } from '@/lib/code/content-store'
 import type { FileNode } from '@/types/repository'
 import type { FullAnalysis, ExtractedType, ExtractedClass } from '@/lib/code/parser/types'
 import { analyzeCodebase } from '@/lib/code/import-parser'
@@ -49,7 +50,7 @@ function makeCodeIndex(
     const lines = content.split('\n')
     map.set(path, { path, name: path.split('/').pop() ?? path, content, lines, lineCount: lines.length })
   }
-  return { files: map, totalFiles: map.size, totalLines: 0, isIndexing: false }
+  return { files: map, totalFiles: map.size, totalLines: 0, isIndexing: false, meta: new Map(), contentStore: new InMemoryContentStore() }
 }
 
 function makeFullAnalysis(overrides?: Partial<FullAnalysis>): FullAnalysis {
@@ -78,7 +79,7 @@ describe('generateDiagramAsync', () => {
     const idx = makeCodeIndex({ 'src/app.ts': 'export function main() {}' })
     const files = [makeFileNode('src/app.ts')]
 
-    const syncResult = generateDiagram('topology', idx, files)
+    const syncResult = await generateDiagram('topology', idx, files)
     const asyncResult = await generateDiagramAsync('topology', idx, files)
 
     // Both should produce the same output

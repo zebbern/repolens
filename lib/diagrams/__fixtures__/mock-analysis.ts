@@ -2,6 +2,7 @@
 
 import type { FullAnalysis, FileAnalysis, DependencyGraph, TopologyAnalysis } from '@/lib/code/parser/types'
 import type { CodeIndex, IndexedFile } from '@/lib/code/code-index'
+import { InMemoryContentStore } from '@/lib/code/content-store'
 import type { FileNode } from '@/types/repository'
 
 // ────────── Helper for creating minimal topology/graph ──────────
@@ -543,6 +544,8 @@ export function createMockCodeIndex(): CodeIndex {
     totalFiles: files.size,
     totalLines: Array.from(files.values()).reduce((s, f) => s + f.lineCount, 0),
     isIndexing: false,
+    meta: new Map(),
+    contentStore: new InMemoryContentStore(),
   }
 }
 

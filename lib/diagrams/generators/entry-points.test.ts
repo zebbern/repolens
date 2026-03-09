@@ -1,6 +1,7 @@
 import { generateEntryPoints } from '@/lib/diagrams/generators/entry-points'
 import { createRealisticAnalysis, createEmptyAnalysis } from '@/lib/diagrams/__fixtures__/mock-analysis'
 import type { CodeIndex, IndexedFile } from '@/lib/code/code-index'
+import { InMemoryContentStore } from '@/lib/code/content-store'
 import type { FileNode } from '@/types/repository'
 
 function createNextJsAnalysis() {
@@ -52,13 +53,15 @@ function createMinimalCodeIndex(): CodeIndex {
     totalFiles: 0,
     totalLines: 0,
     isIndexing: false,
+    meta: new Map(),
+    contentStore: new InMemoryContentStore(),
   }
 }
 
 describe('generateEntryPoints', () => {
-  it('uses generic fallback for an analysis with entry points', () => {
+  it('uses generic fallback for an analysis with entry points', async () => {
     const analysis = createRealisticAnalysis()
-    const result = generateEntryPoints(analysis, createMinimalCodeIndex(), [])
+    const result = await generateEntryPoints(analysis, createMinimalCodeIndex(), [])
 
     expect(result.type).toBe('entrypoints')
     expect(result.title).toContain('Entry Points')
@@ -67,12 +70,12 @@ describe('generateEntryPoints', () => {
     expect(result.stats.totalNodes).toBeGreaterThanOrEqual(1)
   })
 
-  it('detects Next.js routes when framework is Next.js', () => {
+  it('detects Next.js routes when framework is Next.js', async () => {
     const analysis = createNextJsAnalysis()
     const files = createNextJsFiles()
     const codeIndex = createMinimalCodeIndex()
 
-    const result = generateEntryPoints(analysis, codeIndex, files)
+    const result = await generateEntryPoints(analysis, codeIndex, files)
 
     expect(result.type).toBe('entrypoints')
     expect(result.title).toContain('Route')
@@ -81,25 +84,25 @@ describe('generateEntryPoints', () => {
     expect(result.chart).toContain('/')
   })
 
-  it('shows empty message when no entry points exist', () => {
+  it('shows empty message when no entry points exist', async () => {
     const analysis = createEmptyAnalysis()
-    const result = generateEntryPoints(analysis, createMinimalCodeIndex(), [])
+    const result = await generateEntryPoints(analysis, createMinimalCodeIndex(), [])
 
     expect(result.type).toBe('entrypoints')
     expect(result.chart).toContain('No entry points detected')
     expect(result.stats.totalNodes).toBe(0)
   })
 
-  it('includes first-level dependencies of generic entry points', () => {
+  it('includes first-level dependencies of generic entry points', async () => {
     const analysis = createRealisticAnalysis()
-    const result = generateEntryPoints(analysis, createMinimalCodeIndex(), [])
+    const result = await generateEntryPoints(analysis, createMinimalCodeIndex(), [])
 
     // src/index.ts has dep on src/app.tsx
     expect(result.chart).toContain('-->')
     expect(result.stats.totalNodes).toBeGreaterThanOrEqual(2)
   })
 
-  it('detects Express routes when framework is Express', () => {
+  it('detects Express routes when framework is Express', async () => {
     const analysis = createRealisticAnalysis()
     analysis.detectedFramework = 'Express'
     
@@ -114,7 +117,7 @@ describe('generateEntryPoints', () => {
       lineCount: routeContent.split('\n').length,
     })
 
-    const result = generateEntryPoints(analysis, codeIndex, [])
+    const result = await generateEntryPoints(analysis, codeIndex, [])
 
     expect(result.type).toBe('entrypoints')
     expect(result.title).toContain('Express')

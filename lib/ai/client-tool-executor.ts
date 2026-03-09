@@ -1,5 +1,5 @@
 import type { CodeIndex, IndexedFile } from '@/lib/code/code-index'
-import { createEmptyIndex, indexFile, searchIndex, getFileLines } from '@/lib/code/code-index'
+import { createEmptyIndex, indexFile, searchIndex, getFileLines, getFileContent, getFileLinesAsync, getFileContentSync } from '@/lib/code/code-index'
 import { scanIssues } from '@/lib/code/scanner/scanner'
 import { LANG_EXTENSIONS } from '@/lib/code/scanner/constants'
 import { SYMBOL_PATTERNS } from '@/lib/ai/structural-index'
@@ -95,7 +95,7 @@ export async function executeToolLocally(
     case 'searchFiles': {
       const result = searchFilesSchema.safeParse(input)
       if (!result.success) { output = { error: formatZodError(result.error.issues) }; break }
-      output = executeSearchFiles(result.data, codeIndex, allFilePaths)
+      output = await executeSearchFiles(result.data, codeIndex, allFilePaths)
       break
     }
     case 'listDirectory': {
@@ -107,31 +107,31 @@ export async function executeToolLocally(
     case 'findSymbol': {
       const result = findSymbolSchema.safeParse(input)
       if (!result.success) { output = { error: formatZodError(result.error.issues) }; break }
-      output = executeFindSymbol(result.data, codeIndex, allFilePaths)
+      output = await executeFindSymbol(result.data, codeIndex, allFilePaths)
       break
     }
     case 'getFileStats': {
       const result = getFileStatsSchema.safeParse(input)
       if (!result.success) { output = { error: formatZodError(result.error.issues) }; break }
-      output = executeGetFileStats(result.data, codeIndex)
+      output = await executeGetFileStats(result.data, codeIndex)
       break
     }
     case 'analyzeImports': {
       const result = analyzeImportsSchema.safeParse(input)
       if (!result.success) { output = { error: formatZodError(result.error.issues) }; break }
-      output = executeAnalyzeImports(result.data, codeIndex)
+      output = await executeAnalyzeImports(result.data, codeIndex)
       break
     }
     case 'scanIssues': {
       const result = scanIssuesSchema.safeParse(input)
       if (!result.success) { output = { error: formatZodError(result.error.issues) }; break }
-      output = executeScanIssues(result.data, codeIndex, options?.codebaseAnalysis ?? null)
+      output = await executeScanIssues(result.data, codeIndex, options?.codebaseAnalysis ?? null)
       break
     }
     case 'generateDiagram': {
       const result = generateDiagramSchema.safeParse(input)
       if (!result.success) { output = { error: formatZodError(result.error.issues) }; break }
-      output = executeGenerateDiagram(result.data, codeIndex)
+      output = await executeGenerateDiagram(result.data, codeIndex)
       break
     }
     case 'getProjectOverview':
@@ -140,7 +140,7 @@ export async function executeToolLocally(
     case 'generateTour': {
       const result = generateTourSchema.safeParse(input)
       if (!result.success) { output = { error: formatZodError(result.error.issues) }; break }
-      output = executeGenerateTour(result.data, codeIndex, options?.repoName ? { name: options.repoName } : undefined)
+      output = await executeGenerateTour(result.data, codeIndex, options?.repoName ? { name: options.repoName } : undefined)
       break
     }
     default:
@@ -167,9 +167,12 @@ function allPaths(codeIndex: CodeIndex): string[] {
   return Array.from(keys).sort()
 }
 
-function getContent(codeIndex: CodeIndex, path: string): string | undefined {
-  const file = codeIndex.files.get(path)
-  return file?.content
+function getContentSync(codeIndex: CodeIndex, path: string): string | undefined {
+  return getFileContentSync(codeIndex, path) ?? undefined
+}
+
+async function getContentAsync(codeIndex: CodeIndex, path: string): Promise<string | undefined> {
+  return (await getFileContent(codeIndex, path)) ?? undefined
 }
 
 function findFile(codeIndex: CodeIndex, path: string): IndexedFile | undefined {
@@ -215,9 +218,9 @@ async function executeReadFile(
     return { error: `File not found: ${input.path}. Use searchFiles or check the file tree.` }
   }
 
-  let content = getContent(codeIndex, usedPath)
+  let content = await getContentAsync(codeIndex, usedPath)
 
-  // On-demand fetch for lazy repos when content is not in memory
+  // On-demand fetch for lazy repos when content is not available
   if (!content && fetchContent) {
     const fetched = await fetchContent([usedPath])
     content = fetched.get(usedPath)
@@ -259,7 +262,7 @@ async function executeReadFiles(
   // Resolve all paths and identify which need fetching (batch, no N+1)
   const resolved = input.paths.map(p => ({ original: p, resolved: resolvePath(codeIndex, p) }))
   const needFetch = resolved
-    .filter(r => r.resolved && !getContent(codeIndex, r.resolved))
+    .filter(r => r.resolved && !getContentSync(codeIndex, r.resolved))
     .map(r => r.resolved!)
 
   let fetched = new Map<string, string>()
@@ -267,11 +270,11 @@ async function executeReadFiles(
     fetched = await fetchContent(needFetch)
   }
 
-  const results = resolved.map(({ original, resolved: rp }) => {
+  const results = await Promise.all(resolved.map(async ({ original, resolved: rp }) => {
     if (!rp) {
       return { error: `File not found: ${original}. Use searchFiles or check the file tree.` }
     }
-    let content = getContent(codeIndex, rp)
+    let content = await getContentAsync(codeIndex, rp)
     if (!content) content = fetched.get(rp)
     if (!content) {
       return { error: `File content not available for: ${rp}. Content has not been loaded yet.` }
@@ -289,16 +292,16 @@ async function executeReadFiles(
       }
     }
     return { path: rp, content, lineCount: totalLines, totalLines }
-  })
+  }))
 
   return { files: results }
 }
 
-function executeSearchFiles(
+async function executeSearchFiles(
   input: { query: string; maxResults?: number; isRegex?: boolean },
   codeIndex: CodeIndex,
   allFilePaths?: string[],
-): Record<string, unknown> {
+): Promise<Record<string, unknown>> {
   const limit = input.maxResults ?? 15
   const paths = allFilePaths && allFilePaths.length > 0 ? allFilePaths : allPaths(codeIndex)
   const results: Array<{ path: string; matchType: 'path' | 'content'; matches?: Array<{ line: number; content: string; context?: string[] }>; totalMatches?: number }> = []
@@ -351,7 +354,7 @@ function executeSearchFiles(
       for (const match of sr.matches.slice(0, 5)) {
         const contextLines: string[] = []
         const lineIdx = match.line - 1 // 0-based index into file lines
-        const fileLines = getFileLines(file)
+        const fileLines = file.content ? getFileLines(file) : (await getFileLinesAsync(codeIndex, sr.file) ?? [''])
 
         for (let offset = -3; offset <= 3; offset++) {
           const idx = lineIdx + offset
@@ -433,11 +436,11 @@ function executeListDirectory(
 /** Map structural-index kind labels to the labels used by findSymbolSchema. */
 const KIND_MAP: Record<string, string> = { fn: 'function', iface: 'interface' }
 
-function executeFindSymbol(
+async function executeFindSymbol(
   input: { name: string; kind?: string },
   codeIndex: CodeIndex,
   allFilePaths?: string[],
-): Record<string, unknown> {
+): Promise<Record<string, unknown>> {
   const results: Array<{ path: string; line: number; kind: string; match: string }> = []
   // Derive patterns from the shared SYMBOL_PATTERNS, remapping kind labels and
   // cloning each RegExp to avoid shared /g lastIndex state across iterations.
@@ -448,7 +451,7 @@ function executeFindSymbol(
   const nameL = input.name.toLowerCase()
 
   for (const [filePath, file] of codeIndex.files) {
-    const lines = getFileLines(file)
+    const lines = file.content ? getFileLines(file) : (await getFileLinesAsync(codeIndex, filePath) ?? [''])
     for (let i = 0; i < lines.length; i++) {
       for (const pat of patterns) {
         if (input.kind && input.kind !== 'any' && pat.kind !== input.kind) continue
@@ -484,14 +487,14 @@ function executeFindSymbol(
   return output
 }
 
-function executeGetFileStats(
+async function executeGetFileStats(
   input: { path: string },
   codeIndex: CodeIndex,
-): Record<string, unknown> {
+): Promise<Record<string, unknown>> {
   const file = findFile(codeIndex, input.path)
   if (!file) return { error: `File not found: ${input.path}` }
 
-  const lines = getFileLines(file)
+  const lines = file.content ? getFileLines(file) : (await getFileLinesAsync(codeIndex, file.path) ?? [''])
   const ext = file.path.split('.').pop() || ''
   const importLines = lines.filter(l => l.match(/^import\s/))
   const exportLines = lines.filter(l => l.match(/^export\s/))
@@ -619,21 +622,24 @@ function resolveImportToFilePath(
 // executeAnalyzeImports
 // ---------------------------------------------------------------------------
 
-function executeAnalyzeImports(
+async function executeAnalyzeImports(
   input: { path: string },
   codeIndex: CodeIndex,
-): Record<string, unknown> {
+): Promise<Record<string, unknown>> {
   const file = findFile(codeIndex, input.path)
   if (!file) return { error: `File not found: ${input.path}` }
 
   const resolvedPath = file.path
 
   // --- Outgoing imports from the target file ---
+  const fileContent = file.content ?? (await getFileContent(codeIndex, resolvedPath))
   // Non-greedy .*? matches IMPORT_REGEX in structural-index.ts
   const importRegex = /import\s+.*?from\s+['"]([^'"]+)['"]/g
   const imports: string[] = []
   let m: RegExpExecArray | null
-  while ((m = importRegex.exec(file.content)) !== null) imports.push(m[1])
+  if (fileContent) {
+    while ((m = importRegex.exec(fileContent)) !== null) imports.push(m[1])
+  }
 
   // --- Reverse lookup: which files import the target ---
   const paths = allPaths(codeIndex)
@@ -650,8 +656,15 @@ function executeAnalyzeImports(
   // For repeated calls, caching the full reverse-import map per execution context would help.
   const importedBy: string[] = []
 
+  // Batch-fetch content for all files to avoid N+1 async calls in the loop
+  const otherPaths = [...codeIndex.files.keys()].filter(p => p !== resolvedPath)
+  const contentMap = await codeIndex.contentStore.getBatch(otherPaths)
+
   for (const [filePath, otherFile] of codeIndex.files) {
     if (filePath === resolvedPath) continue
+
+    const otherContent = otherFile.content ?? contentMap.get(filePath)
+    if (!otherContent) continue
 
     let isImporter = false
     const ext = filePath.split('.').pop()?.toLowerCase() || ''
@@ -664,7 +677,7 @@ function executeAnalyzeImports(
         // Create fresh instance to avoid shared lastIndex state
         const re = new RegExp(baseRe.source, baseRe.flags)
         let match: RegExpExecArray | null
-        while ((match = re.exec(otherFile.content)) !== null) {
+        while ((match = re.exec(otherContent)) !== null) {
           if (resolveImportToFilePath(match[1], filePath, lookup) === resolvedPath) {
             isImporter = true
             break
@@ -675,7 +688,7 @@ function executeAnalyzeImports(
       // Python: convert dot-separated module path to file path
       const re = new RegExp(PY_IMPORT_RE.source, PY_IMPORT_RE.flags)
       let match: RegExpExecArray | null
-      while ((match = re.exec(otherFile.content)) !== null) {
+      while ((match = re.exec(otherContent)) !== null) {
         const rawSource = match[1] || match[2]
         let importPath: string
 
@@ -708,17 +721,20 @@ function executeAnalyzeImports(
   return { path: resolvedPath, imports, importedBy: importedBy.slice(0, 30) }
 }
 
-function executeScanIssues(
+async function executeScanIssues(
   input: { path: string },
   codeIndex: CodeIndex,
   codebaseAnalysis?: Record<string, unknown> | null,
-): Record<string, unknown> {
+): Promise<Record<string, unknown>> {
   const file = findFile(codeIndex, input.path)
   if (!file) return { error: `File not found: ${input.path}` }
 
+  const content = file.content ?? (await getFileContent(codeIndex, file.path))
+  if (!content) return { error: `File content not available for: ${file.path}` }
+
   // Build a single-file CodeIndex and run the real scanner
   let miniIndex = createEmptyIndex()
-  miniIndex = indexFile(miniIndex, file.path, file.content, detectLang(file.path))
+  miniIndex = indexFile(miniIndex, file.path, content, detectLang(file.path))
   const result = scanIssues(miniIndex, null)
 
   // Map CodeIssue to backward-compatible output shape
@@ -750,10 +766,10 @@ function detectLang(filePath: string): string {
   return 'text'
 }
 
-function executeGenerateDiagram(
+async function executeGenerateDiagram(
   input: { type: string; focusFile?: string },
   codeIndex: CodeIndex,
-): Record<string, unknown> {
+): Promise<Record<string, unknown>> {
   const paths = allPaths(codeIndex)
 
   if (input.type === 'summary') {
@@ -774,12 +790,18 @@ function executeGenerateDiagram(
     const nodes = new Set<string>()
     const edges: Array<{ from: string; to: string }> = []
 
+    // Batch-fetch content for all files
+    const filePaths = [...codeIndex.files.keys()]
+    const contentMap = await codeIndex.contentStore.getBatch(filePaths)
+
     for (const [filePath, file] of codeIndex.files) {
       const dir = filePath.split('/').slice(0, -1).join('/') || '(root)'
       nodes.add(dir)
+      const content = file.content ?? contentMap.get(filePath)
+      if (!content) continue
       const importRegex = /import\s+.*from\s+['"](@\/[^'"]+|\.\.?\/[^'"]+)['"]/g
       let m
-      while ((m = importRegex.exec(file.content)) !== null) {
+      while ((m = importRegex.exec(content)) !== null) {
         const importPath = m[1].replace(/\.\w+$/, '')
         const parts = importPath.split('/')
         const targetDir = parts.slice(0, -1).join('/') || '(root)'
@@ -899,7 +921,7 @@ function findSignificantRange(
 /**
  * Score a file for architectural significance. Higher is more significant.
  */
-function significanceScore(path: string, file: { lineCount: number; content: string }): number {
+function significanceScore(path: string, file: { lineCount: number; content?: string }): number {
   let score = 0
   const fileName = path.split('/').pop() || ''
 
@@ -911,7 +933,7 @@ function significanceScore(path: string, file: { lineCount: number; content: str
   }
 
   // Files with many exports are likely important modules
-  const exportCount = (file.content.match(/^export\s/gm) || []).length
+  const exportCount = ((file.content ?? '').match(/^export\s/gm) || []).length
   score += Math.min(exportCount, 10)
 
   // Prefer files that aren't tests
@@ -963,11 +985,11 @@ function generateAnnotation(path: string, lines: string[], title: string): strin
   return description
 }
 
-function executeGenerateTour(
+async function executeGenerateTour(
   input: { repoKey: string; theme?: string; maxStops?: number },
   codeIndex: CodeIndex,
   repoContext?: { name: string },
-): Record<string, unknown> {
+): Promise<Record<string, unknown>> {
   // F12: Override repoKey with validated repo name when available
   const repoKey = repoContext?.name || input.repoKey
   const maxStops = input.maxStops ?? 8
@@ -1028,10 +1050,16 @@ function executeGenerateTour(
   // Take top candidates
   const selected = candidateFiles.slice(0, maxStops)
 
+  // Pre-fetch content for all selected candidates
+  const selectedPaths = selected.map(c => c.path)
+  const contentMap = await codeIndex.contentStore.getBatch(selectedPaths)
+
   // Build tour stops
   const stops: TourStop[] = selected.map(({ path, file }) => {
-    const { startLine, endLine, title } = findSignificantRange(getFileLines(file))
-    const annotation = generateAnnotation(path, getFileLines(file), title)
+    const content = file.content ?? contentMap.get(path)
+    const lines = content ? content.split('\n') : ['']
+    const { startLine, endLine, title } = findSignificantRange(lines)
+    const annotation = generateAnnotation(path, lines, title)
 
     return {
       id: crypto.randomUUID(),

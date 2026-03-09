@@ -242,7 +242,8 @@ describe('CodeIndex Phase 3 dual-write', () => {
       totalFiles: 0,
       totalLines: 0,
       isIndexing: false,
-      // no meta, no contentStore
+      meta: new Map(),
+      contentStore: new InMemoryContentStore(),
     }
 
     const result = indexFile(legacyIndex, 'legacy.ts', 'const x = 1;\n', 'typescript')
@@ -411,7 +412,7 @@ describe('LazyContentStore', () => {
     globalThis.indexedDB = new IDBFactory()
     globalThis.IDBKeyRange = IDBKeyRange
     mockFetchFn = vi.fn(async (path: string) => `fetched:${path}`)
-    fetchQueue = new FetchQueue({ fetchFn: mockFetchFn })
+    fetchQueue = new FetchQueue({ fetchFn: mockFetchFn as unknown as (path: string) => Promise<string> })
   })
 
   it('constructor initializes with empty metadataPaths and loadedPaths', () => {
@@ -524,7 +525,7 @@ describe('LazyContentStore', () => {
 
   it('get() returns null when fetch fails', async () => {
     mockFetchFn.mockRejectedValue(new Error('Network error'))
-    const failQueue = new FetchQueue({ fetchFn: mockFetchFn })
+    const failQueue = new FetchQueue({ fetchFn: mockFetchFn as unknown as (path: string) => Promise<string> })
     const store = new LazyContentStore('owner/repo', failQueue)
     store.registerPaths(['fail.ts'])
 

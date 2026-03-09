@@ -147,7 +147,7 @@ workproject/                    # Next.js application root
 │   │   ├── prompt-builder.ts   # AI prompt construction
 │   │   └── index.ts            # Barrel exports
 │   ├── code/                   # Code analysis engine
-│   │   ├── code-index.ts       # In-memory file index (search, symbol lookup)
+│   │   ├── code-index.ts       # In-memory file index (search, symbol lookup) + async content access helpers
 │   │   ├── content-store.ts    # ContentStore abstraction (InMemory + IDB + Lazy)
 │   │   ├── fetch-queue.ts      # Priority-based fetch queue for lazy content loading
 │   │   ├── import-parser.ts    # Dependency graph analysis
@@ -331,6 +331,8 @@ Security headers (`X-Frame-Options`, `X-Content-Type-Options`, `Referrer-Policy`
 ### ContentStore (Tiered Content Storage)
 
 Three-tier content storage routes repos by size: <50 MB → `InMemoryContentStore` (zero-overhead `Map`), 50–200 MB → `IDBContentStore` (IndexedDB-backed), >200 MB → `LazyContentStore` (on-demand fetching via `FetchQueue`). All three implement the `ContentStore` interface (`lib/code/content-store.ts`). `CodeIndex` holds `CodeIndexMeta` records (path, name, language, lineCount) for all files regardless of store type. Thresholds are configured via `IDB_CONTENT_STORE_THRESHOLD_KB` (50 MB) and `LAZY_CONTENT_THRESHOLD_KB` (200 MB) in `config/constants.ts`. Search and scanner workers use IDB directly for large repos. For lazy repos, `batchIndexMetadataOnly()` creates a metadata-only `CodeIndex` with `content: ''`, and `searchIndexPartial()` separates searched vs. unsearched files.
+
+**Content access pattern**: `IndexedFile.content` is optional — for IDB-tier repos, content is stripped from heap after indexing and lives only in IndexedDB. Main-thread consumers use the async helpers in `code-index.ts`: `getFileContent(index, path)` (async, works with all tiers), `getFileContentSync(index, path)` (sync fast path for InMemory-tier), and `getFileLinesAsync(index, path)` (async, returns split lines). Scanner files guard with `if (!file.content)` before accessing content directly.
 
 ### Scanner Architecture
 

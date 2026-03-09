@@ -41,6 +41,7 @@ export async function scanWithTreeSitter(
   const filesByLanguage = new Map<string, Map<string, IndexedFile>>()
   for (const [path, file] of files) {
     if (SKIP_VENDORED.test(path)) continue
+    if (!file.content) continue
     if (file.content.length > MAX_FILE_SIZE) continue
 
     const lang = getLanguageForFile(path)

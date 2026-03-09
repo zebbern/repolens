@@ -1,6 +1,7 @@
 // Main analysis entry point — orchestrates all parsing phases.
 
 import type { CodeIndex } from '../code-index'
+import { getFileContent } from '../code-index'
 import type { FileAnalysis, DependencyGraph, FullAnalysis } from './types'
 import { detectLang, detectPrimaryLanguage } from './utils'
 import { extractImports } from './languages'
@@ -12,13 +13,14 @@ import { detectFramework } from './framework-detection'
 
 const JS_TS_LANGS = new Set(['typescript', 'javascript', 'tsx', 'jsx'])
 
-export function analyzeCodebase(codeIndex: CodeIndex): FullAnalysis {
+export async function analyzeCodebase(codeIndex: CodeIndex): Promise<FullAnalysis> {
   const files = new Map<string, FileAnalysis>()
   const indexedPaths = new Set(codeIndex.files.keys())
 
   // Phase 1: Analyze each file
-  for (const [path, indexed] of codeIndex.files) {
-    const content = indexed.content
+  for (const [path] of codeIndex.files) {
+    const content = await getFileContent(codeIndex, path)
+    if (!content) continue
     const lang = detectLang(path)
     const imports = extractImports(content, path, lang, indexedPaths)
     const exports = extractExports(content, lang)
@@ -71,7 +73,7 @@ export function analyzeCodebase(codeIndex: CodeIndex): FullAnalysis {
  * Tree-sitter–based type and class extraction for richer class diagrams.
  */
 export async function analyzeCodebaseAsync(codeIndex: CodeIndex): Promise<FullAnalysis> {
-  const result = analyzeCodebase(codeIndex)
+  const result = await analyzeCodebase(codeIndex)
 
   const { extractTypesAsync, extractClassesAsync } = await import('./extract-types')
 
@@ -80,7 +82,7 @@ export async function analyzeCodebaseAsync(codeIndex: CodeIndex): Promise<FullAn
     if (JS_TS_LANGS.has(fileAnalysis.language)) continue
 
     enhancePromises.push((async () => {
-      const content = codeIndex.files.get(path)?.content ?? ''
+      const content = await getFileContent(codeIndex, path) ?? ''
       const [asyncTypes, asyncClasses] = await Promise.all([
         extractTypesAsync(content, fileAnalysis.language),
         extractClassesAsync(content, fileAnalysis.language),

@@ -104,7 +104,7 @@ describe('scanWithTreeSitter', () => {
     mockedParseFile.mockResolvedValueOnce(null as unknown as import('web-tree-sitter').Tree)
 
     const files = new Map<string, IndexedFile>()
-    files.set('empty.py', makeFile(''))
+    files.set('empty.py', makeFile('# empty'))
 
     const result = await scanWithTreeSitter(files)
     expect(result).toEqual([])

@@ -11,6 +11,7 @@ import {
   type FixSuggestion,
   type ValidationResult,
 } from '@/lib/code/issue-scanner'
+import { getFileContent } from '@/lib/code/code-index'
 import { useRepository } from '@/providers'
 import { useAPIKeys } from '@/providers/api-keys-provider'
 import { useBatchOperations } from '@/hooks/use-batch-operations'
@@ -107,7 +108,7 @@ export function IssuesPanel({ codeIndex, onNavigateToFile }: IssuesPanelProps) {
     setValidationResults,
   })
 
-  const handleShowFix = useCallback((issue: CodeIssue) => {
+  const handleShowFix = useCallback(async (issue: CodeIssue) => {
     setShowFix(prev => {
       const next = new Set(prev)
       if (next.has(issue.id)) { next.delete(issue.id); return next }
@@ -116,14 +117,14 @@ export function IssuesPanel({ codeIndex, onNavigateToFile }: IssuesPanelProps) {
     })
 
     if (!fixCacheRef.current.has(issue.id)) {
-      const file = codeIndex.files.get(issue.file)
-      if (file) {
-        setFixCache(prev => new Map(prev).set(issue.id, generateFix(issue, file.content)))
+      const content = await getFileContent(codeIndex, issue.file)
+      if (content) {
+        setFixCache(prev => new Map(prev).set(issue.id, generateFix(issue, content)))
       } else {
         setFixCache(prev => new Map(prev).set(issue.id, null))
       }
     }
-  }, [codeIndex.files])
+  }, [codeIndex])
 
   const handleValidate = useCallback(async (issue: CodeIssue) => {
     if (validationResultsRef.current.has(issue.id) || validatingIssuesRef.current.has(issue.id)) return
@@ -133,8 +134,8 @@ export function IssuesPanel({ codeIndex, onNavigateToFile }: IssuesPanelProps) {
 
     setValidatingIssues(prev => new Set(prev).add(issue.id))
     try {
-      const file = codeIndex.files.get(issue.file)
-      const result = await validateFinding(issue, file?.content ?? '', {
+      const content = (await getFileContent(codeIndex, issue.file)) ?? ''
+      const result = await validateFinding(issue, content, {
         provider: selectedProvider, model: selectedModel.id, apiKey,
       })
       setValidationResults(prev => new Map(prev).set(issue.id, result))
@@ -146,7 +147,7 @@ export function IssuesPanel({ codeIndex, onNavigateToFile }: IssuesPanelProps) {
     } finally {
       setValidatingIssues(prev => { const next = new Set(prev); next.delete(issue.id); return next })
     }
-  }, [selectedProvider, selectedModel, apiKeys, codeIndex.files])
+  }, [selectedProvider, selectedModel, apiKeys, codeIndex])
 
   const filteredIssues = useMemo(() => {
     if (!results) return []

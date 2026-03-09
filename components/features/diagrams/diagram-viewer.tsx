@@ -103,19 +103,22 @@ export function DiagramViewer({ files, codeIndex, className, onNavigateToFile }:
       .slice(0, 8)
   }, [focusQuery, analysis])
 
-  // Generate diagram (sync — instant rendering)
+  // Generate diagram (async — resolves content from store)
   const selectedType = viewMode === 'overview' ? null : viewMode
   const activeDiagramType = focusTarget ? 'focus' as DiagramType : selectedType
-  const diagram = useMemo((): AnyDiagramResult | null => {
-    if (!activeDiagramType) return null
-    if (!files || files.length === 0 || codeIndex.totalFiles === 0) return null
-    if (!analysis && activeDiagramType !== 'treemap') return null
-    try {
-      return generateDiagram(activeDiagramType, codeIndex, files, analysis || undefined, focusTarget || undefined, focusHops)
-    } catch (err) {
-      console.error(`Diagram generation failed for type "${activeDiagramType}":`, err)
-      return null
-    }
+  const [diagram, setDiagram] = useState<AnyDiagramResult | null>(null)
+  useEffect(() => {
+    if (!activeDiagramType) { setDiagram(null); return }
+    if (!files || files.length === 0 || codeIndex.totalFiles === 0) { setDiagram(null); return }
+    if (!analysis && activeDiagramType !== 'treemap') { setDiagram(null); return }
+    let cancelled = false
+    generateDiagram(activeDiagramType, codeIndex, files, analysis || undefined, focusTarget || undefined, focusHops)
+      .then(result => { if (!cancelled) setDiagram(result) })
+      .catch(err => {
+        console.error(`Diagram generation failed for type "${activeDiagramType}":`, err)
+        if (!cancelled) setDiagram(null)
+      })
+    return () => { cancelled = true }
   }, [files, codeIndex, activeDiagramType, analysis, focusTarget, focusHops])
 
   // Async enhancement for class diagrams (Tree-sitter for non-JS/TS)

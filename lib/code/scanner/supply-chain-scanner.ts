@@ -584,6 +584,7 @@ export function scanSupplyChain(codeIndex: CodeIndex): CodeIssue[] {
 
   for (const [path, file] of codeIndex.files) {
     const content = file.content
+    if (!content) continue
     const lines = getFileLines(file)
     const filename = path.split('/').pop() || ''
 

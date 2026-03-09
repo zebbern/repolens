@@ -3,6 +3,7 @@ import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { act } from 'react'
 import type { CodeIndex, SearchResult } from '@/lib/code/code-index'
+import { InMemoryContentStore } from '@/lib/code/content-store'
 import type { ExtractedSymbol } from '@/components/features/code/hooks/use-symbol-extraction'
 
 /* ── Hoisted mocks (available to vi.mock factories) ───────────────── */
@@ -108,7 +109,13 @@ function createCodeIndex(
       lineCount: lines.length,
     })
   }
-  return { files: map, totalFiles: map.size, totalLines: 0, isIndexing: false }
+  const contentStore = new InMemoryContentStore()
+  const meta = new Map<string, { path: string; name: string; language?: string; lineCount: number }>()
+  for (const f of files) {
+    contentStore.put(f.path, f.content)
+    meta.set(f.path, { path: f.path, name: f.path.split('/').pop() || f.path, language: f.language, lineCount: f.content.split('\n').length })
+  }
+  return { files: map, totalFiles: map.size, totalLines: 0, isIndexing: false, meta, contentStore }
 }
 
 const defaultFiles = [

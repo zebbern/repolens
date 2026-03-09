@@ -7,7 +7,7 @@ interface UseReplaceOptions {
   codeIndex: CodeIndex
   updateCodeIndex: (index: CodeIndex) => void
   setModifiedContents: Dispatch<SetStateAction<Map<string, string>>>
-  getFileContent: (path: string) => string | null
+  getFileContent: (path: string) => Promise<string | null>
   debouncedSearchQuery: string
   searchOptions: SearchOptions
   replaceQuery: string
@@ -55,11 +55,11 @@ export function useReplace({
   }, [codeIndex, updateCodeIndex, setModifiedContents, setOpenTabs])
 
   // Replace single match on a specific line
-  const replaceInFile = useCallback((filePath: string, matchLine: number) => {
+  const replaceInFile = useCallback(async (filePath: string, matchLine: number) => {
     const searchPattern = buildSearchRegex(debouncedSearchQuery, searchOptions)
     if (!searchPattern) return
 
-    const content = getFileContent(filePath)
+    const content = await getFileContent(filePath)
     if (!content) return
 
     const lines = content.split('\n')
@@ -72,11 +72,11 @@ export function useReplace({
   }, [debouncedSearchQuery, searchOptions, replaceQuery, getFileContent, applyReplace])
 
   // Replace all matches in one file
-  const replaceAllInFile = useCallback((filePath: string) => {
+  const replaceAllInFile = useCallback(async (filePath: string) => {
     const searchPattern = buildSearchRegex(debouncedSearchQuery, searchOptions)
     if (!searchPattern) return
 
-    const content = getFileContent(filePath)
+    const content = await getFileContent(filePath)
     if (!content) return
 
     searchPattern.lastIndex = 0
@@ -84,7 +84,7 @@ export function useReplace({
   }, [debouncedSearchQuery, searchOptions, replaceQuery, getFileContent, applyReplace])
 
   // Replace all matches across ALL files
-  const replaceAllInAllFiles = useCallback(() => {
+  const replaceAllInAllFiles = useCallback(async () => {
     setConfirmReplaceAll(false)
     const searchPattern = buildSearchRegex(debouncedSearchQuery, searchOptions)
     if (!searchPattern) return
@@ -92,8 +92,16 @@ export function useReplace({
     const updates: Array<{ path: string; content: string; language?: string }> = []
     const newModified = new Map(modifiedContents)
 
+    // Pre-fetch all file contents in parallel
+    const uniquePaths = [...new Set(searchResults.map(r => r.file))]
+    const prefetched = new Map<string, string>()
+    await Promise.all(uniquePaths.map(async (p) => {
+      const c = await getFileContent(p)
+      if (c) prefetched.set(p, c)
+    }))
+
     for (const result of searchResults) {
-      const content = getFileContent(result.file)
+      const content = prefetched.get(result.file)
       if (!content) continue
 
       searchPattern.lastIndex = 0
@@ -120,7 +128,7 @@ export function useReplace({
   }, [searchResults, debouncedSearchQuery, searchOptions, replaceQuery, getFileContent, modifiedContents, codeIndex, updateCodeIndex, setModifiedContents, setOpenTabs])
 
   // Revert a file to its original content
-  const revertFile = useCallback((filePath: string) => {
+  const revertFile = useCallback(async (filePath: string) => {
     const indexed = codeIndex.files.get(filePath)
 
     setModifiedContents(prev => {
@@ -129,14 +137,14 @@ export function useReplace({
       return next
     })
 
-    if (indexed) {
-      updateCodeIndex(indexFile(codeIndex, filePath, indexed.content, indexed.language))
+    const originalContent = indexed?.content ?? await codeIndex.contentStore.get(filePath)
+    if (indexed && originalContent) {
+      updateCodeIndex(indexFile(codeIndex, filePath, originalContent, indexed.language))
     }
 
     setOpenTabs(prev => prev.map(tab => {
       if (tab.path !== filePath) return tab
-      const original = indexed?.content ?? tab.originalContent
-      return { ...tab, content: original, isModified: false }
+      return { ...tab, content: originalContent ?? tab.originalContent, isModified: false }
     }))
   }, [codeIndex, updateCodeIndex, setModifiedContents, setOpenTabs])
 

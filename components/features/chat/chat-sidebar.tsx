@@ -22,6 +22,7 @@ import { handleToolCall } from "@/lib/ai/tool-call-handler"
 import { executeToolLocally, type ToolExecutorOptions } from "@/lib/ai/client-tool-executor"
 import type { ToolCallInfo, AddToolOutputFn } from "@/lib/ai/tool-call-handler"
 import type { CodeIndex } from "@/lib/code/code-index"
+import type { PinnedContentsResult } from "@/types/types"
 import type { Tour } from "@/types/tours"
 
 // TODO(F8): Wire docs/changelog/comparison providers into chat context for richer tool responses.
@@ -48,8 +49,15 @@ export function ChatSidebar({ className }: { className?: string }) {
     })
   }, [])
 
-  // Memoize pinned contents to avoid recomputing every render
-  const pinnedResult = useMemo(() => getPinnedContents(), [getPinnedContents])
+  // Resolve pinned contents asynchronously (contentStore may be IDB-backed)
+  const [pinnedResult, setPinnedResult] = useState<PinnedContentsResult>({ content: '', fileCount: 0, totalBytes: 0, skipped: [] })
+  useEffect(() => {
+    let stale = false
+    getPinnedContents().then(result => {
+      if (!stale) setPinnedResult(result)
+    })
+    return () => { stale = true }
+  }, [getPinnedContents])
 
   const validProviders = getValidProviders()
   const hasValidKey = validProviders.length > 0 && selectedModel

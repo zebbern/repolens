@@ -10,7 +10,7 @@ interface UseDownloadsOptions {
   openTabs: OpenTab[]
   codeIndex: CodeIndex
   files: FileNode[]
-  getFileContent: (path: string) => string | null
+  getFileContent: (path: string) => Promise<string | null>
   repo: GitHubRepo | null
 }
 
@@ -85,7 +85,7 @@ export function useDownloads({
 
   // Download a single file from the explorer
   const downloadExplorerFile = useCallback(async (node: FileNode) => {
-    let content = getFileContent(node.path)
+    let content = await getFileContent(node.path)
     if (content === null && repo) {
       try {
         content = await fetchFileContent(repo.owner, repo.name, repo.defaultBranch, node.path)
@@ -119,7 +119,7 @@ export function useDownloads({
 
     const results = await Promise.allSettled(
       fileNodes.map(async (f) => {
-        let content = getFileContent(f.path)
+        let content = await getFileContent(f.path)
         if (content === null && repo) {
           content = await fetchFileContent(repo.owner, repo.name, repo.defaultBranch, f.path)
         }
@@ -160,7 +160,7 @@ export function useDownloads({
 
     const results = await Promise.allSettled(
       allFiles.map(async (f) => {
-        let content = getFileContent(f.path)
+        let content = await getFileContent(f.path)
         if (content === null && repo) {
           content = await fetchFileContent(repo.owner, repo.name, repo.defaultBranch, f.path)
         }

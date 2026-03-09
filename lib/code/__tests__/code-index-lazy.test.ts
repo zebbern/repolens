@@ -162,7 +162,7 @@ describe('batchIndexMetadataOnly integration', () => {
     const file = index.files.get('secret.ts')!
     // Empty content means no search matches
     expect(file.content).toBe('')
-    expect(file.content.includes('secret')).toBe(false)
+    expect((file.content ?? '').includes('secret')).toBe(false)
   })
 
   it('mixed content + metadata-only index tracks correctly', () => {

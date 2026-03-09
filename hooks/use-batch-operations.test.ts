@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, type Mock } from 'vitest'
 import { renderHook, act } from '@testing-library/react'
 import type { CodeIndex } from '@/lib/code/code-index'
+import { InMemoryContentStore } from '@/lib/code/code-index'
 import type { CodeIssue } from '@/lib/code/scanner/types'
 import type { FixSuggestion, ValidationResult } from '@/lib/code/scanner'
 import { useBatchOperations, type BatchOperationsOptions } from './use-batch-operations'
@@ -8,6 +9,7 @@ import type { APIKeysState } from '@/types/types'
 
 function createCodeIndex(files?: Map<string, { content: string }>): CodeIndex {
   const fileMap = new Map<string, { path: string; name: string; content: string; lineCount: number }>()
+  const contentStore = new InMemoryContentStore()
   if (files) {
     for (const [path, { content }] of files) {
       fileMap.set(path, {
@@ -16,6 +18,7 @@ function createCodeIndex(files?: Map<string, { content: string }>): CodeIndex {
         content,
         lineCount: content.split('\n').length,
       })
+      contentStore.put(path, content)
     }
   }
   return {
@@ -23,6 +26,8 @@ function createCodeIndex(files?: Map<string, { content: string }>): CodeIndex {
     totalFiles: fileMap.size,
     totalLines: 0,
     isIndexing: false,
+    meta: new Map(),
+    contentStore,
   }
 }
 
@@ -149,14 +154,14 @@ describe('useBatchOperations', () => {
   })
 
   describe('batchGenerateFixes', () => {
-    it('generates fixes for all issues synchronously', () => {
+    it('generates fixes for all issues', async () => {
       const issue1 = createIssue({ id: 'i1', file: 'src/utils.ts' })
       const issue2 = createIssue({ id: 'i2', file: 'src/utils.ts' })
       generateFix.mockReturnValue(createFix())
 
       const { result } = renderBatchHook()
-      act(() => {
-        result.current.batchGenerateFixes([issue1, issue2])
+      await act(async () => {
+        await result.current.batchGenerateFixes([issue1, issue2])
       })
 
       expect(generateFix).toHaveBeenCalledTimes(2)
@@ -164,13 +169,13 @@ describe('useBatchOperations', () => {
       expect(setShowFix).toHaveBeenCalledTimes(1)
     })
 
-    it('sets fixProgress to completed after generation', () => {
+    it('sets fixProgress to completed after generation', async () => {
       const issue = createIssue({ id: 'i1', file: 'src/utils.ts' })
       generateFix.mockReturnValue(createFix())
 
       const { result } = renderBatchHook()
-      act(() => {
-        result.current.batchGenerateFixes([issue])
+      await act(async () => {
+        await result.current.batchGenerateFixes([issue])
       })
 
       expect(result.current.fixProgress).toEqual({
@@ -181,35 +186,35 @@ describe('useBatchOperations', () => {
       })
     })
 
-    it('counts failures when file is not in index', () => {
+    it('counts failures when file is not in index', async () => {
       const issue = createIssue({ id: 'i1', file: 'nonexistent.ts' })
 
       const { result } = renderBatchHook()
-      act(() => {
-        result.current.batchGenerateFixes([issue])
+      await act(async () => {
+        await result.current.batchGenerateFixes([issue])
       })
 
       expect(result.current.fixProgress.failed).toBe(1)
       expect(generateFix).not.toHaveBeenCalled()
     })
 
-    it('does nothing when issues array is empty', () => {
+    it('does nothing when issues array is empty', async () => {
       const { result } = renderBatchHook()
-      act(() => {
-        result.current.batchGenerateFixes([])
+      await act(async () => {
+        await result.current.batchGenerateFixes([])
       })
 
       expect(generateFix).not.toHaveBeenCalled()
       expect(result.current.fixProgress.inProgress).toBe(false)
     })
 
-    it('passes file content to generateFix', () => {
+    it('passes file content to generateFix', async () => {
       const issue = createIssue({ id: 'i1', file: 'src/utils.ts' })
       generateFix.mockReturnValue(null)
 
       const { result } = renderBatchHook()
-      act(() => {
-        result.current.batchGenerateFixes([issue])
+      await act(async () => {
+        await result.current.batchGenerateFixes([issue])
       })
 
       expect(generateFix).toHaveBeenCalledWith(issue, 'const x = eval("test")')

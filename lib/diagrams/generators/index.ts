@@ -27,15 +27,15 @@ export {
   generateFocusDiagram,
 }
 
-export function generateDiagram(
+export async function generateDiagram(
   type: DiagramType,
   codeIndex: CodeIndex,
   files: FileNode[],
   analysis?: FullAnalysis,
   focusTarget?: string,
   focusHops?: 1 | 2,
-): AnyDiagramResult {
-  const data = analysis || analyzeCodebase(codeIndex)
+): Promise<AnyDiagramResult> {
+  const data = analysis || await analyzeCodebase(codeIndex)
 
   switch (type) {
     case 'topology':

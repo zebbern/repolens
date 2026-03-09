@@ -42,8 +42,8 @@ interface RepositoryContextType extends RepositoryContext {
   /** Map of file path -> modified content (replacements etc.) */
   modifiedContents: Map<string, string>
   setModifiedContents: Dispatch<SetStateAction<Map<string, string>>>
-  /** Read file content: modifiedContents first, then codeIndex, then null */
-  getFileContent: (path: string) => string | null
+  /** Read file content: modifiedContents first, then codeIndex, then contentStore */
+  getFileContent: (path: string) => Promise<string | null>
   /** Codebase analysis computed once after indexing completes (B5). */
   codebaseAnalysis: FullAnalysis | null
   /** Files that failed to fetch during indexing (B6). */
@@ -63,7 +63,7 @@ interface RepositoryContextType extends RepositoryContext {
   /** Check if a path is currently pinned. */
   isPinned: (path: string) => boolean
   /** Assemble pinned file contents for system prompt injection. */
-  getPinnedContents: () => PinnedContentsResult
+  getPinnedContents: () => Promise<PinnedContentsResult>
   /** Get cached tab data by key. Returns undefined if no cache for that key. */
   getTabCache: <T>(key: string) => T | undefined
   /** Store tab data in cache by key. */
@@ -107,11 +107,12 @@ export function RepositoryProvider({ children }: { children: ReactNode }) {
 
   const { token: githubToken } = useGitHubToken()
 
-  // Helper: get file content from modifiedContents first, then codeIndex
-  const getFileContent = useCallback((path: string): string | null => {
+  // Helper: get file content from modifiedContents first, then codeIndex, then contentStore
+  const getFileContent = useCallback(async (path: string): Promise<string | null> => {
     if (modifiedContents.has(path)) return modifiedContents.get(path)!
     const indexed = codeIndex.files.get(path)
-    return indexed ? indexed.content : null
+    if (indexed?.content) return indexed.content
+    return codeIndex.contentStore.get(path)
   }, [modifiedContents, codeIndex])
 
   // Detect lazy content store and wire up progress tracking
@@ -263,6 +264,10 @@ export function RepositoryProvider({ children }: { children: ReactNode }) {
     const existingFile = codeIndex?.files?.get(path)
     if (existingFile?.content) return existingFile.content
 
+    // Check contentStore (covers IDB-backed repos)
+    const storedContent = await codeIndex.contentStore.get(path)
+    if (storedContent) return storedContent
+
     // Lazy repo: file exists in index with empty content — fetch on demand with critical priority
     if (existingFile && contentAvailability !== 'full' && codeIndex.contentStore instanceof LazyContentStore) {
       try {
@@ -344,7 +349,7 @@ export function RepositoryProvider({ children }: { children: ReactNode }) {
     return pinnedFiles.has(path)
   }, [pinnedFiles])
 
-  const getPinnedContents = useCallback((): PinnedContentsResult => {
+  const getPinnedContents = useCallback(async (): Promise<PinnedContentsResult> => {
     const { MAX_SINGLE_FILE_BYTES, MAX_PINNED_BYTES } = PINNED_CONTEXT_CONFIG
     const resolvedPaths = new Set<string>()
     const skipped: string[] = []
@@ -352,50 +357,60 @@ export function RepositoryProvider({ children }: { children: ReactNode }) {
     let totalBytes = 0
     let fileCount = 0
 
+    // Collect all paths we need content for
+    const pathsToFetch: string[] = []
     for (const [, pin] of pinnedFiles) {
       if (pin.type === 'file') {
-        if (resolvedPaths.has(pin.path)) continue
-        resolvedPaths.add(pin.path)
-
-        const file = codeIndex.files.get(pin.path)
-        if (!file || !file.content) continue
-
-        if (file.content.length > MAX_SINGLE_FILE_BYTES) {
-          skipped.push(pin.path)
-          continue
+        if (!resolvedPaths.has(pin.path)) {
+          resolvedPaths.add(pin.path)
+          pathsToFetch.push(pin.path)
         }
-        if (totalBytes + file.content.length > MAX_PINNED_BYTES) {
-          skipped.push(pin.path)
-          continue
-        }
-
-        const ext = pin.path.split('.').pop() ?? ''
-        content += `### \`${pin.path}\`\n\`\`\`${ext}\n${file.content}\n\`\`\`\n\n`
-        totalBytes += file.content.length
-        fileCount++
       } else {
-        // Directory: expand all files with matching prefix
         const prefix = pin.path.endsWith('/') ? pin.path : `${pin.path}/`
-        for (const [filePath, file] of codeIndex.files) {
+        for (const [filePath] of codeIndex.files) {
           if (!filePath.startsWith(prefix)) continue
-          if (resolvedPaths.has(filePath)) continue
-          resolvedPaths.add(filePath)
-
-          if (!file.content) continue
-
-          if (file.content.length > MAX_SINGLE_FILE_BYTES) {
-            skipped.push(filePath)
-            continue
+          if (!resolvedPaths.has(filePath)) {
+            resolvedPaths.add(filePath)
+            pathsToFetch.push(filePath)
           }
-          if (totalBytes + file.content.length > MAX_PINNED_BYTES) {
-            skipped.push(filePath)
-            continue
-          }
+        }
+      }
+    }
 
-          const ext = filePath.split('.').pop() ?? ''
-          content += `### \`${filePath}\`\n\`\`\`${ext}\n${file.content}\n\`\`\`\n\n`
-          totalBytes += file.content.length
-          fileCount++
+    // Batch-fetch all content at once
+    const contentMap = await codeIndex.contentStore.getBatch(pathsToFetch)
+
+    // Assemble output in original pin order
+    resolvedPaths.clear()
+    for (const [, pin] of pinnedFiles) {
+      const addFile = (filePath: string) => {
+        if (resolvedPaths.has(filePath)) return
+        resolvedPaths.add(filePath)
+
+        const fileContent = contentMap.get(filePath)
+        if (!fileContent) return
+
+        if (fileContent.length > MAX_SINGLE_FILE_BYTES) {
+          skipped.push(filePath)
+          return
+        }
+        if (totalBytes + fileContent.length > MAX_PINNED_BYTES) {
+          skipped.push(filePath)
+          return
+        }
+
+        const ext = filePath.split('.').pop() ?? ''
+        content += `### \`${filePath}\`\n\`\`\`${ext}\n${fileContent}\n\`\`\`\n\n`
+        totalBytes += fileContent.length
+        fileCount++
+      }
+
+      if (pin.type === 'file') {
+        addFile(pin.path)
+      } else {
+        const prefix = pin.path.endsWith('/') ? pin.path : `${pin.path}/`
+        for (const [filePath] of codeIndex.files) {
+          if (filePath.startsWith(prefix)) addFile(filePath)
         }
       }
     }
@@ -410,7 +425,7 @@ export function RepositoryProvider({ children }: { children: ReactNode }) {
       return
     }
     const timer = setTimeout(() => {
-      setCodebaseAnalysis(analyzeCodebase(codeIndex))
+      analyzeCodebase(codeIndex).then(setCodebaseAnalysis)
     }, 50)
     return () => clearTimeout(timer)
   }, [codeIndex, indexingProgress.isComplete])

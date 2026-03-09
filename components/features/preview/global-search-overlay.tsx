@@ -390,23 +390,39 @@ export function GlobalSearchOverlay({
 
   /* ── Symbol search ────────────────────────────────────────────── */
 
-  // Build cross-file symbol index (cached via useMemo on codeIndex reference)
-  const allSymbols = useMemo(() => {
-    if (activeTab !== 'symbols') return []
-    const result: SymbolResult[] = []
-    for (const [, file] of codeIndex.files) {
-      const symbols = extractSymbols(file.content, file.language)
-      for (const symbol of symbols) {
-        result.push({ symbol, filePath: file.path, fileName: file.name })
-        // Include children (methods, properties)
-        if (symbol.children) {
-          for (const child of symbol.children) {
-            result.push({ symbol: child, filePath: file.path, fileName: file.name })
+  // Build cross-file symbol index asynchronously (content may be in IDB)
+  const [allSymbols, setAllSymbols] = useState<SymbolResult[]>([])
+  const [isExtractingSymbols, setIsExtractingSymbols] = useState(false)
+
+  useEffect(() => {
+    if (activeTab !== 'symbols') return
+
+    let stale = false
+    setIsExtractingSymbols(true)
+
+    // Collect all file paths and fetch content in batch
+    const paths = Array.from(codeIndex.files.keys())
+    codeIndex.contentStore.getBatch(paths).then(contentMap => {
+      if (stale) return
+      const result: SymbolResult[] = []
+      for (const [, file] of codeIndex.files) {
+        const content = contentMap.get(file.path)
+        if (!content) continue
+        const symbols = extractSymbols(content, file.language)
+        for (const symbol of symbols) {
+          result.push({ symbol, filePath: file.path, fileName: file.name })
+          if (symbol.children) {
+            for (const child of symbol.children) {
+              result.push({ symbol: child, filePath: file.path, fileName: file.name })
+            }
           }
         }
       }
-    }
-    return result
+      setAllSymbols(result)
+      setIsExtractingSymbols(false)
+    })
+
+    return () => { stale = true }
   }, [codeIndex, activeTab])
 
   const symbolResults = useMemo(() => {
@@ -603,6 +619,7 @@ export function GlobalSearchOverlay({
               selectedIndex={selectedIndex}
               onSelect={onSelect}
               scrollRef={resultsRef}
+              isLoading={isExtractingSymbols}
             />
           )}
         </div>
@@ -836,6 +853,7 @@ function SymbolResultsList({
   selectedIndex,
   onSelect,
   scrollRef,
+  isLoading,
 }: {
   query: string
   results: SymbolResult[]
@@ -843,6 +861,7 @@ function SymbolResultsList({
   selectedIndex: number
   onSelect: (path: string, line?: number) => void
   scrollRef: React.RefObject<HTMLDivElement | null>
+  isLoading?: boolean
 }) {
   const virtualizer = useVirtualizer({
     count: results.length,
@@ -856,6 +875,14 @@ function SymbolResultsList({
       virtualizer.scrollToIndex(selectedIndex, { align: 'auto' })
     }
   }, [selectedIndex, virtualizer, results.length])
+
+  if (isLoading) {
+    return (
+      <div className="px-3 py-4 text-center text-xs text-text-muted">
+        Extracting symbols…
+      </div>
+    )
+  }
 
   if (!query.trim() && results.length === 0) {
     return (

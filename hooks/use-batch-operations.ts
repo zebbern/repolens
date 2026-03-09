@@ -2,6 +2,7 @@
 
 import { useState, useCallback, useRef, useEffect } from 'react'
 import type { CodeIndex } from '@/lib/code/code-index'
+import { getFileContent } from '@/lib/code/code-index'
 import type { CodeIssue, FixSuggestion, ValidationResult, ValidationOptions } from '@/lib/code/issue-scanner'
 import type { AIProvider, ProviderModel, APIKeysState } from '@/types/types'
 
@@ -86,9 +87,9 @@ export function useBatchOperations({
     const workers = Array.from({ length: Math.min(MAX_CONCURRENCY, queue.length) }, async () => {
       while (queue.length > 0 && !abortRef.current) {
         const issue = queue.shift()!
-        const file = codeIndex.files.get(issue.file)
         try {
-          const result = await validateFinding(issue, file?.content ?? '', {
+          const content = await getFileContent(codeIndex, issue.file) ?? ''
+          const result = await validateFinding(issue, content, {
             provider: selectedProvider,
             model: selectedModel.id,
             apiKey,
@@ -121,16 +122,20 @@ export function useBatchOperations({
     await Promise.all(workers)
     if (abortRef.current) return
     setValidationProgress((prev) => ({ ...prev, inProgress: false }))
-  }, [selectedProvider, selectedModel, apiKeys, codeIndex.files, validateFinding, setValidationResults])
+  }, [selectedProvider, selectedModel, apiKeys, codeIndex, validateFinding, setValidationResults])
 
   // -----------------------------------------------------------------------
-  // Batch fix generation (synchronous)
+  // Batch fix generation (async — fetches content from contentStore)
   // -----------------------------------------------------------------------
 
-  const batchGenerateFixes = useCallback((issues: CodeIssue[]) => {
+  const batchGenerateFixes = useCallback(async (issues: CodeIssue[]) => {
     if (issues.length === 0) return
 
     setFixProgress({ completed: 0, total: issues.length, failed: 0, inProgress: true })
+
+    // Pre-fetch all unique file contents in one batch
+    const uniquePaths = [...new Set(issues.map(i => i.file))]
+    const contentMap = await codeIndex.contentStore.getBatch(uniquePaths)
 
     let completed = 0
     let failed = 0
@@ -138,9 +143,9 @@ export function useBatchOperations({
     const idsWithFix = new Set<string>()
 
     for (const issue of issues) {
-      const file = codeIndex.files.get(issue.file)
-      if (file) {
-        const fix = generateFix(issue, file.content)
+      const content = codeIndex.files.get(issue.file)?.content ?? contentMap.get(issue.file) ?? null
+      if (content) {
+        const fix = generateFix(issue, content)
         newFixes.set(issue.id, fix)
         if (fix) idsWithFix.add(issue.id)
       } else {
@@ -163,7 +168,7 @@ export function useBatchOperations({
     })
 
     setFixProgress({ completed, total: issues.length, failed, inProgress: false })
-  }, [codeIndex.files, generateFix, setFixCache, setShowFix])
+  }, [codeIndex, generateFix, setFixCache, setShowFix])
 
   // -----------------------------------------------------------------------
   // Cancel

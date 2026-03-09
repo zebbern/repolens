@@ -158,7 +158,7 @@ export function FileTreeNode({
           ? (indexed?.lineCount ?? 0)
           : 0
         // In lazy repos, files without loaded content are dimmed
-        const isContentPending = isFile && contentAvailability !== 'full' && indexed && !indexed.content
+        const isContentPending = isFile && contentAvailability !== 'full' && indexed && !codeIndex?.contentStore.has(indexed.path)
 
         return (
           <div key={node.path}>

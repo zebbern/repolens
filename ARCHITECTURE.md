@@ -73,6 +73,7 @@ graph TD
 - Thresholds are configured via `IDB_CONTENT_STORE_THRESHOLD_KB` (50,000 KB) and `LAZY_CONTENT_THRESHOLD_KB` (200,000 KB) in `config/constants.ts`.
 - `indexing-pipeline.ts` checks repo size to choose the store tier.
 - During indexing, content is written to the chosen store. `CodeIndex.files` holds metadata-only `CodeIndexMeta` entries when IDB or Lazy is active.
+- For IDB-tier repos, `IndexedFile.content` is set during indexing but stripped from the JS heap afterward — consumers access content via `contentStore.get()` or the async helpers in `code-index.ts` (see [Content Stripping (Phase 6)](#content-stripping-phase-6)).
 
 ### Worker Optimization
 
@@ -683,6 +684,26 @@ Priority-based, concurrency-limited queue for fetching file content from GitHub'
 - `buildRawContentUrl()` in `lib/github/parser.ts` URL-encodes path segments to prevent injection.
 - `FetchQueue` rejects paths with path traversal patterns (`..`, absolute paths).
 - Abort signal integration prevents orphaned fetches on repo disconnect.
+
+## Content Stripping (Phase 6)
+
+For IDB-tier repos (50–200 MB), `IndexedFile.content` is populated during indexing but stripped from the JS heap afterward — content lives only in IndexedDB via `IDBContentStore`. This reduces main-thread memory by keeping only `CodeIndexMeta` records (path, name, language, lineCount) in the `CodeIndex` map, while full file content is accessed on demand through `contentStore.get()`.
+
+For InMemory-tier repos (< 50 MB), `file.content` remains populated as before, providing a synchronous fast path with no behavioral change.
+
+### Async Content Access Helpers
+
+Three helpers in `lib/code/code-index.ts` provide a unified content access layer:
+
+| Helper | Signature | Behavior |
+| ------ | --------- | -------- |
+| `getFileContent` | `(index, path) → Promise<string \| null>` | Async — reads from `contentStore` for all tiers |
+| `getFileContentSync` | `(index, path) → string \| null` | Sync fast path — returns content only if available in-memory (InMemory-tier); returns `null` for IDB/Lazy tiers |
+| `getFileLinesAsync` | `(index, path) → Promise<string[] \| null>` | Async — fetches content via `getFileContent` and splits into lines |
+
+### Consumer Migration
+
+All main-thread consumers (AI tools, UI components, analyzers, diagram generators) use the async helpers instead of accessing `file.content` directly. Scanner files include `if (!file.content)` guards to handle cases where content has been stripped.
 
 ## Key Design Patterns
 

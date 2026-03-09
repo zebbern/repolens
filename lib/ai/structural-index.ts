@@ -1,5 +1,5 @@
 import type { CodeIndex, IndexedFile } from '@/lib/code/code-index'
-import { getFileLines } from '@/lib/code/code-index'
+import { getFileLines, getFileContent, getFileLinesAsync } from '@/lib/code/code-index'
 
 export interface RichFileMetadata {
   path: string
@@ -254,7 +254,8 @@ export function extractExports(file: IndexedFile): string[] {
     const reExportRegex = /export\s*\{([^}]+)\}/g
     reExportRegex.lastIndex = 0
     let m: RegExpExecArray | null
-    while ((m = reExportRegex.exec(file.content)) !== null) {
+    const content = file.content ?? ''
+    while ((m = reExportRegex.exec(content)) !== null) {
       const names = m[1].split(',').map(s => s.trim().split(/\s+as\s+/).pop()?.trim()).filter(Boolean)
       for (const name of names) {
         if (name) exports.push(name)
@@ -274,7 +275,8 @@ export function extractImports(file: IndexedFile): string[] {
   if (importRegex) {
     importRegex.lastIndex = 0
     let m: RegExpExecArray | null
-    while ((m = importRegex.exec(file.content)) !== null) {
+    const content = file.content ?? ''
+    while ((m = importRegex.exec(content)) !== null) {
       // Some language regexes have multiple capture groups (e.g. Python)
       const importName = m[1] || m[2]
       if (importName) imports.push(importName.trim())
@@ -291,6 +293,95 @@ export function extractSignatures(file: IndexedFile): string[] {
   const symbols = new Set<string>()
 
   for (const line of getFileLines(file)) {
+    for (const pat of symbolPatterns) {
+      pat.regex.lastIndex = 0
+      let sm: RegExpExecArray | null
+      while ((sm = pat.regex.exec(line)) !== null) {
+        const sig = extractSignature(line, sm[1], pat.kind)
+        symbols.add(`${pat.kind}:${sig}`)
+      }
+    }
+  }
+
+  return [...symbols]
+}
+
+/** Async variant of extractExports — resolves content from contentStore. */
+export async function extractExportsAsync(path: string, index: CodeIndex): Promise<string[]> {
+  const language = inferLanguage(path)
+  const symbolPatterns = getLanguagePatterns(language)
+  const exportRegex = getExportRegex(language)
+  const exports: string[] = []
+
+  const lines = await getFileLinesAsync(index, path)
+  if (!lines) return []
+
+  for (const line of lines) {
+    if (exportRegex) {
+      const exportMatch = exportRegex.exec(line)
+      if (exportMatch) {
+        exports.push(exportMatch[1])
+      }
+    } else if (language === 'python' || language === 'go') {
+      for (const pat of symbolPatterns) {
+        pat.regex.lastIndex = 0
+        const sm = pat.regex.exec(line)
+        if (sm && !line.startsWith(' ') && !line.startsWith('\t')) {
+          exports.push(sm[1])
+        }
+      }
+    }
+  }
+
+  if (language === 'typescript' || language === 'tsx' || language === 'javascript' || language === 'jsx') {
+    const content = await getFileContent(index, path)
+    if (content) {
+      const reExportRegex = /export\s*\{([^}]+)\}/g
+      reExportRegex.lastIndex = 0
+      let m: RegExpExecArray | null
+      while ((m = reExportRegex.exec(content)) !== null) {
+        const names = m[1].split(',').map(s => s.trim().split(/\s+as\s+/).pop()?.trim()).filter(Boolean)
+        for (const name of names) {
+          if (name) exports.push(name)
+        }
+      }
+    }
+  }
+
+  return [...new Set(exports)]
+}
+
+/** Async variant of extractImports — resolves content from contentStore. */
+export async function extractImportsAsync(path: string, index: CodeIndex): Promise<string[]> {
+  const language = inferLanguage(path)
+  const importRegex = getImportRegex(language)
+  const imports: string[] = []
+
+  if (importRegex) {
+    const content = await getFileContent(index, path)
+    if (content) {
+      importRegex.lastIndex = 0
+      let m: RegExpExecArray | null
+      while ((m = importRegex.exec(content)) !== null) {
+        const importName = m[1] || m[2]
+        if (importName) imports.push(importName.trim())
+      }
+    }
+  }
+
+  return imports
+}
+
+/** Async variant of extractSignatures — resolves content from contentStore. */
+export async function extractSignaturesAsync(path: string, index: CodeIndex): Promise<string[]> {
+  const language = inferLanguage(path)
+  const symbolPatterns = getLanguagePatterns(language)
+  const symbols = new Set<string>()
+
+  const lines = await getFileLinesAsync(index, path)
+  if (!lines) return []
+
+  for (const line of lines) {
     for (const pat of symbolPatterns) {
       pat.regex.lastIndex = 0
       let sm: RegExpExecArray | null

@@ -92,7 +92,7 @@ export function useFileOperations({
             }
           } else {
             setOpenTabs(prev => prev.map(t =>
-              t.path === file.path ? { ...t, content: indexed.content, originalContent: indexed.content, isLoading: false } : t
+              t.path === file.path ? { ...t, content: indexed.content ?? null, originalContent: indexed.content ?? null, isLoading: false } : t
             ))
           }
         } else {

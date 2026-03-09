@@ -4,8 +4,7 @@ import type { FileNode } from '@/types/repository'
 import { InMemoryContentStore, type ContentStore, type CodeIndexMeta } from './content-store'
 
 /** Clone the content store for immutable CodeIndex updates (Wave 1: InMemoryContentStore only). */
-function cloneContentStore(store: ContentStore | undefined): InMemoryContentStore {
-  if (!store) return new InMemoryContentStore()
+function cloneContentStore(store: ContentStore): InMemoryContentStore {
   if (store instanceof InMemoryContentStore) {
     return new InMemoryContentStore(store.getAllSync())
   }
@@ -18,7 +17,7 @@ export { InMemoryContentStore, IDBContentStore, LazyContentStore } from './conte
 export interface IndexedFile {
   path: string
   name: string
-  content: string
+  content?: string
   language?: string
   lineCount: number
 }
@@ -28,7 +27,7 @@ const linesCache = new WeakMap<IndexedFile, string[]>()
 export function getFileLines(file: IndexedFile): string[] {
   let lines = linesCache.get(file)
   if (!lines) {
-    lines = file.content.split('\n')
+    lines = file.content ? file.content.split('\n') : ['']
     linesCache.set(file, lines)
   }
   return lines
@@ -36,6 +35,27 @@ export function getFileLines(file: IndexedFile): string[] {
 
 export function invalidateLinesCache(file: IndexedFile): void {
   linesCache.delete(file)
+}
+
+/** Async content access: tries in-memory `file.content` first, then falls back to contentStore. */
+export async function getFileContent(index: CodeIndex, path: string): Promise<string | null> {
+  const file = index.files.get(path)
+  if (file?.content) return file.content
+  return index.contentStore.get(path)
+}
+
+/** Sync content access: tries in-memory `file.content` first, then contentStore.getSync(). */
+export function getFileContentSync(index: CodeIndex, path: string): string | null {
+  const file = index.files.get(path)
+  if (file?.content) return file.content
+  return index.contentStore.getSync(path)
+}
+
+/** Async version of getFileLines — resolves content from contentStore when not in-memory. */
+export async function getFileLinesAsync(index: CodeIndex, path: string): Promise<string[] | null> {
+  const content = await getFileContent(index, path)
+  if (content == null) return null
+  return content.split('\n')
 }
 
 export interface SearchResult {
@@ -57,9 +77,9 @@ export interface CodeIndex {
   totalLines: number
   isIndexing: boolean
   /** Phase 3: metadata-only records (no content). Populated alongside `files`. */
-  meta?: Map<string, CodeIndexMeta>
+  meta: Map<string, CodeIndexMeta>
   /** Phase 3: content storage abstraction. InMemoryContentStore in Wave 1. */
-  contentStore?: ContentStore
+  contentStore: ContentStore
 }
 
 /**
@@ -112,13 +132,14 @@ export function indexFile(index: CodeIndex, path: string, content: string, langu
 
   // IDB stores are mutable shared references — mutate in-place.
   // InMemory stores are cloned for immutability.
+  // Fallback: legacy callers may pass CodeIndex without contentStore at runtime.
   let newContentStore: ContentStore
-  if (index.contentStore && !(index.contentStore instanceof InMemoryContentStore)) {
+  if (!index.contentStore || index.contentStore instanceof InMemoryContentStore) {
+    newContentStore = cloneContentStore(index.contentStore ?? new InMemoryContentStore())
+    newContentStore.put(path, content)
+  } else {
     index.contentStore.put(path, content)
     newContentStore = index.contentStore
-  } else {
-    newContentStore = cloneContentStore(index.contentStore)
-    newContentStore.put(path, content)
   }
   
   return {
@@ -143,12 +164,12 @@ export function removeFromIndex(index: CodeIndex, path: string): CodeIndex {
   newMeta.delete(path)
 
   let newContentStore: ContentStore
-  if (index.contentStore && !(index.contentStore instanceof InMemoryContentStore)) {
+  if (!index.contentStore || index.contentStore instanceof InMemoryContentStore) {
+    newContentStore = cloneContentStore(index.contentStore ?? new InMemoryContentStore())
+    newContentStore.delete(path)
+  } else {
     index.contentStore.delete(path)
     newContentStore = index.contentStore
-  } else {
-    newContentStore = cloneContentStore(index.contentStore)
-    newContentStore.delete(path)
   }
   
   return {
@@ -176,14 +197,14 @@ export function batchIndexFiles(
   // IDB stores are mutable shared references — putBatch directly.
   // InMemory stores are cloned for immutability.
   let newContentStore: ContentStore
-  if (index.contentStore && !(index.contentStore instanceof InMemoryContentStore)) {
-    index.contentStore.putBatch(updates.map(u => ({ path: u.path, content: u.content })))
-    newContentStore = index.contentStore
-  } else {
-    const contentMap = (index.contentStore as InMemoryContentStore)?.getAllSync?.() ?? new Map<string, string>()
+  if (!index.contentStore || index.contentStore instanceof InMemoryContentStore) {
+    const contentMap = (index.contentStore as InMemoryContentStore | undefined)?.getAllSync?.() ?? new Map<string, string>()
     const store = new InMemoryContentStore(contentMap)
     store.putBatch(updates.map(u => ({ path: u.path, content: u.content })))
     newContentStore = store
+  } else {
+    index.contentStore.putBatch(updates.map(u => ({ path: u.path, content: u.content })))
+    newContentStore = index.contentStore
   }
 
   for (const { path, content, language } of updates) {
@@ -287,6 +308,8 @@ export function searchIndex(
   const results: SearchResult[] = []
   
   for (const [path, file] of index.files) {
+    if (!file.content) continue
+
     const matches: SearchMatch[] = []
     
     const lines = getFileLines(file)
@@ -346,7 +369,7 @@ export function searchIndexPartial(
   const unsearchedPaths: string[] = []
 
   for (const [path, file] of index.files) {
-    if (file.content === '') {
+    if (!file.content) {
       unsearchedPaths.push(path)
       continue
     }

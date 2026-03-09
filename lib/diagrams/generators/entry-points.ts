@@ -1,13 +1,13 @@
 // Generator — Entry Points / Routes (universal: Next.js, Express, Flask, generic)
 
 import type { CodeIndex } from '@/lib/code/code-index'
-import { flattenFiles } from '@/lib/code/code-index'
+import { flattenFiles, getFileContent } from '@/lib/code/code-index'
 import type { FullAnalysis } from '@/lib/code/import-parser'
 import type { FileNode } from '@/types/repository'
 import type { MermaidDiagramResult } from '../types'
 import { sanitizeId } from '../helpers'
 
-export function generateEntryPoints(analysis: FullAnalysis, codeIndex: CodeIndex, files: FileNode[]): MermaidDiagramResult {
+export async function generateEntryPoints(analysis: FullAnalysis, codeIndex: CodeIndex, files: FileNode[]): Promise<MermaidDiagramResult> {
   const nodePathMap = new Map<string, string>()
   const { topology, detectedFramework, graph } = analysis
   const allFiles = flattenFiles(files)
@@ -113,12 +113,12 @@ export function generateEntryPoints(analysis: FullAnalysis, codeIndex: CodeIndex
     const routePattern = /\.(get|post|put|delete|patch|all|use)\s*\(\s*['"](\/[^'"]*)['"]/g
     const routeEntries: { method: string; path: string; file: string }[] = []
 
-    for (const [path, fileAnalysis] of analysis.files) {
-      const indexed = codeIndex.files.get(path)
-      if (!indexed) continue
+    for (const [path] of analysis.files) {
+      const content = await getFileContent(codeIndex, path)
+      if (!content) continue
       let m: RegExpExecArray | null
       routePattern.lastIndex = 0
-      while ((m = routePattern.exec(indexed.content)) !== null) {
+      while ((m = routePattern.exec(content)) !== null) {
         routeEntries.push({ method: m[1].toUpperCase(), path: m[2], file: path })
       }
     }
@@ -152,11 +152,11 @@ export function generateEntryPoints(analysis: FullAnalysis, codeIndex: CodeIndex
     const routeEntries: { method: string; path: string; file: string }[] = []
 
     for (const [path] of analysis.files) {
-      const indexed = codeIndex.files.get(path)
-      if (!indexed) continue
+      const content = await getFileContent(codeIndex, path)
+      if (!content) continue
       let m: RegExpExecArray | null
       pyRoutePattern.lastIndex = 0
-      while ((m = pyRoutePattern.exec(indexed.content)) !== null) {
+      while ((m = pyRoutePattern.exec(content)) !== null) {
         routeEntries.push({ method: m[1].toUpperCase(), path: m[2], file: path })
       }
     }

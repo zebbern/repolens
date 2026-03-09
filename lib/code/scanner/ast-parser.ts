@@ -84,6 +84,7 @@ export function getAST(file: IndexedFile): ParseResult<File> | null {
   const lang = file.language ?? ''
   if (!AST_LANGUAGES.has(lang)) return null
   if (file.lineCount > MAX_LINE_COUNT) return null
+  if (!file.content) return null
 
   const cached = astCache.get(file.path)
   if (cached && cached.contentLen === file.content.length) return cached.ast

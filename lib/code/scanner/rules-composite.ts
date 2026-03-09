@@ -548,6 +548,7 @@ export function scanCompositeRules(codeIndex: CodeIndex): CodeIssue[] {
 
       // Use pre-computed file content
       const content = file.content
+      if (!content) continue
 
       // Check ALL required patterns are present
       const allPresent = rule.requiredPatterns.every(p => p.test(content))

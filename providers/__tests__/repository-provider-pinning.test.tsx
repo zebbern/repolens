@@ -203,10 +203,10 @@ describe('RepositoryProvider — Pin Logic', () => {
 
   // ── getPinnedContents ──────────────────────────────────────────────
 
-  it('getPinnedContents returns empty result when nothing is pinned', () => {
+  it('getPinnedContents returns empty result when nothing is pinned', async () => {
     const { result } = renderHook(() => useRepository(), { wrapper: createWrapper() })
 
-    const contents = result.current.getPinnedContents()
+    const contents = await result.current.getPinnedContents()
 
     expect(contents).toEqual({
       content: '',
@@ -216,7 +216,7 @@ describe('RepositoryProvider — Pin Logic', () => {
     })
   })
 
-  it('getPinnedContents assembles content for pinned files', () => {
+  it('getPinnedContents assembles content for pinned files', async () => {
     const { result } = renderHook(() => useRepository(), { wrapper: createWrapper() })
 
     const index = buildIndex([
@@ -230,7 +230,7 @@ describe('RepositoryProvider — Pin Logic', () => {
       result.current.pinFile('src/bar.ts')
     })
 
-    const contents = result.current.getPinnedContents()
+    const contents = await result.current.getPinnedContents()
 
     expect(contents.fileCount).toBe(2)
     expect(contents.totalBytes).toBeGreaterThan(0)
@@ -241,7 +241,7 @@ describe('RepositoryProvider — Pin Logic', () => {
     expect(contents.skipped).toEqual([])
   })
 
-  it('getPinnedContents skips files not found in codeIndex (stale pins)', () => {
+  it('getPinnedContents skips files not found in codeIndex (stale pins)', async () => {
     const { result } = renderHook(() => useRepository(), { wrapper: createWrapper() })
 
     const index = buildIndex([{ path: 'src/exists.ts', content: 'hello' }])
@@ -252,14 +252,14 @@ describe('RepositoryProvider — Pin Logic', () => {
       result.current.pinFile('src/deleted.ts') // Not in index
     })
 
-    const contents = result.current.getPinnedContents()
+    const contents = await result.current.getPinnedContents()
 
     expect(contents.fileCount).toBe(1)
     expect(contents.content).toContain('src/exists.ts')
     expect(contents.content).not.toContain('src/deleted.ts')
   })
 
-  it('getPinnedContents skips files exceeding MAX_SINGLE_FILE_BYTES', () => {
+  it('getPinnedContents skips files exceeding MAX_SINGLE_FILE_BYTES', async () => {
     const { result } = renderHook(() => useRepository(), { wrapper: createWrapper() })
 
     const largeContent = 'x'.repeat(PINNED_CONTEXT_CONFIG.MAX_SINGLE_FILE_BYTES + 1)
@@ -274,7 +274,7 @@ describe('RepositoryProvider — Pin Logic', () => {
       result.current.pinFile('src/small.ts')
     })
 
-    const contents = result.current.getPinnedContents()
+    const contents = await result.current.getPinnedContents()
 
     expect(contents.fileCount).toBe(1)
     expect(contents.content).toContain('src/small.ts')
@@ -282,7 +282,7 @@ describe('RepositoryProvider — Pin Logic', () => {
     expect(contents.skipped).toContain('src/big.ts')
   })
 
-  it('getPinnedContents respects MAX_PINNED_BYTES total limit', () => {
+  it('getPinnedContents respects MAX_PINNED_BYTES total limit', async () => {
     const { result } = renderHook(() => useRepository(), { wrapper: createWrapper() })
 
     // Each file is under MAX_SINGLE_FILE_BYTES (50KB) but together they exceed MAX_PINNED_BYTES (100KB)
@@ -302,7 +302,7 @@ describe('RepositoryProvider — Pin Logic', () => {
       result.current.pinFile('src/c.ts')
     })
 
-    const contents = result.current.getPinnedContents()
+    const contents = await result.current.getPinnedContents()
 
     // a + b = 90K — fits under 100K budget
     // c would push to 110K — skipped
@@ -312,7 +312,7 @@ describe('RepositoryProvider — Pin Logic', () => {
     expect(contents.skipped).toContain('src/c.ts')
   })
 
-  it('getPinnedContents resolves directory pins to all matching child files', () => {
+  it('getPinnedContents resolves directory pins to all matching child files', async () => {
     const { result } = renderHook(() => useRepository(), { wrapper: createWrapper() })
 
     const index = buildIndex([
@@ -326,7 +326,7 @@ describe('RepositoryProvider — Pin Logic', () => {
       result.current.pinFile('src/lib', 'directory')
     })
 
-    const contents = result.current.getPinnedContents()
+    const contents = await result.current.getPinnedContents()
 
     expect(contents.fileCount).toBe(2)
     expect(contents.content).toContain('src/lib/a.ts')
@@ -334,7 +334,7 @@ describe('RepositoryProvider — Pin Logic', () => {
     expect(contents.content).not.toContain('src/other/c.ts')
   })
 
-  it('getPinnedContents deduplicates files pinned individually and via directory', () => {
+  it('getPinnedContents deduplicates files pinned individually and via directory', async () => {
     const { result } = renderHook(() => useRepository(), { wrapper: createWrapper() })
 
     const index = buildIndex([
@@ -348,7 +348,7 @@ describe('RepositoryProvider — Pin Logic', () => {
       result.current.pinFile('src/lib', 'directory')
     })
 
-    const contents = result.current.getPinnedContents()
+    const contents = await result.current.getPinnedContents()
 
     // a.ts should appear only once despite being pinned individually and via directory
     const occurrences = contents.content.split('src/lib/a.ts').length - 1
@@ -356,7 +356,7 @@ describe('RepositoryProvider — Pin Logic', () => {
     expect(contents.fileCount).toBe(2) // a.ts + b.ts
   })
 
-  it('getPinnedContents returns content in code fence format with file extension', () => {
+  it('getPinnedContents returns content in code fence format with file extension', async () => {
     const { result } = renderHook(() => useRepository(), { wrapper: createWrapper() })
 
     const index = buildIndex([{ path: 'src/utils.ts', content: 'const x = 1' }])
@@ -366,7 +366,7 @@ describe('RepositoryProvider — Pin Logic', () => {
       result.current.pinFile('src/utils.ts')
     })
 
-    const contents = result.current.getPinnedContents()
+    const contents = await result.current.getPinnedContents()
 
     expect(contents.content).toContain('### `src/utils.ts`')
     expect(contents.content).toContain('```ts')

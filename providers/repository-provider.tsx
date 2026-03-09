@@ -1,7 +1,7 @@
 "use client"
 
 import { createContext, useContext, useState, useCallback, useRef, useEffect, useMemo, type ReactNode, type Dispatch, type SetStateAction } from "react"
-import type { GitHubRepo, FileNode, ParsedFile, RepositoryContext } from "@/types/repository"
+import type { GitHubRepo, FileNode, ParsedFile } from "@/types/repository"
 import type { PinnedFile, PinnedContentsResult } from "@/types/types"
 import { PINNED_CONTEXT_CONFIG, IDB_CONTENT_STORE_THRESHOLD_KB } from "@/config/constants"
 import { parseGitHubUrl } from "@/lib/github/parser"
@@ -29,60 +29,55 @@ import {
 // Re-export for backward compatibility
 export type { LoadingStage, SearchState, ContentAvailability, ContentLoadingStats } from '@/lib/repository'
 
-interface RepositoryContextType extends RepositoryContext {
+// Data context — rarely changes after repo load/indexing
+export interface RepositoryDataContextType {
+  repo: GitHubRepo | null
+  files: FileNode[]
+  parsedFiles: Map<string, ParsedFile>
+  codeIndex: CodeIndex
+  codebaseAnalysis: FullAnalysis | null
+  failedFiles: Array<{ path: string; error: string }>
+  isCacheHit: boolean
+}
+
+// Actions context — stable callbacks (never change identity)
+export interface RepositoryActionsContextType {
   connectRepository: (url: string) => Promise<boolean>
   disconnectRepository: () => void
   loadFileContent: (path: string) => Promise<string | null>
   getFileByPath: (path: string) => FileNode | null
-  codeIndex: CodeIndex
   updateCodeIndex: (index: CodeIndex) => void
+  pinFile: (path: string, type?: 'file' | 'directory') => void
+  unpinFile: (path: string) => void
+  clearPins: () => void
+  getPinnedContents: () => Promise<PinnedContentsResult>
+  getTabCache: <T>(key: string) => T | undefined
+  setTabCache: (key: string, value: unknown) => void
+  setSearchState: Dispatch<SetStateAction<SearchState>>
+  setModifiedContents: Dispatch<SetStateAction<Map<string, string>>>
+  getFileContent: (path: string) => Promise<string | null>
+}
+
+// Progress context — changes frequently during indexing/search/pins
+export interface RepositoryProgressContextType {
+  isLoading: boolean
+  error: string | null
   indexingProgress: IndexingProgress
   searchState: SearchState
-  setSearchState: Dispatch<SetStateAction<SearchState>>
-  /** Map of file path -> modified content (replacements etc.) */
   modifiedContents: Map<string, string>
-  setModifiedContents: Dispatch<SetStateAction<Map<string, string>>>
-  /** Read file content: modifiedContents first, then codeIndex, then contentStore */
-  getFileContent: (path: string) => Promise<string | null>
-  /** Codebase analysis computed once after indexing completes (B5). */
-  codebaseAnalysis: FullAnalysis | null
-  /** Files that failed to fetch during indexing (B6). */
-  failedFiles: Array<{ path: string; error: string }>
-  /** Whether the code index was hydrated from IndexedDB cache (B2). */
-  isCacheHit: boolean
-  /** Current loading stage for multi-step progress UI. */
   loadingStage: LoadingStage
-  /** Map of pinned file/directory paths for chat context. */
-  pinnedFiles: Map<string, PinnedFile>
-  /** Pin a file or directory to the chat context. */
-  pinFile: (path: string, type?: 'file' | 'directory') => void
-  /** Unpin a file or directory from the chat context. */
-  unpinFile: (path: string) => void
-  /** Clear all pinned files. */
-  clearPins: () => void
-  /** Check if a path is currently pinned. */
-  isPinned: (path: string) => boolean
-  /** Assemble pinned file contents for system prompt injection. */
-  getPinnedContents: () => Promise<PinnedContentsResult>
-  /** Get cached tab data by key. Returns undefined if no cache for that key. */
-  getTabCache: <T>(key: string) => T | undefined
-  /** Store tab data in cache by key. */
-  setTabCache: (key: string, value: unknown) => void
-  /** Whether file content is fully available or metadata-only (lazy repos). */
   contentAvailability: ContentAvailability
-  /** On-demand content loading progress for lazy repos. */
   contentLoadingStats: ContentLoadingStats
+  pinnedFiles: Map<string, PinnedFile>
+  isPinned: (path: string) => boolean
 }
 
-const RepositoryContextDefault: RepositoryContext = {
-  repo: null,
-  files: [],
-  parsedFiles: new Map(),
-  isLoading: false,
-  error: null,
-}
+// Combined type for backward compatibility
+type RepositoryContextType = RepositoryDataContextType & RepositoryActionsContextType & RepositoryProgressContextType
 
-const RepositoryContext = createContext<RepositoryContextType | null>(null)
+const RepositoryDataCtx = createContext<RepositoryDataContextType | null>(null)
+const RepositoryActionsCtx = createContext<RepositoryActionsContextType | null>(null)
+const RepositoryProgressCtx = createContext<RepositoryProgressContextType | null>(null)
 
 export function RepositoryProvider({ children }: { children: ReactNode }) {
   const [repo, setRepo] = useState<GitHubRepo | null>(null)
@@ -433,61 +428,61 @@ export function RepositoryProvider({ children }: { children: ReactNode }) {
     return () => clearTimeout(timer)
   }, [codeIndex, indexingProgress.isComplete])
 
-  const contextValue = useMemo<RepositoryContextType>(() => ({
-    repo,
-    files,
-    parsedFiles,
-    isLoading,
-    error,
-    connectRepository,
-    disconnectRepository,
-    loadFileContent,
-    getFileByPath,
-    codeIndex,
-    updateCodeIndex,
-    indexingProgress,
-    searchState,
-    setSearchState,
-    modifiedContents,
-    setModifiedContents,
-    getFileContent,
-    codebaseAnalysis,
-    failedFiles,
-    isCacheHit,
-    loadingStage,
-    pinnedFiles,
-    pinFile,
-    unpinFile,
-    clearPins,
-    isPinned,
-    getPinnedContents,
-    getTabCache,
-    setTabCache,
-    contentAvailability,
-    contentLoadingStats,
-  }), [
-    repo, files, parsedFiles, isLoading, error,
+  const dataValue = useMemo<RepositoryDataContextType>(() => ({
+    repo, files, parsedFiles, codeIndex, codebaseAnalysis, failedFiles, isCacheHit,
+  }), [repo, files, parsedFiles, codeIndex, codebaseAnalysis, failedFiles, isCacheHit])
+
+  const actionsValue = useMemo<RepositoryActionsContextType>(() => ({
     connectRepository, disconnectRepository, loadFileContent, getFileByPath,
-    codeIndex, updateCodeIndex, indexingProgress,
-    searchState, setSearchState,
-    modifiedContents, setModifiedContents, getFileContent,
-    codebaseAnalysis, failedFiles, isCacheHit, loadingStage,
-    pinnedFiles, pinFile, unpinFile, clearPins, isPinned, getPinnedContents,
-    getTabCache, setTabCache,
-    contentAvailability, contentLoadingStats,
+    updateCodeIndex, pinFile, unpinFile, clearPins, getPinnedContents,
+    getTabCache, setTabCache, setSearchState, setModifiedContents, getFileContent,
+  }), [
+    connectRepository, disconnectRepository, loadFileContent, getFileByPath,
+    updateCodeIndex, pinFile, unpinFile, clearPins, getPinnedContents,
+    getTabCache, setTabCache, setSearchState, setModifiedContents, getFileContent,
+  ])
+
+  const progressValue = useMemo<RepositoryProgressContextType>(() => ({
+    isLoading, error, indexingProgress, searchState, modifiedContents,
+    loadingStage, contentAvailability, contentLoadingStats, pinnedFiles, isPinned,
+  }), [
+    isLoading, error, indexingProgress, searchState, modifiedContents,
+    loadingStage, contentAvailability, contentLoadingStats, pinnedFiles, isPinned,
   ])
 
   return (
-    <RepositoryContext.Provider value={contextValue}>
-      {children}
-    </RepositoryContext.Provider>
+    <RepositoryDataCtx.Provider value={dataValue}>
+      <RepositoryActionsCtx.Provider value={actionsValue}>
+        <RepositoryProgressCtx.Provider value={progressValue}>
+          {children}
+        </RepositoryProgressCtx.Provider>
+      </RepositoryActionsCtx.Provider>
+    </RepositoryDataCtx.Provider>
   )
 }
 
-export function useRepository() {
-  const context = useContext(RepositoryContext)
-  if (context === null) {
-    throw new Error('useRepository must be used within a RepositoryProvider')
-  }
+export function useRepositoryData() {
+  const context = useContext(RepositoryDataCtx)
+  if (context === null) throw new Error('useRepositoryData must be used within a RepositoryProvider')
   return context
+}
+
+export function useRepositoryActions() {
+  const context = useContext(RepositoryActionsCtx)
+  if (context === null) throw new Error('useRepositoryActions must be used within a RepositoryProvider')
+  return context
+}
+
+export function useRepositoryProgress() {
+  const context = useContext(RepositoryProgressCtx)
+  if (context === null) throw new Error('useRepositoryProgress must be used within a RepositoryProvider')
+  return context
+}
+
+// Backward-compatible convenience hook — combines all 3 sub-contexts
+export function useRepository() {
+  const data = useRepositoryData()
+  const actions = useRepositoryActions()
+  const progress = useRepositoryProgress()
+  return { ...data, ...actions, ...progress }
 }

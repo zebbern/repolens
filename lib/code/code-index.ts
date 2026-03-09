@@ -44,6 +44,11 @@ export async function getFileContent(index: CodeIndex, path: string): Promise<st
   return index.contentStore.get(path)
 }
 
+/** Type guard: true when `file.content` is a non-empty string (content is loaded). */
+export function hasContent(file: IndexedFile): file is IndexedFile & { content: string } {
+  return typeof file.content === 'string' && file.content.length > 0
+}
+
 /** Sync content access: tries in-memory `file.content` first, then contentStore.getSync(). */
 export function getFileContentSync(index: CodeIndex, path: string): string | null {
   const file = index.files.get(path)

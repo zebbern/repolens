@@ -577,11 +577,11 @@ export interface ScanOptions {
   changedFiles?: string[]
 }
 
-/** Count files in the index that have no content loaded (content === ''). */
+/** Count files in the index that have no content loaded (empty string or undefined). */
 function countUnscannedFiles(codeIndex: CodeIndex): number {
   let count = 0
   for (const file of codeIndex.files.values()) {
-    if (file.content === '') count++
+    if (!file.content) count++
   }
   return count
 }

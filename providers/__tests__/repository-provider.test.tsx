@@ -48,7 +48,7 @@ vi.mock('@/providers/github-token-provider', () => ({
   useGitHubToken: vi.fn(() => ({ token: null })),
 }))
 
-import { RepositoryProvider, useRepository } from '../repository-provider'
+import { RepositoryProvider, useRepository, useRepositoryData, useRepositoryActions, useRepositoryProgress } from '../repository-provider'
 import { fetchFileViaProxy } from '@/lib/github/client'
 
 // ---------------------------------------------------------------------------
@@ -117,12 +117,18 @@ describe('loadFileContent (via useRepository)', () => {
 })
 
 describe('RepositoryProvider memoization', () => {
-  it('context value identity is stable across re-renders when deps are unchanged', async () => {
-    const capturedValues: unknown[] = []
+  it('sub-context identities are stable across re-renders when deps are unchanged', async () => {
+    const capturedData: unknown[] = []
+    const capturedActions: unknown[] = []
+    const capturedProgress: unknown[] = []
 
     function Spy() {
-      const ctx = useRepository()
-      capturedValues.push(ctx)
+      const data = useRepositoryData()
+      const actions = useRepositoryActions()
+      const progress = useRepositoryProgress()
+      capturedData.push(data)
+      capturedActions.push(actions)
+      capturedProgress.push(progress)
       return null
     }
 
@@ -145,7 +151,52 @@ describe('RepositoryProvider memoization', () => {
       screen.getByTestId('force-render').click()
     })
 
-    expect(capturedValues.length).toBeGreaterThanOrEqual(2)
-    expect(capturedValues[0]).toBe(capturedValues[1])
+    expect(capturedData.length).toBeGreaterThanOrEqual(2)
+    expect(capturedData[0]).toBe(capturedData[1])
+    expect(capturedActions[0]).toBe(capturedActions[1])
+    expect(capturedProgress[0]).toBe(capturedProgress[1])
+  })
+
+  it('useRepository returns all fields from all 3 sub-contexts', () => {
+    const { result } = renderHook(() => useRepository(), {
+      wrapper: createWrapper(),
+    })
+
+    // Data fields
+    expect(result.current).toHaveProperty('repo')
+    expect(result.current).toHaveProperty('files')
+    expect(result.current).toHaveProperty('parsedFiles')
+    expect(result.current).toHaveProperty('codeIndex')
+    expect(result.current).toHaveProperty('codebaseAnalysis')
+    expect(result.current).toHaveProperty('failedFiles')
+    expect(result.current).toHaveProperty('isCacheHit')
+
+    // Actions fields
+    expect(result.current).toHaveProperty('connectRepository')
+    expect(result.current).toHaveProperty('disconnectRepository')
+    expect(result.current).toHaveProperty('loadFileContent')
+    expect(result.current).toHaveProperty('getFileByPath')
+    expect(result.current).toHaveProperty('updateCodeIndex')
+    expect(result.current).toHaveProperty('pinFile')
+    expect(result.current).toHaveProperty('unpinFile')
+    expect(result.current).toHaveProperty('clearPins')
+    expect(result.current).toHaveProperty('getPinnedContents')
+    expect(result.current).toHaveProperty('getTabCache')
+    expect(result.current).toHaveProperty('setTabCache')
+    expect(result.current).toHaveProperty('setSearchState')
+    expect(result.current).toHaveProperty('setModifiedContents')
+    expect(result.current).toHaveProperty('getFileContent')
+
+    // Progress fields
+    expect(result.current).toHaveProperty('isLoading')
+    expect(result.current).toHaveProperty('error')
+    expect(result.current).toHaveProperty('indexingProgress')
+    expect(result.current).toHaveProperty('searchState')
+    expect(result.current).toHaveProperty('modifiedContents')
+    expect(result.current).toHaveProperty('loadingStage')
+    expect(result.current).toHaveProperty('contentAvailability')
+    expect(result.current).toHaveProperty('contentLoadingStats')
+    expect(result.current).toHaveProperty('pinnedFiles')
+    expect(result.current).toHaveProperty('isPinned')
   })
 })

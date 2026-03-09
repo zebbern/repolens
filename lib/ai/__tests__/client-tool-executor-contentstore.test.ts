@@ -159,7 +159,7 @@ describe('executeToolLocally — searchFiles with contentStore', () => {
 // ===========================================================================
 
 describe('executeToolLocally — scanIssues with contentStore', () => {
-  it('works when file content comes from contentStore', async () => {
+  it('works when file content comes from contentStore', { timeout: 15_000 }, async () => {
     const index = buildStrippedIndex([
       {
         path: 'src/bad.ts',

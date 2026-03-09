@@ -85,17 +85,18 @@ export function getAST(file: IndexedFile): ParseResult<File> | null {
   if (!AST_LANGUAGES.has(lang)) return null
   if (file.lineCount > MAX_LINE_COUNT) return null
   if (!file.content) return null
+  const content = file.content
 
   const cached = astCache.get(file.path)
-  if (cached && cached.contentLen === file.content.length) return cached.ast
+  if (cached && cached.contentLen === content.length) return cached.ast
 
-  const ast = parseFileAST(file.content, lang)
+  const ast = parseFileAST(content, lang)
   // Evict oldest entry if cache is full (FIFO approximation)
   if (astCache.size >= AST_CACHE_MAX_SIZE) {
     const oldestKey = astCache.keys().next().value
     if (oldestKey !== undefined) astCache.delete(oldestKey)
   }
-  astCache.set(file.path, { contentLen: file.content.length, ast })
+  astCache.set(file.path, { contentLen: content.length, ast })
   return ast
 }
 

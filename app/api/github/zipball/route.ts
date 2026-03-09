@@ -9,10 +9,10 @@ import { applyRateLimit } from '@/lib/api/rate-limit'
 const zipballSchema = z.object({
   owner: z.string().min(1).regex(GITHUB_NAME_RE, 'Invalid owner name'),
   repo: z.string().min(1).regex(GITHUB_NAME_RE, 'Invalid repo name'),
-  ref: z.string().min(1),
+  ref: z.string().min(1).max(256),
 })
 
-export async function POST(request: NextRequest): Promise<NextResponse> {
+export async function POST(request: NextRequest): Promise<Response> {
   const rateLimited = applyRateLimit(request)
   if (rateLimited) return rateLimited
 
@@ -49,6 +49,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     const ghResponse = await fetch(url, {
       headers,
       redirect: 'follow',
+      signal: AbortSignal.timeout(30_000),
     })
 
     if (!ghResponse.ok) {
@@ -63,17 +64,15 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       return apiError('GITHUB_ERROR', message, status)
     }
 
-    const arrayBuffer = await ghResponse.arrayBuffer()
+    const responseHeaders = new Headers({ 'Content-Type': 'application/zip' })
+    const contentLength = ghResponse.headers.get('Content-Length')
+    if (contentLength) {
+      responseHeaders.set('Content-Length', contentLength)
+    }
 
-    return new NextResponse(arrayBuffer, {
-      headers: {
-        'Content-Type': 'application/zip',
-        'Content-Length': String(arrayBuffer.byteLength),
-      },
-    })
+    return new Response(ghResponse.body, { headers: responseHeaders })
   } catch (error) {
-    const message =
-      error instanceof Error ? error.message : 'Zipball proxy failed'
-    return apiError('ZIPBALL_ERROR', message, 500)
+    console.error('Zipball proxy error:', error)
+    return apiError('ZIPBALL_ERROR', 'Zipball proxy failed', 500)
   }
 }

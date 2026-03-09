@@ -198,7 +198,7 @@ workproject/                    # Next.js application root
 │   │   ├── graphql.ts          # GitHub GraphQL API utility
 │   │   ├── validation.ts       # Shared GITHUB_NAME_RE constant
 │   │   ├── parser.ts           # GitHub URL parsing
-│   │   └── zipball.ts          # Zipball download and extraction
+│   │   └── zipball.ts          # Streaming zipball extraction (fflate Unzip API) + legacy buffered fallback
 │   └── parsers/                # Language parsers (TypeScript AST)
 ├── lib/api/                    # API utilities
 │   ├── error.ts                # Standardized API error responses
@@ -315,6 +315,10 @@ Each provider has a clear dependency chain. `RepositoryProvider` depends on no A
 1. Parse GitHub URL → fetch metadata → fetch tree via API or zipball download (zipball for repos under 200 MB)
 2. Extract files → build `CodeIndex` (in-memory search index) → cache in IndexedDB
 3. On repeat visits, compare tree SHA to serve from cache (LRU, max 5 repos)
+
+### Streaming Zipball Extraction
+
+The zipball pipeline uses streaming extraction to reduce peak memory. The server route (`app/api/github/zipball/route.ts`) streams the GitHub zipball response body directly to the client without buffering. On the client, `streamUnzipFiles()` in `lib/github/zipball.ts` uses fflate's streaming `Unzip` + `UnzipInflate` API to extract files as chunks arrive, and `indexing-pipeline.ts` indexes files during streaming. This reduces peak memory from ~3–4× zip size to ~1×. Protection mechanisms include `MAX_FILE_SIZE` (500 KB), `MAX_TOTAL_EXTRACTED_SIZE` (200 MB), path traversal rejection, a 30-second fetch timeout, and `AbortSignal` support. On failure, the pipeline falls back to per-file fetching.
 
 ### URL Rewriting
 

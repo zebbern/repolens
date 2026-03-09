@@ -17,9 +17,9 @@ graph LR
   D -->|No| F["Fetch metadata via GitHub API"]
   F --> G["Fetch tree"]
   G --> H{"Repo < 200MB?"}
-  H -->|Yes| I["Download zipball"]
+  H -->|Yes| I["Stream zipball (fflate Unzip)"]
   H -->|No| J["Per-file fetch with concurrency"]
-  I --> K["Build CodeIndex"]
+  I --> K["Index files during streaming"]
   J --> K
   K --> L["Persist to IndexedDB"]
   E --> M["CodeIndex ready"]
@@ -38,7 +38,7 @@ graph LR
 3. **Metadata fetch** — `RepositoryProvider.connectRepository()` parses the URL, calls `fetchRepoMetadata()` via the GitHub REST API.
 4. **Tree fetch** — `fetchRepoTree()` retrieves the recursive tree for the default branch.
 5. **Cache check** — The provider checks IndexedDB (`getCachedRepo`) for a cached entry matching the tree SHA. On hit, the `CodeIndex` is hydrated immediately from cache.
-6. **Content fetch** — On cache miss, the provider attempts a zipball download for repos under 200 MB. If that fails or the repo is larger, it falls back to per-file fetching with a concurrency limit of 10.
+6. **Content fetch** — On cache miss, the provider attempts a streaming zipball download for repos under 200 MB. The server streams the GitHub zipball response body directly (no buffering), and the client uses fflate's streaming `Unzip` + `UnzipInflate` to extract and index files as chunks arrive, reducing peak memory from ~3–4× zip size to ~1×. If streaming extraction fails or the repo is larger, it falls back to per-file fetching with a concurrency limit of 10.
 7. **Indexing** — `batchIndexFiles()` builds the `CodeIndex` — a `Map<string, IndexedFile>` with split lines, language detection, and file metadata.
 8. **Cache persist** — The indexed data is written to IndexedDB with LRU eviction (max 5 repos).
 9. **Structural index** — On chat/docs requests, `buildStructuralIndex()` extracts exports, imports, and symbol signatures from the `CodeIndex` into a compact JSON string sized to ~15% of the model's context window.
@@ -585,6 +585,40 @@ graph TD
   R10 --> G1
   R11 --> EXT1
 ```
+
+## Streaming Zipball Extraction (Phase 5)
+
+For repos under 200 MB, the zipball is downloaded and extracted via streaming to minimize peak memory.
+
+### Streaming Architecture
+
+```mermaid
+graph LR
+  A["Client requests zipball"] --> B["POST /api/github/zipball"]
+  B --> C["Server fetches GitHub zipball"]
+  C --> D["Stream response body to client (no buffering)"]
+  D --> E["fflate Unzip + UnzipInflate"]
+  E --> F["onFile callback per extracted file"]
+  F --> G["indexing-pipeline indexes file"]
+  G --> H["CodeIndex + ContentStore"]
+```
+
+### Key Components
+
+| Component | Location | Role |
+| --------- | -------- | ---- |
+| Zipball API route | `app/api/github/zipball/route.ts` | Streams GitHub zipball response body to client without buffering |
+| `streamUnzipFiles()` | `lib/github/zipball.ts` | Uses fflate's streaming `Unzip` API to extract files as chunks arrive |
+| `indexing-pipeline.ts` | `lib/repository/indexing-pipeline.ts` | Indexes files during streaming via the `onFile` callback |
+
+### Protection Mechanisms
+
+- **MAX_FILE_SIZE** (500 KB): Files exceeding this limit are skipped during extraction.
+- **MAX_TOTAL_EXTRACTED_SIZE** (200 MB): Extraction aborts when cumulative extracted size exceeds this limit.
+- **Path traversal rejection**: File paths containing `..` or absolute paths are rejected.
+- **30-second fetch timeout**: The zipball fetch is aborted if it takes too long.
+- **AbortSignal support**: Callers can cancel extraction mid-stream.
+- **Fallback**: On any failure, the pipeline falls back to per-file fetching with concurrency.
 
 ## Lazy Content Loading (Phase 4)
 

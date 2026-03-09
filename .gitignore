@@ -38,6 +38,9 @@ playwright-report/
 test-results/
 coverage/
 /test-screenshots/
+test-output*.txt
+build-output.txt
+git-log-temp.txt
 
 # task tracking
 .tasks/

@@ -6,7 +6,7 @@ import type { CodeIndex } from '@/lib/code/code-index'
 import { createEmptyIndex, createEmptyIndexWithStore, batchIndexFiles, batchIndexMetadataOnly, flattenFiles } from '@/lib/code/code-index'
 import { IDBContentStore, LazyContentStore } from '@/lib/code/content-store'
 import { FetchQueue } from '@/lib/code/fetch-queue'
-import { fetchRepoZipball, isFileIndexable } from '@/lib/github/zipball'
+import { streamUnzipFiles, isFileIndexable } from '@/lib/github/zipball'
 import { setCachedRepo } from '@/lib/cache/repo-cache'
 import { fetchWithConcurrency } from './fetch-utils'
 import { IDB_CONTENT_STORE_THRESHOLD_KB, LAZY_CONTENT_THRESHOLD_KB } from '@/config/constants'
@@ -100,24 +100,58 @@ export async function startIndexing(
   const errors: Array<{ path: string; error: string }> = []
   let zipballUsed = false
 
-  // B1: Try zipball for repos under 200 MB (GitHub API reports size in KB)
-  if (repoData.size != null && repoData.size < 200_000) {
+  // For IDB tier (50-200 MB): create content store early so we can write during streaming
+  const useIDB = repoData.size != null && repoData.size >= IDB_CONTENT_STORE_THRESHOLD_KB
+  const contentStore = useIDB
+    ? new IDBContentStore(`${repoData.owner}/${repoData.name}`)
+    : null
+
+  // B1: Try streaming zipball for repos under 200 MB
+  if (repoData.size != null && repoData.size < LAZY_CONTENT_THRESHOLD_KB) {
     try {
       setLoadingStage('downloading')
-      const zipFiles = await fetchRepoZipball(
-        repoData.owner,
-        repoData.name,
-        repoData.defaultBranch,
-        { signal, token: options.token },
-      )
+
+      const headers: HeadersInit = { 'Content-Type': 'application/json' }
+      if (options.token) {
+        headers['X-GitHub-Token'] = options.token
+      }
+
+      const response = await fetch('/api/github/zipball', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ owner: repoData.owner, repo: repoData.name, ref: repoData.defaultBranch }),
+        signal,
+      })
+
+      if (!response.ok) {
+        throw new Error(`Zipball download failed: ${response.status} ${response.statusText}`)
+      }
 
       if (signal.aborted) return
 
-      setLoadingStage('extracting')
-      for (const [path, content] of zipFiles) {
-        const filename = path.split('/').pop() || path
-        accumulated.push({ path, content, language: detectLanguage(filename) })
-      }
+      // Download and extraction happen simultaneously with streaming
+      // — keep 'downloading' stage throughout
+
+      await streamUnzipFiles(
+        response,
+        (path, content) => {
+          const filename = path.split('/').pop() || path
+          accumulated.push({ path, content, language: detectLanguage(filename) })
+
+          // Write to IDB as files arrive (fire-and-forget)
+          if (contentStore) {
+            contentStore.put(path, content)
+          }
+
+          // Progress update per file
+          setIndexingProgress(prev => ({
+            ...prev,
+            current: accumulated.length,
+            total: Math.max(prev.total, accumulated.length),
+          }))
+        },
+        { signal },
+      )
 
       zipballUsed = true
       setIndexingProgress({
@@ -129,6 +163,10 @@ export async function startIndexing(
       // Zipball failed — fall back to per-file fetch
       if (signal.aborted) return
       console.warn('Zipball download failed, falling back to per-file fetch:', err)
+      accumulated.length = 0 // Clear any partial results
+      if (contentStore) {
+        contentStore.clear().catch(() => {})
+      }
     }
   }
 
@@ -172,9 +210,8 @@ export async function startIndexing(
   setLoadingStage('indexing')
 
   // B3: Batch-index all accumulated files at once (avoids O(N²) Map copies)
-  const useIDB = repoData.size != null && repoData.size >= IDB_CONTENT_STORE_THRESHOLD_KB
-  const baseIndex = useIDB
-    ? createEmptyIndexWithStore(new IDBContentStore(`${repoData.owner}/${repoData.name}`))
+  const baseIndex = contentStore
+    ? createEmptyIndexWithStore(contentStore)
     : createEmptyIndex()
   const finalIndex = batchIndexFiles(baseIndex, accumulated)
 

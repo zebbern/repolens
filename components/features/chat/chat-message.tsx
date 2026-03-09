@@ -28,10 +28,11 @@ import {
   AccordionTrigger,
   AccordionContent,
 } from "@/components/ui/accordion"
-import { memo, useState, useMemo } from "react"
+import { memo, useState, useMemo, Suspense } from "react"
 import type { UIMessage, ToolUIPart as AiToolUIPart, DynamicToolUIPart } from "ai"
 import { isToolUIPart, getToolName } from "ai"
 import { formatTokenCount, formatModelName, estimateCost, formatCost } from "@/lib/ai/token-cost"
+import { TOOL_RENDERERS } from "./tool-renderers"
 
 // ---------------------------------------------------------------------------
 // Tool call indicator
@@ -261,6 +262,7 @@ function ToolCallIndicator({
   const Icon = TOOL_ICONS[toolName] || Code2
   const label = buildToolLabel(toolName, args)
   const hasResult = result !== undefined && result !== null
+  const RichRenderer = TOOL_RENDERERS[toolName] ?? null
 
   const summary = hasResult ? buildToolSummary(toolName, result) : null
 
@@ -294,9 +296,17 @@ function ToolCallIndicator({
 
       <CollapsibleContent>
         {hasResult && (
-          <div className="mt-1 ml-6 max-h-60 overflow-y-auto overflow-x-auto rounded bg-surface-elevated p-2 border border-foreground/6">
-            <ToolResultContent result={result} />
-          </div>
+          RichRenderer ? (
+            <div className="mt-1 ml-6">
+              <Suspense fallback={<div className="animate-pulse h-8 bg-surface-elevated rounded" />}>
+                <RichRenderer result={result} args={args} toolName={toolName} />
+              </Suspense>
+            </div>
+          ) : (
+            <div className="mt-1 ml-6 max-h-60 overflow-y-auto overflow-x-auto rounded bg-surface-elevated p-2 border border-foreground/6">
+              <ToolResultContent result={result} />
+            </div>
+          )
         )}
       </CollapsibleContent>
     </Collapsible>

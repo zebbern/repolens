@@ -1,5 +1,6 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  reactCompiler: true,
   images: {
     unoptimized: true,
     remotePatterns: [
@@ -11,6 +12,7 @@ const nextConfig = {
   },
   experimental: {
     optimizePackageImports: ["lucide-react", "@radix-ui/react-icons"],
+    turbopackFileSystemCacheForDev: true,
   },
   turbopack: {
     // web-tree-sitter contains a Node.js code path that imports 'fs/promises'.

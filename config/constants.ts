@@ -43,5 +43,5 @@ export const FILE_STATUS = {
 /** Repo size threshold (KB) for using IDB-backed content store. ~50 MB */
 export const IDB_CONTENT_STORE_THRESHOLD_KB = 50_000
 
-/** Repo size threshold (KB) for lazy content loading (metadata-only indexing). ~200 MB */
-export const LAZY_CONTENT_THRESHOLD_KB = 200_000
+/** Repo size threshold (KB) for lazy content loading (metadata-only indexing). ~250 MB */
+export const LAZY_CONTENT_THRESHOLD_KB = 250_000

@@ -24,6 +24,7 @@ export type LoadingStage =
   | 'idle'
   | 'metadata'
   | 'tree'
+  | 'tree-ready'
   | 'downloading'
   | 'extracting'
   | 'indexing'

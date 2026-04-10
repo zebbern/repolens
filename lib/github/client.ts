@@ -24,6 +24,7 @@ const CACHE_TTL_COMPARE    = 600_000  // 10 minutes
 const CACHE_TTL_BLAME         = 600_000  // 10 minutes
 const CACHE_TTL_COMMIT_DETAIL = 600_000  // 10 minutes
 const CACHE_TTL_PULLS         = 60_000   // 1 minute
+const CACHE_TTL_LANGUAGES     = 600_000  // 10 minutes
 
 // ---------------------------------------------------------------------------
 // PAT management — allows the React provider to inject a token
@@ -651,6 +652,19 @@ export async function fetchRateLimitViaProxy(): Promise<{
   const key = 'rate-limit'
   const url = '/api/github/rate-limit'
   return cachedProxyFetch(key, url, CACHE_TTL_RATE_LIMIT)
+}
+
+/**
+ * Fetch repository language breakdown through the proxy.
+ * Returns an object mapping language names to byte counts.
+ */
+export async function fetchLanguagesViaProxy(
+  owner: string,
+  name: string,
+): Promise<Record<string, number>> {
+  const key = `languages:${owner}/${name}`
+  const url = `/api/github/languages?owner=${encodeURIComponent(owner)}&name=${encodeURIComponent(name)}`
+  return cachedProxyFetch<Record<string, number>>(key, url, CACHE_TTL_LANGUAGES)
 }
 
 // ---------------------------------------------------------------------------

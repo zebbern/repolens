@@ -9,13 +9,13 @@ import { FetchQueue } from '@/lib/code/fetch-queue'
 import { streamUnzipFiles, isFileIndexable } from '@/lib/github/zipball'
 import { setCachedRepo } from '@/lib/cache/repo-cache'
 import { fetchWithConcurrency } from './fetch-utils'
-import { IDB_CONTENT_STORE_THRESHOLD_KB, LAZY_CONTENT_THRESHOLD_KB } from '@/config/constants'
+import { LAZY_CONTENT_THRESHOLD_KB, getIdbThresholdKB } from '@/config/constants'
 import { toast } from 'sonner'
 
 const CONCURRENCY_LIMIT = 10
 
 /** Subset of LoadingStage relevant during indexing. */
-type IndexingStage = 'downloading' | 'extracting' | 'indexing' | 'lazy-indexing' | 'ready'
+type IndexingStage = 'tree-ready' | 'downloading' | 'extracting' | 'indexing' | 'lazy-indexing' | 'ready'
 
 interface IndexingProgress {
   current: number
@@ -101,7 +101,7 @@ export async function startIndexing(
   let zipballUsed = false
 
   // For IDB tier (50-200 MB): create content store early so we can write during streaming
-  const useIDB = repoData.size != null && repoData.size >= IDB_CONTENT_STORE_THRESHOLD_KB
+  const useIDB = repoData.size != null && repoData.size >= getIdbThresholdKB()
   const contentStore = useIDB
     ? new IDBContentStore(`${repoData.owner}/${repoData.name}`)
     : null

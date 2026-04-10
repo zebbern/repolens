@@ -43,5 +43,24 @@ export const FILE_STATUS = {
 /** Repo size threshold (KB) for using IDB-backed content store. ~50 MB */
 export const IDB_CONTENT_STORE_THRESHOLD_KB = 50_000
 
+/**
+ * Returns the effective IDB threshold in KB, adjusted for device memory.
+ * On low-memory devices (≤4 GB), use IDB earlier to prevent OOM from
+ * holding large repos entirely in a JS Map.
+ *
+ * `navigator.deviceMemory` is a W3C draft spec supported in Chromium browsers.
+ * Returns `undefined` in Firefox/Safari, in which case we fall back to the default.
+ */
+export function getIdbThresholdKB(): number {
+  if (typeof navigator !== 'undefined' && 'deviceMemory' in navigator) {
+    const mem = (navigator as { deviceMemory?: number }).deviceMemory
+    if (typeof mem === 'number' && mem <= 4) {
+      // On ≤4 GB devices, push repos ≥ 25 MB into IDB instead of in-memory
+      return 25_000
+    }
+  }
+  return IDB_CONTENT_STORE_THRESHOLD_KB
+}
+
 /** Repo size threshold (KB) for lazy content loading (metadata-only indexing). ~250 MB */
 export const LAZY_CONTENT_THRESHOLD_KB = 250_000

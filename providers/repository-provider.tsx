@@ -3,7 +3,7 @@
 import { createContext, useContext, useState, useCallback, useRef, useEffect, useMemo, type ReactNode, type Dispatch, type SetStateAction } from "react"
 import type { GitHubRepo, FileNode, ParsedFile } from "@/types/repository"
 import type { PinnedFile, PinnedContentsResult } from "@/types/types"
-import { PINNED_CONTEXT_CONFIG, IDB_CONTENT_STORE_THRESHOLD_KB } from "@/config/constants"
+import { PINNED_CONTEXT_CONFIG, getIdbThresholdKB } from "@/config/constants"
 import { parseGitHubUrl } from "@/lib/github/parser"
 import { buildFileTree } from "@/lib/github/fetcher"
 import { fetchRepoViaProxy, fetchTreeViaProxy, fetchFileViaProxy } from "@/lib/github/client"
@@ -188,6 +188,7 @@ export function RepositoryProvider({ children }: { children: ReactNode }) {
       const tree = await fetchTreeViaProxy(owner, repoName, repoData.defaultBranch)
       const fileTree = buildFileTree(tree)
       setFiles(fileTree)
+      setLoadingStage('tree-ready')
 
       setIsLoading(false)
 
@@ -195,7 +196,7 @@ export function RepositoryProvider({ children }: { children: ReactNode }) {
       const cached = await getCachedRepo(owner, repoName)
       if (cached && cached.sha === tree.sha) {
         // Cache hit — hydrate code index from cached data
-        const useIDB = repoData.size != null && repoData.size >= IDB_CONTENT_STORE_THRESHOLD_KB
+        const useIDB = repoData.size != null && repoData.size >= getIdbThresholdKB()
         const baseIndex = useIDB
           ? createEmptyIndexWithStore(new IDBContentStore(`${owner}/${repoName}`))
           : createEmptyIndex()

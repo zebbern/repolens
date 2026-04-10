@@ -175,6 +175,26 @@ export async function fetchTags(
 }
 
 /**
+ * Fetch repository language breakdown.
+ * Returns an object mapping language names to byte counts.
+ */
+export async function fetchRepoLanguages(
+  owner: string,
+  name: string,
+  options: FetchOptions = {},
+): Promise<Record<string, number>> {
+  const headers = buildHeaders(options.token)
+  const url = `${GITHUB_API_BASE}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/languages`
+  const response = await fetch(url, { headers })
+
+  if (!response.ok) {
+    handleGitHubError(response, 'Languages')
+  }
+
+  return response.json()
+}
+
+/**
  * Fetch repository branches.
  */
 export async function fetchBranches(

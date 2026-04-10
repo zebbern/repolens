@@ -31,6 +31,7 @@ function stageToStepIndex(stage: LoadingStage): number {
       return -1
     case "metadata":
     case "tree":
+    case "tree-ready":
       return 0
     case "downloading":
       return 1
@@ -59,6 +60,8 @@ function getSublabel(
       return "Fetching repository metadata..."
     case "tree":
       return "Building file tree..."
+    case "tree-ready":
+      return "Fetching file contents..."
     case "downloading":
       return "Downloading source code..."
     case "extracting":
@@ -83,6 +86,7 @@ function getStageLabel(stage: LoadingStage): string {
   switch (stage) {
     case "metadata":
     case "tree":
+    case "tree-ready":
       return "Fetching repository..."
     case "downloading":
       return "Downloading source..."

@@ -3,6 +3,7 @@ export {
   fetchTreeViaProxy,
   fetchFileViaProxy,
   fetchRateLimitViaProxy,
+  fetchLanguagesViaProxy,
   clearGitHubCache,
   invalidateRepoCache,
 } from './client'
@@ -11,6 +12,7 @@ export {
   fetchRepoMetadata,
   fetchRepoTree,
   fetchFileContent,
+  fetchRepoLanguages,
   buildFileTree,
   detectLanguage,
   buildFileTreeString,

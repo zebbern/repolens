@@ -101,7 +101,7 @@ export function IssueDetails({
             className={cn(
               'text-[10px] px-2 py-1 rounded-md border transition-colors flex items-center gap-1',
               hasValidApiKey
-                ? 'border-violet-500/20 text-violet-400 hover:bg-violet-500/10'
+                ? 'border-blue-500/20 text-blue-400 hover:bg-blue-500/10'
                 : 'border-foreground/6 text-text-muted/50 cursor-not-allowed',
             )}
             title={hasValidApiKey ? 'Verify this finding with AI' : 'Configure an API key to use AI validation'}
@@ -146,7 +146,7 @@ export function IssueDetails({
               href={`https://cwe.mitre.org/data/definitions/${issue.cwe.replace('CWE-', '')}.html`}
               target="_blank"
               rel="noopener noreferrer"
-              className="text-[9px] px-1.5 py-0.5 rounded bg-violet-500/10 border border-violet-500/20 text-violet-400 hover:bg-violet-500/20 transition-colors font-mono flex items-center gap-1"
+              className="text-[9px] px-1.5 py-0.5 rounded bg-blue-500/10 border border-blue-500/20 text-blue-400 hover:bg-blue-500/20 transition-colors font-mono flex items-center gap-1"
             >
               {issue.cwe}
               <ExternalLink className="h-2 w-2" />

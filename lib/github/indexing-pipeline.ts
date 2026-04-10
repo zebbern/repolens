@@ -90,7 +90,7 @@ export async function startIndexing(
     const finalIndex = batchIndexMetadataOnly(baseIndex, metadataEntries)
 
     setCodeIndex(finalIndex)
-    setIndexingProgress({ current: 0, total: indexableFiles.length, isComplete: false })
+    setIndexingProgress({ current: indexableFiles.length, total: indexableFiles.length, isComplete: true })
     setLoadingStage('ready')
     // FetchQueue accessible via codeIndex.contentStore (LazyContentStore.getFetchQueue())
     return

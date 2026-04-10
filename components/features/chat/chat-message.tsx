@@ -30,7 +30,7 @@ import {
 } from "@/components/ui/accordion"
 import { memo, useState, useMemo, Suspense } from "react"
 import type { UIMessage, ToolUIPart as AiToolUIPart, DynamicToolUIPart } from "ai"
-import { isToolUIPart, getToolName } from "ai"
+import { isToolUIPart, isFileUIPart, getToolName } from "ai"
 import { formatTokenCount, formatModelName, estimateCost, formatCost } from "@/lib/ai/token-cost"
 import { TOOL_RENDERERS } from "./tool-renderers"
 
@@ -468,7 +468,8 @@ export const ChatMessage = memo(function ChatMessage({ message, className }: Cha
   const hasContent = parts.some(
     (p) =>
       (p.type === "text" && p.text.trim().length > 0) ||
-      isToolUIPart(p),
+      isToolUIPart(p) ||
+      isFileUIPart(p),
   )
 
   const groupedParts = useMemo(() => groupMessageParts(parts), [parts])
@@ -508,6 +509,17 @@ export const ChatMessage = memo(function ChatMessage({ message, className }: Cha
               </p>
             ) : (
               <MarkdownRenderer key={gi} content={part.text} />
+            )
+          }
+
+          if (isFileUIPart(part) && part.mediaType?.startsWith("image/")) {
+            return (
+              <img
+                key={gi}
+                src={part.url}
+                alt={part.filename || "Attached image"}
+                className="max-w-full max-h-64 rounded-md border border-foreground/10 my-1"
+              />
             )
           }
 

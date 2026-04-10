@@ -3,6 +3,7 @@
 import { useState, useMemo, useRef, useEffect, useCallback } from "react"
 import { useChat } from "@ai-sdk/react"
 import { DefaultChatTransport, lastAssistantMessageIsCompleteWithToolCalls, isToolUIPart } from "ai"
+import type { FileUIPart } from "ai"
 import { Button } from "@/components/ui/button"
 import { ChatMessage } from "./chat-message"
 import { ChatInput } from "./chat-input"
@@ -37,7 +38,16 @@ export function ChatSidebar({ className }: { className?: string }) {
   const { saveTour, startTour } = useTours()
   const { token: githubToken } = useGitHubToken()
   const [input, setInput] = useState("")
+  const [attachedImages, setAttachedImages] = useState<FileUIPart[]>([])
   const [activeSkills, setActiveSkills] = useState<Set<string>>(new Set())
+
+  const handleImageAttach = useCallback((newImages: FileUIPart[]) => {
+    setAttachedImages(prev => [...prev, ...newImages])
+  }, [])
+
+  const handleImageRemove = useCallback((index: number) => {
+    setAttachedImages(prev => prev.filter((_, i) => i !== index))
+  }, [])
 
   const handleSkillToggle = useCallback((skillId: string) => {
     setActiveSkills(prev => {
@@ -187,28 +197,35 @@ export function ChatSidebar({ className }: { className?: string }) {
   }, [messages])
 
   const handleSubmit = () => {
-    if (!input.trim() || isLoading || !hasValidKey || !selectedModel) return
+    const hasText = input.trim().length > 0
+    const hasImages = attachedImages.length > 0
+    if ((!hasText && !hasImages) || isLoading || !hasValidKey || !selectedModel) return
 
     const currentInput = input.trim()
     setInput("")
+    const imagesToSend = [...attachedImages]
+    setAttachedImages([])
 
     const structuralIndex = buildStructuralIndex(codeIndex, { maxIndexBytes: getMaxIndexBytesForModel(selectedModel.id) })
 
-    sendMessage(
-      { text: currentInput },
-      {
-        body: {
-          provider: selectedModel.provider,
-          model: selectedModel.id,
-          apiKey: apiKeys[selectedModel.provider].key,
-          repoContext,
-          structuralIndex,
-          pinnedContext: pinnedResult.content || undefined,
-          maxSteps: 50,
-          ...(activeSkills.size > 0 ? { activeSkills: Array.from(activeSkills) } : {}),
-        },
-      },
-    )
+    const body = {
+      provider: selectedModel.provider,
+      model: selectedModel.id,
+      apiKey: apiKeys[selectedModel.provider].key,
+      repoContext,
+      structuralIndex,
+      pinnedContext: pinnedResult.content || undefined,
+      maxSteps: 50,
+      ...(activeSkills.size > 0 ? { activeSkills: Array.from(activeSkills) } : {}),
+    }
+
+    if (hasText && hasImages) {
+      sendMessage({ text: currentInput, files: imagesToSend }, { body })
+    } else if (hasImages) {
+      sendMessage({ files: imagesToSend }, { body })
+    } else {
+      sendMessage({ text: currentInput }, { body })
+    }
   }
 
   return (
@@ -330,6 +347,9 @@ export function ChatSidebar({ className }: { className?: string }) {
           onStop={stop}
           placeholder={hasValidKey ? "Ask about the codebase..." : "Add API key to chat"}
           disabled={!hasValidKey}
+          attachedImages={attachedImages}
+          onImageAttach={handleImageAttach}
+          onImageRemove={handleImageRemove}
           pinnedChips={
             <PinnedContextChips
               pinnedFiles={pinnedFiles}

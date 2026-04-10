@@ -13,8 +13,7 @@ vi.mock('@/lib/github/fetcher', () => ({
 }))
 
 vi.mock('@/lib/github/zipball', () => ({
-  fetchRepoZipball: vi.fn(),
-  streamUnzipFiles: vi.fn().mockResolvedValue({ count: 0, totalSize: 0 }),
+  streamUnzipFiles:vi.fn().mockResolvedValue({ count: 0, totalSize: 0 }),
   isFileIndexable: vi.fn(() => true),
 }))
 

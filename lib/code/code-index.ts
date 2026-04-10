@@ -11,6 +11,15 @@ function cloneContentStore(store: ContentStore): InMemoryContentStore {
   throw new Error('Cannot clone non-InMemory ContentStore. Phase 3 Wave 2+ requires async content store operations.')
 }
 
+/** Count lines in content without allocating a temporary array. */
+function countLines(content: string): number {
+  let count = 1
+  for (let i = 0; i < content.length; i++) {
+    if (content.charCodeAt(i) === 10) count++
+  }
+  return count
+}
+
 export type { ContentStore, CodeIndexMeta } from './content-store'
 export { InMemoryContentStore, IDBContentStore, LazyContentStore } from './content-store'
 
@@ -118,7 +127,7 @@ export function createEmptyIndexWithStore(contentStore: ContentStore): CodeIndex
  */
 export function indexFile(index: CodeIndex, path: string, content: string, language?: string): CodeIndex {
   const name = path.split('/').pop() || path
-  const lineCount = content.split('\n').length
+  const lineCount = countLines(content)
   
   const indexed: IndexedFile = {
     path,
@@ -213,7 +222,7 @@ export function batchIndexFiles(
   }
 
   for (const { path, content, language } of updates) {
-    const lineCount = content.split('\n').length
+    const lineCount = countLines(content)
     const name = path.split('/').pop() || path
     newFiles.set(path, { path, name, content, language, lineCount })
     newMeta.set(path, { path, name, language, lineCount })

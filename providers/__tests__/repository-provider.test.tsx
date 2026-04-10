@@ -22,7 +22,6 @@ vi.mock('@/lib/github/client', () => ({
 
 // Mock the GitHub zipball module
 vi.mock('@/lib/github/zipball', () => ({
-  fetchRepoZipball: vi.fn(),
   streamUnzipFiles: vi.fn().mockResolvedValue({ count: 0, totalSize: 0 }),
   isFileIndexable: vi.fn(() => true),
 }))

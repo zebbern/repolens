@@ -174,14 +174,18 @@ function mapProxyUrlToGitHubApi(proxyUrl: string): DirectUrlMapping | null {
  * Fetch from the GitHub API directly with PAT authentication.
  * Handles JSON responses and common GitHub error codes.
  */
-async function directFetch(url: string, pat: string): Promise<unknown> {
-  const response = await fetch(url, {
+async function directFetch(url: string, pat: string, timeoutMs?: number): Promise<unknown> {
+  const fetchOptions: RequestInit = {
     headers: {
       'Accept': 'application/vnd.github.v3+json',
       'Authorization': `Bearer ${pat}`,
     },
     redirect: 'error',
-  })
+  }
+  if (timeoutMs) {
+    fetchOptions.signal = AbortSignal.timeout(timeoutMs)
+  }
+  const response = await fetch(url, fetchOptions)
 
   if (!response.ok) {
     const body = await response.json().catch(() => ({}))
@@ -208,11 +212,15 @@ async function directFetch(url: string, pat: string): Promise<unknown> {
  * Fetch file content from raw.githubusercontent.com with PAT auth.
  * Returns { content: string } to match the proxy response shape.
  */
-async function directFetchRawFile(url: string, pat: string): Promise<{ content: string }> {
-  const response = await fetch(url, {
+async function directFetchRawFile(url: string, pat: string, timeoutMs?: number): Promise<{ content: string }> {
+  const fetchOptions: RequestInit = {
     headers: { 'Authorization': `Bearer ${pat}` },
     redirect: 'error',
-  })
+  }
+  if (timeoutMs) {
+    fetchOptions.signal = AbortSignal.timeout(timeoutMs)
+  }
+  const response = await fetch(url, fetchOptions)
 
   if (!response.ok) {
     if (response.status === 404) {
@@ -515,7 +523,7 @@ interface BlameGraphQLResponse {
  * When a PAT is available, bypasses the proxy to reduce latency.
  * When no PAT is set, falls back to the proxy routes (used by OAuth users).
  */
-async function proxyFetch<T>(url: string): Promise<T> {
+async function proxyFetch<T>(url: string, timeoutMs?: number): Promise<T> {
   if (!url.startsWith('/') || url.startsWith('//')) {
     throw new Error('proxyFetch only accepts relative URLs')
   }
@@ -527,13 +535,17 @@ async function proxyFetch<T>(url: string): Promise<T> {
   if (pat) {
     const mapping = mapProxyUrlToGitHubApi(url)
     if (mapping && mapping.endpoint !== 'file') {
-      const raw = await directFetch(mapping.url, pat)
+      const raw = await directFetch(mapping.url, pat, timeoutMs)
       return normalizeDirectResponse<T>(raw, mapping.endpoint)
     }
   }
 
   // Proxy mode: no PAT or unrecognized path — use proxy routes
-  const response = await fetch(url, { headers: buildProxyHeaders() })
+  const fetchOptions: RequestInit = { headers: buildProxyHeaders() }
+  if (timeoutMs) {
+    fetchOptions.signal = AbortSignal.timeout(timeoutMs)
+  }
+  const response = await fetch(url, fetchOptions)
 
   if (!response.ok) {
     const body = await response.json().catch(() => ({}))
@@ -556,6 +568,7 @@ async function cachedProxyFetch<T>(
   cacheKey: string,
   url: string,
   ttl: number,
+  timeoutMs?: number,
 ): Promise<T> {
   // 1. Fresh cache hit — return immediately
   const fresh = getCached<T>(cacheKey)
@@ -565,7 +578,7 @@ async function cachedProxyFetch<T>(
   const stale = getStale<T>(cacheKey)
   if (stale !== null && stale.isStale) {
     // Fire-and-forget background revalidation
-    proxyFetch<T>(url)
+    proxyFetch<T>(url, timeoutMs)
       .then((data) => setCache(cacheKey, data, ttl))
       .catch((err) => {
         console.warn('[cachedProxyFetch] Background revalidation failed:', cacheKey, err)
@@ -574,7 +587,7 @@ async function cachedProxyFetch<T>(
   }
 
   // 3. Cache miss — fetch, cache, return
-  const data = await proxyFetch<T>(url)
+  const data = await proxyFetch<T>(url, timeoutMs)
   setCache(cacheKey, data, ttl)
   return data
 }
@@ -616,12 +629,13 @@ export async function fetchFileViaProxy(
   name: string,
   branch: string,
   path: string,
+  options?: { timeoutMs?: number },
 ): Promise<string> {
   const key = `file:${owner}/${name}:${branch}:${path}`
   const url = `/api/github/file?owner=${encodeURIComponent(owner)}&name=${encodeURIComponent(name)}&branch=${encodeURIComponent(branch)}&path=${encodeURIComponent(path)}`
 
   // File content returns { content: string } — unwrap after caching the raw response
-  const data = await cachedProxyFetch<{ content: string }>(key, url, CACHE_TTL_FILE)
+  const data = await cachedProxyFetch<{ content: string }>(key, url, CACHE_TTL_FILE, options?.timeoutMs ?? 15_000)
   return data.content
 }
 

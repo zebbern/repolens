@@ -51,7 +51,7 @@ export async function POST(request: NextRequest): Promise<Response> {
     const ghResponse = await fetch(url, {
       headers,
       redirect: 'follow',
-      signal: AbortSignal.timeout(30_000),
+      signal: AbortSignal.timeout(120_000),
     })
 
     if (!ghResponse.ok) {

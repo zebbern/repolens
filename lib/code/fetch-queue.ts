@@ -19,6 +19,8 @@ export interface FetchQueueOptions {
   onProgress?: (stats: FetchQueueStats) => void
   /** External abort signal — aborts all queued fetches when triggered. */
   signal?: AbortSignal
+  /** Timeout per individual fetch in ms (default: 15000). */
+  perFetchTimeoutMs?: number
 }
 
 export interface FetchQueueStats {
@@ -46,6 +48,7 @@ export class FetchQueue {
   private readonly fetchFn: (path: string) => Promise<string>
   private readonly concurrency: number
   private readonly onProgressCb: ((stats: FetchQueueStats) => void) | null
+  private readonly perFetchTimeoutMs: number
 
   private readonly queue: QueueEntry[] = []
   private readonly inflight = new Map<string, Promise<string>>()
@@ -58,6 +61,7 @@ export class FetchQueue {
     this.fetchFn = options.fetchFn
     this.concurrency = options.concurrency ?? 10
     this.onProgressCb = options.onProgress ?? null
+    this.perFetchTimeoutMs = options.perFetchTimeoutMs ?? 15_000
 
     if (options.signal) {
       if (options.signal.aborted) {
@@ -160,7 +164,11 @@ export class FetchQueue {
 
   private async executeFetch(entry: QueueEntry): Promise<void> {
     try {
-      const content = await this.fetchFn(entry.path)
+      const fetchPromise = this.fetchFn(entry.path)
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        setTimeout(() => reject(new Error(`Fetch timed out after ${this.perFetchTimeoutMs}ms: ${entry.path}`)), this.perFetchTimeoutMs)
+      })
+      const content = await Promise.race([fetchPromise, timeoutPromise])
 
       if (this.isAborted) {
         this.inflight.delete(entry.path)

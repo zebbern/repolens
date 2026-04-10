@@ -28,7 +28,6 @@ export {
 export type { ParsedGitHubUrl } from './parser'
 
 export {
-  fetchRepoZipball,
   isFileIndexable,
   INDEXABLE_EXTENSIONS,
 } from './zipball'

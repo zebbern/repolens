@@ -15,9 +15,10 @@ export async function fetchWithConcurrency<T>(
   while (queue.length > 0 || executing.length > 0) {
     while (executing.length < limit && queue.length > 0) {
       const item = queue.shift()!
-      const promise = fn(item).then(() => {
-        executing.splice(executing.indexOf(promise), 1)
-      })
+      const promise = fn(item).then(
+        () => { executing.splice(executing.indexOf(promise), 1) },
+        () => { executing.splice(executing.indexOf(promise), 1) },
+      )
       executing.push(promise)
     }
 

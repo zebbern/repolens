@@ -4,10 +4,11 @@ import { useEffect, useState, useCallback } from "react"
 import { useRouter } from "next/navigation"
 import { useTheme } from "next-themes"
 import {
-  Github, Bug, FileText, Network, Code2, Package, History,
+  Bug, FileText, Network, Code2, Package, History,
   GitCommitHorizontal, Route, Settings, Moon, Sun, Monitor,
   MessageSquare, Search, GitCompareArrows,
 } from "lucide-react"
+import { Github } from "@/components/icons/github"
 import {
   CommandDialog,
   CommandInput,

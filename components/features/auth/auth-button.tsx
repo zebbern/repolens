@@ -1,7 +1,8 @@
 "use client"
 
 import { signIn, signOut, useSession } from "next-auth/react"
-import { Github, LogIn, LogOut, KeyRound } from "lucide-react"
+import { LogIn, LogOut, KeyRound } from "lucide-react"
+import { Github } from "@/components/icons/github"
 import { Button } from "@/components/ui/button"
 import { useGitHubToken } from "@/providers/github-token-provider"
 

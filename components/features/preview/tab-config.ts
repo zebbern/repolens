@@ -1,4 +1,5 @@
-import { Github, Bug, FileText, Network, Code2, Package, History, GitCommitHorizontal, Route, GitPullRequest } from "lucide-react"
+import { Bug, FileText, Network, Code2, Package, History, GitCommitHorizontal, Route, GitPullRequest } from "lucide-react"
+import { Github } from "@/components/icons/github"
 import type { LucideIcon } from "lucide-react"
 
 export interface PreviewTab {

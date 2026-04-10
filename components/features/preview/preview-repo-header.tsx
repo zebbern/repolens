@@ -1,6 +1,7 @@
 "use client"
 
-import { Github, Star, GitFork, X } from "lucide-react"
+import { Star, GitFork, X } from "lucide-react"
+import { Github } from "@/components/icons/github"
 import { Button } from "@/components/ui/button"
 import type { GitHubRepo } from "@/types/repository"
 

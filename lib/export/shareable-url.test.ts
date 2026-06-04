@@ -94,6 +94,32 @@ describe('parseShareableUrl', () => {
     expect(result!.view).toBe('issues')
   })
 
+  it('extracts repo from a path-based tree (branch) URL', () => {
+    const result = parseShareableUrl('', '/greensock/gsap-skills/tree/main')
+
+    expect(result).not.toBeNull()
+    expect(result!.repoUrl).toBe('https://github.com/greensock/gsap-skills/tree/main')
+  })
+
+  it('extracts repo from a path-based subdirectory URL', () => {
+    const result = parseShareableUrl('', '/greensock/gsap-skills/tree/main/skills/gsap-react')
+
+    expect(result).not.toBeNull()
+    expect(result!.repoUrl).toBe('https://github.com/greensock/gsap-skills/tree/main/skills/gsap-react')
+  })
+
+  it('extracts repo from a path-based blob (file) URL', () => {
+    const result = parseShareableUrl('', '/owner/repo/blob/main/src/index.ts')
+
+    expect(result).not.toBeNull()
+    expect(result!.repoUrl).toBe('https://github.com/owner/repo/blob/main/src/index.ts')
+  })
+
+  it('returns null for non-tree/blob deep paths', () => {
+    const result = parseShareableUrl('', '/owner/repo/issues')
+    expect(result).toBeNull()
+  })
+
   it('falls back to query-param format (legacy)', () => {
     const result = parseShareableUrl('?repo=https%3A%2F%2Fgithub.com%2Fowner%2Frepo', '/')
 

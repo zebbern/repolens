@@ -1,7 +1,7 @@
 // Layout constants
 export const SIDEBAR_CONFIG = {
     MIN_WIDTH: 240,
-    MAX_WIDTH: 500,
+    MAX_WIDTH: 800,
     DEFAULT_WIDTH: 320,
 } as const
 

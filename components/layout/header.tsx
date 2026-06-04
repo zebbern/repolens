@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react"
 import { useSession } from "next-auth/react"
 import { Button } from "@/components/ui/button"
-import { GitCompareArrows, GitFork, Settings } from "lucide-react"
+import { GitCompareArrows, GitFork, Settings, PanelLeftClose, PanelLeftOpen } from "lucide-react"
 import { Github } from "@/components/icons/github"
 import Image from "next/image"
 import Link from "next/link"
@@ -12,7 +12,8 @@ import { ThemeToggle } from "@/components/theme-toggle"
 import { AuthButton } from "@/components/features/auth/auth-button"
 import { UserMenu } from "@/components/features/auth/user-menu"
 import { ExportMenu } from "@/components/features/export/export-menu"
-import { useAPIKeys } from "@/providers"
+import { useAPIKeys, useApp } from "@/providers"
+import { useIsMobile } from "@/hooks/use-mobile"
 
 const SHOW_AUTH = process.env.NEXT_PUBLIC_AUTH_ENABLED === "true"
 
@@ -23,6 +24,8 @@ interface HeaderProps {
 export function Header({ className }: HeaderProps) {
   const [settingsOpen, setSettingsOpen] = useState(false)
   const { getValidProviders } = useAPIKeys()
+  const { isChatCollapsed, setChatCollapsed } = useApp()
+  const isMobile = useIsMobile()
   const { data: session } = useSession()
   
   const validProviders = getValidProviders()
@@ -38,6 +41,23 @@ export function Header({ className }: HeaderProps) {
     <>
       <header className={`flex h-11 items-center bg-primary-background border-b border-foreground/6 px-4 justify-between ${className || ''}`}>
         <div className="flex items-center gap-2">
+          {!isMobile && (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7 text-text-secondary hover:text-text-primary hover:bg-foreground/5 transition-colors duration-150"
+              onClick={() => setChatCollapsed(!isChatCollapsed)}
+              aria-label={isChatCollapsed ? "Show chat panel" : "Hide chat panel"}
+              aria-pressed={!isChatCollapsed}
+              title={isChatCollapsed ? "Show chat panel" : "Hide chat panel"}
+            >
+              {isChatCollapsed ? (
+                <PanelLeftOpen className="h-3.5 w-3.5" />
+              ) : (
+                <PanelLeftClose className="h-3.5 w-3.5" />
+              )}
+            </Button>
+          )}
           <Image src="/repolens.svg" alt="RepoLens" width={24} height={20} className="dark:invert" />
           <Link
             href="/compare"

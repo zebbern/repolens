@@ -16,6 +16,17 @@ const mockFetchDependencyMeta = vi.fn()
 vi.mock('@/lib/code/scanner/cve-lookup', () => ({
   parseDependencies: (...args: unknown[]) => mockParseDependencies(...args),
   queryOSV: (...args: unknown[]) => mockQueryOSV(...args),
+  // Faithful dedupe (prod wins, first version kept) — the real behavior is
+  // unit-tested in cve-lookup.test.ts; here it just needs to pass deps through.
+  dedupeDependencies: (deps: Array<{ name: string; version: string; type: string }>) => {
+    const byName = new Map<string, { name: string; version: string; type: string }>()
+    for (const dep of deps) {
+      const existing = byName.get(dep.name)
+      if (!existing) byName.set(dep.name, { ...dep })
+      else if (existing.type === 'dev' && dep.type === 'production') existing.type = 'production'
+    }
+    return Array.from(byName.values())
+  },
 }))
 
 vi.mock('@/lib/deps/npm-client', () => ({

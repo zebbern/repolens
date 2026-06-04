@@ -4,7 +4,7 @@ import type { CodeIssue, DiffLine, FixSuggestion, ValidationResult } from '@/lib
 import { SEVERITY_CONFIG, VERDICT_CONFIG } from './constants'
 import { TaintFlowDiagram } from './taint-flow-diagram'
 import { cn } from '@/lib/utils'
-import { Wrench, Sparkles, Loader2, ExternalLink } from 'lucide-react'
+import { Wrench, Sparkles, Loader2, ExternalLink, ClipboardCopy } from 'lucide-react'
 
 interface IssueDetailsProps {
   issue: CodeIssue
@@ -15,11 +15,12 @@ interface IssueDetailsProps {
   hasValidApiKey: boolean
   onShowFix: (issue: CodeIssue) => void
   onValidate: (issue: CodeIssue) => void
+  onCopyPrompt: (issue: CodeIssue) => void
 }
 
 export function IssueDetails({
   issue, showFix, fix, validationResult, isValidating,
-  hasValidApiKey, onShowFix, onValidate,
+  hasValidApiKey, onShowFix, onValidate, onCopyPrompt,
 }: IssueDetailsProps) {
   return (
     <div className="px-3 pb-3 flex flex-col gap-2.5 ml-5">
@@ -116,6 +117,15 @@ export function IssueDetails({
             </span>
           </button>
         )}
+
+        <button
+          onClick={() => onCopyPrompt(issue)}
+          className="text-[10px] px-2 py-1 rounded-md border border-foreground/6 text-text-muted hover:text-text-secondary hover:bg-foreground/5 transition-colors flex items-center gap-1"
+          title="Copy a remediation prompt for an AI CLI agent (Claude Code, Codex)"
+        >
+          <ClipboardCopy className="h-2.5 w-2.5" />
+          Copy AI fix prompt
+        </button>
       </div>
 
       {/* AI Validation result */}

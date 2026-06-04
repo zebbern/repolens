@@ -26,6 +26,10 @@ vi.mock('@/providers', () => ({
     },
     codebaseAnalysis: { files: new Map() },
   }),
+  useRepositoryActions: () => ({
+    getTabCache: () => undefined,
+    setTabCache: () => {},
+  }),
 }))
 
 vi.mock('@/lib/code/issue-scanner', () => ({
@@ -53,6 +57,7 @@ vi.mock('@/lib/export', () => ({
   exportToMarkdown: (...args: unknown[]) => mockExportToMarkdown(...(args as Parameters<typeof mockExportToMarkdown>)),
   exportSummaryClipboard: (...args: unknown[]) => mockExportSummaryClipboard(...(args as Parameters<typeof mockExportSummaryClipboard>)),
   buildShareableUrl: (...args: unknown[]) => mockBuildShareableUrl(...(args as Parameters<typeof mockBuildShareableUrl>)),
+  buildRemediationBundle: vi.fn(() => '# AI remediation prompt'),
 }))
 
 vi.mock('sonner', () => ({

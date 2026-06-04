@@ -37,16 +37,22 @@ export function proxy(request: NextRequest) {
     // Split into non-empty segments: "/owner/repo" → ["owner", "repo"]
     const segments = normalizedPath.split('/').filter(Boolean)
 
-    // Path-based repo rewrite: exactly 2 segments, first is not reserved, and both are valid GitHub names
+    // Path-based repo rewrite. Matches GitHub's repo URL grammar:
+    //   /owner/repo                          → repo root
+    //   /owner/repo/tree/<branch>[/subpath]  → branch / directory
+    //   /owner/repo/blob/<branch>/<path>     → file
+    // The first segment must not be reserved, and owner/repo must be valid names.
+    const isRepoRoot = segments.length === 2
+    const isTreeOrBlob = segments.length > 2 && (segments[2] === 'tree' || segments[2] === 'blob')
     if (
-        segments.length === 2
+        (isRepoRoot || isTreeOrBlob)
         && !RESERVED_SEGMENTS.has(segments[0].toLowerCase())
         && GITHUB_NAME_RE.test(segments[0])
         && GITHUB_NAME_RE.test(segments[1])
     ) {
-        const [owner, repo] = segments
         const rewriteUrl = new URL('/', request.url)
-        rewriteUrl.searchParams.set('repo', `https://github.com/${owner}/${repo}`)
+        // join() preserves any /tree/branch/subpath so the client can parse it
+        rewriteUrl.searchParams.set('repo', `https://github.com/${segments.join('/')}`)
 
         // Preserve any additional query params (e.g. ?view=docs)
         request.nextUrl.searchParams.forEach((value, key) => {

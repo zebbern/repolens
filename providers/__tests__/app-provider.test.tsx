@@ -3,6 +3,11 @@ import { render, screen, act } from '@testing-library/react'
 import React from 'react'
 import { useApp, AppProvider } from '../app-provider'
 
+// Keep tests isolated — the provider persists the chat-collapsed flag to localStorage.
+beforeEach(() => {
+  try { localStorage.clear() } catch { /* ignore */ }
+})
+
 // Test helper component that reads context values
 function TestConsumer() {
   const { previewUrl, isGenerating, sidebarWidth, setPreviewUrl, setIsGenerating, setSidebarWidth } = useApp()
@@ -132,6 +137,57 @@ describe('AppProvider', () => {
 
     // Should not cause additional renders
     expect(renderSpy.mock.calls.length).toBe(afterFirstSet)
+  })
+})
+
+describe('AppProvider chat-collapsed state', () => {
+  function CollapseConsumer() {
+    const { isChatCollapsed, setChatCollapsed } = useApp()
+    return (
+      <div>
+        <span data-testid="collapsed">{String(isChatCollapsed)}</span>
+        <button onClick={() => setChatCollapsed(true)}>hide</button>
+        <button onClick={() => setChatCollapsed(false)}>show</button>
+      </div>
+    )
+  }
+
+  it('defaults to not collapsed', () => {
+    render(
+      <AppProvider>
+        <CollapseConsumer />
+      </AppProvider>
+    )
+    expect(screen.getByTestId('collapsed')).toHaveTextContent('false')
+  })
+
+  it('collapses and persists the preference to localStorage', async () => {
+    render(
+      <AppProvider>
+        <CollapseConsumer />
+      </AppProvider>
+    )
+
+    await act(async () => {
+      screen.getByText('hide').click()
+    })
+
+    expect(screen.getByTestId('collapsed')).toHaveTextContent('true')
+    expect(localStorage.getItem('repolens:chat-collapsed')).toBe('1')
+  })
+
+  it('restores the collapsed preference from localStorage on mount', async () => {
+    localStorage.setItem('repolens:chat-collapsed', '1')
+
+    await act(async () => {
+      render(
+        <AppProvider>
+          <CollapseConsumer />
+        </AppProvider>
+      )
+    })
+
+    expect(screen.getByTestId('collapsed')).toHaveTextContent('true')
   })
 })
 

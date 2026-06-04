@@ -18,12 +18,13 @@ interface IssueCardProps {
   hasValidApiKey: boolean
   onShowFix: (issue: CodeIssue) => void
   onValidate: (issue: CodeIssue) => void
+  onCopyPrompt: (issue: CodeIssue) => void
 }
 
 export function IssueCard({
   issue, isExpanded, onToggle, onNavigateToFile,
   showFix, fix, validationResult, isValidating,
-  hasValidApiKey, onShowFix, onValidate,
+  hasValidApiKey, onShowFix, onValidate, onCopyPrompt,
 }: IssueCardProps) {
   const sev = SEVERITY_CONFIG[issue.severity]
   const SevIcon = sev.icon
@@ -88,6 +89,7 @@ export function IssueCard({
           hasValidApiKey={hasValidApiKey}
           onShowFix={onShowFix}
           onValidate={onValidate}
+          onCopyPrompt={onCopyPrompt}
         />
       )}
     </div>

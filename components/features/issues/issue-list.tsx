@@ -25,6 +25,7 @@ interface IssueListProps {
   hasValidApiKey: boolean
   onShowFix: (issue: CodeIssue) => void
   onValidate: (issue: CodeIssue) => void
+  onCopyPrompt: (issue: CodeIssue) => void
 }
 
 export function IssueList({
@@ -33,7 +34,7 @@ export function IssueList({
   ruleOverflow, scannedFiles, languagesDetected,
   totalIssueCount, filteredIssueCount,
   showFix, fixCache, validationResults, validatingIssues,
-  hasValidApiKey, onShowFix, onValidate,
+  hasValidApiKey, onShowFix, onValidate, onCopyPrompt,
 }: IssueListProps) {
   if (filteredIssueCount === 0) {
     return (
@@ -122,6 +123,7 @@ export function IssueList({
                     hasValidApiKey={hasValidApiKey}
                     onShowFix={onShowFix}
                     onValidate={onValidate}
+                    onCopyPrompt={onCopyPrompt}
                   />
                 ))}
               </div>

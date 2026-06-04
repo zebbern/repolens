@@ -64,7 +64,7 @@ export function buildShareableUrl(state: ShareableState): string {
  * Parse shareable state from the current URL.
  *
  * Priority:
- * 1. Path-based: `/owner/repo` → reconstruct GitHub URL
+ * 1. Path-based: `/owner/repo[/tree/branch/...]` → reconstruct GitHub URL
  * 2. Query-based (legacy): `?repo=https://github.com/owner/repo`
  *
  * Returns `null` if no repo info is found.
@@ -75,13 +75,15 @@ export function parseShareableUrl(
 ): ShareableState | null {
   const params = new URLSearchParams(search)
 
-  // 1. Try path-based format: /owner/repo
+  // 1. Try path-based format: /owner/repo or /owner/repo/(tree|blob)/branch[/subpath]
   const segments = pathname.split('/').filter(Boolean)
-  if (segments.length === 2) {
-    const [owner, repo] = segments
+  const isRepoRoot = segments.length === 2
+  const isTreeOrBlob = segments.length > 2 && (segments[2] === 'tree' || segments[2] === 'blob')
+  if (isRepoRoot || isTreeOrBlob) {
     const view = params.get('view') as ViewId | null
     return {
-      repoUrl: `https://github.com/${owner}/${repo}`,
+      // join() preserves any /tree/branch/subpath — parseGitHubUrl reduces it to owner/repo
+      repoUrl: `https://github.com/${segments.join('/')}`,
       view: view ?? undefined,
     }
   }

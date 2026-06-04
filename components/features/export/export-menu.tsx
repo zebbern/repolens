@@ -17,11 +17,12 @@ import {
   Copy,
   Share2,
   Loader2,
+  Bot,
 } from 'lucide-react'
 import { toast } from 'sonner'
-import { useRepositoryData } from '@/providers'
+import { useRepositoryData, useRepositoryActions } from '@/providers'
 import type { FullAnalysis } from '@/lib/code/import-parser'
-import { scanInWorker, type ScanResults } from '@/lib/code/issue-scanner'
+import { scanInWorker, type ScanResults, type CveResult } from '@/lib/code/issue-scanner'
 import { generateProjectSummary } from '@/lib/diagrams/diagram-data'
 import type { ProjectSummary } from '@/lib/diagrams/types'
 import {
@@ -31,6 +32,7 @@ import {
   exportToMarkdown,
   exportSummaryClipboard,
   buildShareableUrl,
+  buildRemediationBundle,
 } from '@/lib/export'
 
 interface ExportMenuProps {
@@ -40,6 +42,7 @@ interface ExportMenuProps {
 
 export function ExportMenu({ activeTab }: ExportMenuProps) {
   const { repo, codeIndex, codebaseAnalysis } = useRepositoryData()
+  const { getTabCache } = useRepositoryActions()
   const [isExporting, setIsExporting] = useState(false)
 
   const hasData = Boolean(repo && codeIndex.totalFiles > 0)
@@ -116,6 +119,52 @@ export function ExportMenu({ activeTab }: ExportMenuProps) {
     }
   }, [repo, codeIndex, getAnalysisData])
 
+  // Build the bulk AI remediation prompt from scan results + cached CVE data.
+  const buildAiPrompt = useCallback(async (): Promise<string | null> => {
+    if (!repo) return null
+    const { scanResults } = await getAnalysisData()
+    const cveResults = getTabCache<{ cveResults?: CveResult[] }>('deps')?.cveResults ?? []
+    return buildRemediationBundle(scanResults, cveResults, repo)
+  }, [repo, getAnalysisData, getTabCache])
+
+  const handleCopyAiPrompt = useCallback(async () => {
+    if (!repo) return
+    setIsExporting(true)
+    try {
+      const prompt = await buildAiPrompt()
+      if (!prompt) return
+      const ok = await copyToClipboard(prompt)
+      toast[ok ? 'success' : 'error'](
+        ok ? 'AI remediation prompt copied to clipboard' : 'Failed to copy — clipboard not available',
+      )
+    } catch (err) {
+      console.error('AI prompt export failed:', err)
+      toast.error('Failed to build AI prompt')
+    } finally {
+      setIsExporting(false)
+    }
+  }, [repo, buildAiPrompt])
+
+  const handleDownloadAiPrompt = useCallback(async () => {
+    if (!repo) return
+    setIsExporting(true)
+    try {
+      const prompt = await buildAiPrompt()
+      if (!prompt) return
+      downloadFile({
+        content: prompt,
+        filename: `${repo.fullName.replace('/', '-')}-ai-remediation.md`,
+        mimeType: 'text/markdown',
+      })
+      toast.success('AI remediation prompt downloaded')
+    } catch (err) {
+      console.error('AI prompt download failed:', err)
+      toast.error('Failed to build AI prompt')
+    } finally {
+      setIsExporting(false)
+    }
+  }, [repo, buildAiPrompt])
+
   const handleShareUrl = useCallback(async () => {
     if (!repo) return
     try {
@@ -161,6 +210,15 @@ export function ExportMenu({ activeTab }: ExportMenuProps) {
         <DropdownMenuItem onClick={handleExportMarkdown} className="gap-2 text-xs">
           <FileText className="h-3.5 w-3.5" />
           Download Markdown
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem onClick={handleCopyAiPrompt} className="gap-2 text-xs">
+          <Bot className="h-3.5 w-3.5" />
+          Copy AI Fix Prompt
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={handleDownloadAiPrompt} className="gap-2 text-xs">
+          <Bot className="h-3.5 w-3.5" />
+          Download AI Fix Prompt
         </DropdownMenuItem>
         <DropdownMenuSeparator />
         <DropdownMenuItem onClick={handleCopySummary} className="gap-2 text-xs">

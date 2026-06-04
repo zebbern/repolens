@@ -46,6 +46,7 @@ const baseProps = {
   hasValidApiKey: true,
   onShowFix: vi.fn(),
   onValidate: vi.fn(),
+  onCopyPrompt: vi.fn(),
 }
 
 describe('IssueList', () => {

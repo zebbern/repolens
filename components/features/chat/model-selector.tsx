@@ -41,7 +41,7 @@ export function ModelSelector({ className, onOpenSettings }: ModelSelectorProps)
           variant="ghost"
           size="sm"
           className={cn(
-            'flex items-center gap-2 text-xs text-text-secondary hover:bg-foreground/5',
+            'flex min-w-0 items-center gap-2 text-xs text-text-secondary hover:bg-foreground/5',
             className
           )}
         >
@@ -49,8 +49,8 @@ export function ModelSelector({ className, onOpenSettings }: ModelSelectorProps)
             "h-3.5 w-3.5 shrink-0",
             hasErrors ? "text-status-warning" : hasModels ? "text-status-success" : "text-text-muted"
           )} />
-          {selectedModel ? selectedModel.name : "Select model"}
-          <ChevronDown className="h-3 w-3" />
+          <span className="min-w-0 truncate">{selectedModel ? selectedModel.name : "Select model"}</span>
+          <ChevronDown className="h-3 w-3 shrink-0" />
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent

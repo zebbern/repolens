@@ -188,8 +188,8 @@ export function ChatInput({
         }}
       />
 
-      <div className="flex items-center justify-between px-2 pb-2">
-        <div className="flex items-center gap-1">
+      <div className="flex items-center justify-between gap-1 px-2 pb-2">
+        <div className="flex min-w-0 items-center gap-1">
           <ModelSelector />
           {pinPicker}
           {skillPicker}
@@ -198,7 +198,7 @@ export function ChatInput({
               type="button"
               variant="ghost"
               size="icon"
-              className="h-7 w-7 text-text-muted hover:text-text-primary"
+              className="h-7 w-7 shrink-0 text-text-muted hover:text-text-primary"
               aria-label="Attach image"
               title={`Attach image (max 2 MB, up to ${MAX_IMAGES})`}
               onClick={() => fileInputRef.current?.click()}
@@ -208,7 +208,7 @@ export function ChatInput({
             </Button>
           )}
         </div>
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-1 shrink-0">
           {isLoading && onStop ? (
             <Button
               type="button"

@@ -93,6 +93,43 @@ describe('proxy', () => {
       const rewriteUrl = (NextResponse.rewrite as ReturnType<typeof vi.fn>).mock.calls[0][0] as URL
       expect(rewriteUrl.searchParams.get('repo')).toBe('https://github.com/owner/repo')
     })
+
+    it('rewrites /owner/repo/tree/<branch> (branch deep link)', () => {
+      const req = createRequest('/greensock/gsap-skills/tree/main')
+      proxy(req)
+
+      expect(NextResponse.rewrite).toHaveBeenCalledOnce()
+      const rewriteUrl = (NextResponse.rewrite as ReturnType<typeof vi.fn>).mock.calls[0][0] as URL
+      expect(rewriteUrl.pathname).toBe('/')
+      expect(rewriteUrl.searchParams.get('repo')).toBe('https://github.com/greensock/gsap-skills/tree/main')
+    })
+
+    it('rewrites /owner/repo/tree/<branch>/<subpath> (subdirectory deep link)', () => {
+      const req = createRequest('/greensock/gsap-skills/tree/main/skills/gsap-react')
+      proxy(req)
+
+      const rewriteUrl = (NextResponse.rewrite as ReturnType<typeof vi.fn>).mock.calls[0][0] as URL
+      expect(rewriteUrl.searchParams.get('repo')).toBe(
+        'https://github.com/greensock/gsap-skills/tree/main/skills/gsap-react',
+      )
+    })
+
+    it('rewrites /owner/repo/blob/<branch>/<path> (file deep link)', () => {
+      const req = createRequest('/owner/repo/blob/main/src/index.ts')
+      proxy(req)
+
+      const rewriteUrl = (NextResponse.rewrite as ReturnType<typeof vi.fn>).mock.calls[0][0] as URL
+      expect(rewriteUrl.searchParams.get('repo')).toBe('https://github.com/owner/repo/blob/main/src/index.ts')
+    })
+
+    it('preserves query params on a tree deep link (e.g. ?view=docs)', () => {
+      const req = createRequest('/owner/repo/tree/main?view=docs')
+      proxy(req)
+
+      const rewriteUrl = (NextResponse.rewrite as ReturnType<typeof vi.fn>).mock.calls[0][0] as URL
+      expect(rewriteUrl.searchParams.get('repo')).toBe('https://github.com/owner/repo/tree/main')
+      expect(rewriteUrl.searchParams.get('view')).toBe('docs')
+    })
   })
 
   // -----------------------------------------------------------------------
@@ -158,6 +195,14 @@ describe('proxy', () => {
 
     it('does not rewrite /a/b/c/d (4 segments)', () => {
       const req = createRequest('/a/b/c/d')
+      proxy(req)
+
+      expect(NextResponse.rewrite).not.toHaveBeenCalled()
+      expect(NextResponse.next).toHaveBeenCalledOnce()
+    })
+
+    it('does not rewrite /owner/repo/issues (3rd segment is not tree/blob)', () => {
+      const req = createRequest('/owner/repo/issues')
       proxy(req)
 
       expect(NextResponse.rewrite).not.toHaveBeenCalled()

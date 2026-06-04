@@ -11,7 +11,7 @@ import { PinnedContextChips } from "./pinned-context-chips"
 import { PinFilePicker } from "./pin-file-picker"
 import { SkillSelector } from "./skill-selector"
 import { TokenUsageFooter } from "./token-usage-footer"
-import { Bot, AlertCircle, Download } from "lucide-react"
+import { Bot, AlertCircle, Download, PanelLeftClose } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useAPIKeys, useRepositoryData, useRepositoryActions, useRepositoryProgress, useTours, useGitHubToken } from "@/providers"
 import { toast } from "sonner"
@@ -30,7 +30,7 @@ import type { Tour } from "@/types/tours"
 // These providers are not currently accessible in the chat sidebar and should be added
 // in a future iteration as a separate feature.
 
-export function ChatSidebar({ className }: { className?: string }) {
+export function ChatSidebar({ className, onCollapse }: { className?: string; onCollapse?: () => void }) {
   const { selectedModel, apiKeys, getValidProviders } = useAPIKeys()
   const { repo, files, codeIndex } = useRepositoryData()
   const { pinFile, unpinFile, clearPins, getPinnedContents } = useRepositoryActions()
@@ -265,6 +265,18 @@ export function ChatSidebar({ className }: { className?: string }) {
               {repo.fullName}
             </span>
           )}
+          {onCollapse && (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7 text-text-muted hover:text-text-primary"
+              title="Hide chat"
+              aria-label="Hide chat"
+              onClick={onCollapse}
+            >
+              <PanelLeftClose className="h-4 w-4" />
+            </Button>
+          )}
         </div>
       </div>
 
@@ -365,6 +377,7 @@ export function ChatSidebar({ className }: { className?: string }) {
                 pinnedFiles={pinnedFiles}
                 onPin={pinFile}
                 onUnpin={unpinFile}
+                className="shrink-0"
               />
             ) : undefined
           }
@@ -372,6 +385,7 @@ export function ChatSidebar({ className }: { className?: string }) {
             <SkillSelector
               activeSkills={activeSkills}
               onToggle={handleSkillToggle}
+              className="shrink-0"
             />
           }
         />

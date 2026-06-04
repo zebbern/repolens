@@ -9,10 +9,12 @@ import { PreviewPanel } from "@/components/features/preview/preview-panel"
 import { Button } from "@/components/ui/button"
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet"
 import { useIsMobile } from "@/hooks/use-mobile"
+import { useApp } from "@/providers"
 
 export default function HomePage() {
   const isMobile = useIsMobile()
   const [isChatOpen, setIsChatOpen] = useState(false)
+  const { isChatCollapsed, setChatCollapsed } = useApp()
 
   return (
     <div className="flex h-screen w-full flex-col bg-primary-background font-sans text-text-primary">
@@ -36,9 +38,11 @@ export default function HomePage() {
               </SheetContent>
             </Sheet>
           </>
+        ) : isChatCollapsed ? (
+          <PreviewPanel className="h-full rounded-lg overflow-hidden" />
         ) : (
           <ResizableLayout
-            sidebarContent={<ChatSidebar />}
+            sidebarContent={<ChatSidebar onCollapse={() => setChatCollapsed(true)} />}
             mainContent={<PreviewPanel className="rounded-lg overflow-hidden" />}
           />
         )}

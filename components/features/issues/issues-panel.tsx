@@ -12,6 +12,8 @@ import {
   type ValidationResult,
 } from '@/lib/code/issue-scanner'
 import { getFileContent } from '@/lib/code/code-index'
+import { buildFixPrompt, copyToClipboard } from '@/lib/export'
+import { toast } from 'sonner'
 import { useRepositoryData, useRepositoryActions } from '@/providers'
 import { useAPIKeys } from '@/providers/api-keys-provider'
 import { useBatchOperations } from '@/hooks/use-batch-operations'
@@ -51,7 +53,7 @@ export function IssuesPanel({ codeIndex, onNavigateToFile }: IssuesPanelProps) {
   const validatingIssuesRef = useRef(validatingIssues)
   validatingIssuesRef.current = validatingIssues
 
-  const { codebaseAnalysis: analysis } = useRepositoryData()
+  const { repo, codebaseAnalysis: analysis } = useRepositoryData()
   const { getTabCache, setTabCache } = useRepositoryActions()
   const { selectedProvider, selectedModel, apiKeys } = useAPIKeys()
 
@@ -149,6 +151,13 @@ export function IssuesPanel({ codeIndex, onNavigateToFile }: IssuesPanelProps) {
       setValidatingIssues(prev => { const next = new Set(prev); next.delete(issue.id); return next })
     }
   }, [selectedProvider, selectedModel, apiKeys, codeIndex])
+
+  const handleCopyPrompt = useCallback(async (issue: CodeIssue) => {
+    const ok = await copyToClipboard(buildFixPrompt(issue, repo ?? null))
+    toast[ok ? 'success' : 'error'](
+      ok ? 'AI fix prompt copied — paste it into your CLI agent' : 'Failed to copy — clipboard not available',
+    )
+  }, [repo])
 
   const filteredIssues = useMemo(() => {
     if (!results) return []
@@ -304,6 +313,7 @@ export function IssuesPanel({ codeIndex, onNavigateToFile }: IssuesPanelProps) {
             hasValidApiKey={hasValidApiKey}
             onShowFix={handleShowFix}
             onValidate={handleValidate}
+            onCopyPrompt={handleCopyPrompt}
           />
         </div>
       </>

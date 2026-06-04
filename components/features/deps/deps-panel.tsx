@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useMemo, useCallback } from 'react'
 import type { CodeIndex } from '@/lib/code/code-index'
-import { parseDependencies } from '@/lib/code/scanner/cve-lookup'
+import { parseDependencies, dedupeDependencies } from '@/lib/code/scanner/cve-lookup'
 import type { CveResult, PackageDependency } from '@/lib/code/scanner/cve-lookup'
 import { fetchDependencyMeta } from '@/lib/deps/npm-client'
 import { computeDependencyHealth } from '@/lib/deps/health-scorer'
@@ -35,8 +35,10 @@ export function DepsPanel({ codeIndex }: DepsPanelProps) {
     setErrorMessage('')
 
     try {
-      // Step 1: Parse dependencies from package.json in the code index
-      const parsed = parseDependencies(codeIndex)
+      // Step 1: Parse dependencies from package.json in the code index.
+      // Dedupe across manifests (monorepos repeat the same package) so each
+      // package yields a single row — otherwise React sees duplicate keys.
+      const parsed = dedupeDependencies(parseDependencies(codeIndex))
       if (parsed.length === 0) {
         setLoadState('empty')
         return

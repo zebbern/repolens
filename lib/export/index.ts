@@ -12,3 +12,9 @@ export {
   updateUrlState,
   clearUrlState,
 } from './shareable-url'
+export {
+  buildFixPrompt,
+  buildRemediationBundle,
+  redactSecretSnippet,
+  sortIssuesByRisk,
+} from './ai-prompt-export'

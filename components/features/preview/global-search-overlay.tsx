@@ -5,13 +5,14 @@ import { useVirtualizer } from "@tanstack/react-virtual"
 import {
   Search, Code2, FileText, Braces, Box, Shapes, Type, List, Code,
   CaseSensitive, WholeWord, Regex, X, ChevronRight, ChevronDown,
-  Filter, FilterX,
+  Filter, FilterX, Replace, ArrowRight, Loader2,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import type { CodeIndex, SearchMatch } from "@/lib/code/code-index"
 import { buildSearchRegex } from "@/lib/code/code-index"
 import { searchInWorker, cancelPendingSearches } from "@/lib/code/search-worker-client"
 import { fuzzyMatch } from "@/lib/code/fuzzy-match"
+import { computeFileRenames, type FileRename } from "@/lib/code/rename-files"
 import { extractSymbols, type ExtractedSymbol } from "@/components/features/code/hooks/use-symbol-extraction"
 
 /* ── Types ─────────────────────────────────────────────────────────── */
@@ -37,6 +38,8 @@ interface GlobalSearchOverlayProps {
   allFiles: FileResult[]
   onSelect: (path: string, line?: number) => void
   onClose: () => void
+  /** Apply a session-local rename of matching file names. Enables Replace in the Files tab. */
+  onRename?: (renames: FileRename[]) => Promise<number> | void
 }
 
 /* ── Constants ─────────────────────────────────────────────────────── */
@@ -226,6 +229,7 @@ export function GlobalSearchOverlay({
   allFiles,
   onSelect,
   onClose,
+  onRename,
 }: GlobalSearchOverlayProps) {
   const inputRef = useRef<HTMLInputElement>(null)
   const resultsRef = useRef<HTMLDivElement>(null)
@@ -234,6 +238,12 @@ export function GlobalSearchOverlay({
   const [query, setQuery] = useState("")
   const debouncedQuery = useDebouncedValue(query, activeTab === 'files' ? 0 : 300)
   const [selectedIndex, setSelectedIndex] = useState(0)
+
+  // Files-tab "Replace all" (virtual rename) state
+  const [replaceMode, setReplaceMode] = useState(false)
+  const [replaceValue, setReplaceValue] = useState("")
+  const [isRenaming, setIsRenaming] = useState(false)
+  const renameEnabled = Boolean(onRename) && activeTab === 'files'
 
   // Code search options
   const [caseSensitive, setCaseSensitive] = useState(false)
@@ -296,6 +306,25 @@ export function GlobalSearchOverlay({
     matches.sort((a, b) => b.score - a.score)
     return matches.slice(0, 200)
   }, [query, allFiles, activeTab])
+
+  /* ── File-name replace (virtual rename) ───────────────────────── */
+
+  // Literal substring match on full paths so the replacement is well-defined.
+  const renamePreview = useMemo(() => {
+    if (!renameEnabled || !replaceMode || !query.trim()) return null
+    return computeFileRenames(allFiles.map(f => f.path), query, replaceValue, {})
+  }, [renameEnabled, replaceMode, query, replaceValue, allFiles])
+
+  const handleRenameAll = useCallback(async () => {
+    if (!onRename || !renamePreview || renamePreview.renames.length === 0) return
+    setIsRenaming(true)
+    try {
+      await onRename(renamePreview.renames)
+      onClose()
+    } finally {
+      setIsRenaming(false)
+    }
+  }, [onRename, renamePreview, onClose])
 
   /* ── Code search (Web Worker) ──────────────────────────────────── */
 
@@ -439,7 +468,7 @@ export function GlobalSearchOverlay({
   /* ── Navigable items ──────────────────────────────────────────── */
 
   const itemCount = activeTab === 'files'
-    ? fileResults.length
+    ? (replaceMode ? 0 : fileResults.length) // rename preview is non-navigable
     : activeTab === 'code'
       ? codeSelectableItems.length
       : symbolResults.length
@@ -558,7 +587,43 @@ export function GlobalSearchOverlay({
               <SearchToggle active={excludeGenerated} onClick={() => setExcludeGenerated(v => !v)} icon={excludeGenerated ? FilterX : Filter} label={excludeGenerated ? 'Excluding generated files' : 'Including generated files'} />
             </div>
           )}
+          {/* Files tab: toggle replace-all rename */}
+          {renameEnabled && (
+            <div className="flex items-center gap-0.5 ml-1">
+              <SearchToggle active={replaceMode} onClick={() => setReplaceMode(v => !v)} icon={Replace} label="Replace file names" />
+            </div>
+          )}
         </div>
+
+        {/* Replace-all rename row (Files tab) */}
+        {renameEnabled && replaceMode && (
+          <div className="flex items-center gap-2 px-3 border-b border-foreground/6">
+            <Replace className="h-4 w-4 text-text-muted shrink-0" />
+            <input
+              value={replaceValue}
+              onChange={e => setReplaceValue(e.target.value)}
+              placeholder="Replace matched text in file names… (empty to remove)"
+              className="flex-1 h-9 bg-transparent text-sm text-text-primary placeholder:text-text-muted outline-hidden"
+              aria-label="Replacement text for file names"
+              onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleRenameAll() } }}
+            />
+            <button
+              onClick={handleRenameAll}
+              disabled={!renamePreview || renamePreview.renames.length === 0 || isRenaming}
+              className={cn(
+                "flex items-center gap-1 h-7 px-2 rounded-md text-xs font-medium transition-colors shrink-0",
+                (!renamePreview || renamePreview.renames.length === 0 || isRenaming)
+                  ? "text-text-muted/50 cursor-not-allowed"
+                  : "bg-foreground/10 text-text-primary hover:bg-foreground/15",
+              )}
+              title="Rename all matching files (session-only — not pushed to GitHub)"
+            >
+              {isRenaming
+                ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                : <>Rename {renamePreview?.renames.length ?? 0}</>}
+            </button>
+          </div>
+        )}
 
         {/* Symbol kind filter row */}
         {activeTab === 'symbols' && (
@@ -589,14 +654,18 @@ export function GlobalSearchOverlay({
         {/* Results */}
         <div ref={resultsRef} id="search-results" role="listbox" className="max-h-80 overflow-y-auto">
           {activeTab === 'files' && (
-            <FileResultsList
-              query={query}
-              results={fileResults}
-              totalFileCount={allFiles.length}
-              selectedIndex={selectedIndex}
-              onSelect={onSelect}
-              scrollRef={resultsRef}
-            />
+            renameEnabled && replaceMode ? (
+              <RenamePreviewList query={query} preview={renamePreview} />
+            ) : (
+              <FileResultsList
+                query={query}
+                results={fileResults}
+                totalFileCount={allFiles.length}
+                selectedIndex={selectedIndex}
+                onSelect={onSelect}
+                scrollRef={resultsRef}
+              />
+            )
           )}
           {activeTab === 'code' && (
             <CodeResultsList
@@ -710,6 +779,53 @@ function FileResultsList({
       </div>
       <div className="px-3 py-1.5 text-[10px] text-text-muted text-center border-t border-foreground/4">
         {results.length} file{results.length !== 1 ? 's' : ''} found
+      </div>
+    </>
+  )
+}
+
+function RenamePreviewList({
+  query,
+  preview,
+}: {
+  query: string
+  preview: { renames: FileRename[]; conflicts: FileRename[] } | null
+}) {
+  if (!query.trim()) {
+    return (
+      <div className="px-3 py-4 text-center text-xs text-text-muted">
+        Type a term to match file names, then enter a replacement above.
+      </div>
+    )
+  }
+  if (!preview || preview.renames.length === 0) {
+    return (
+      <div className="px-3 py-6 text-center text-xs text-text-muted">
+        <div>No file names to rename for &ldquo;{query}&rdquo;.</div>
+        {preview && preview.conflicts.length > 0 && (
+          <div className="mt-1 text-amber-400/80">
+            {preview.conflicts.length} skipped — target name already exists.
+          </div>
+        )}
+      </div>
+    )
+  }
+  return (
+    <>
+      <div className="py-1">
+        {preview.renames.map(r => (
+          <div key={r.from} className="flex items-center gap-2 px-3 py-1.5">
+            <Code2 className="h-3.5 w-3.5 text-text-muted shrink-0" />
+            <span className="text-[11px] text-text-muted line-through truncate flex-1 text-right">{r.from}</span>
+            <ArrowRight className="h-3 w-3 text-text-muted shrink-0" />
+            <span className="text-[11px] text-text-primary truncate flex-1">{r.to}</span>
+          </div>
+        ))}
+      </div>
+      <div className="px-3 py-1.5 text-[10px] text-text-muted text-center border-t border-foreground/4">
+        {preview.renames.length} file{preview.renames.length !== 1 ? 's' : ''} will be renamed
+        {preview.conflicts.length > 0 && ` · ${preview.conflicts.length} skipped (name collision)`}
+        {' · session-only'}
       </div>
     </>
   )

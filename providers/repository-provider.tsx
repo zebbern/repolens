@@ -8,7 +8,8 @@ import { parseGitHubUrl } from "@/lib/github/parser"
 import { buildFileTree } from "@/lib/github/fetcher"
 import { fetchRepoViaProxy, fetchTreeViaProxy, fetchFileViaProxy } from "@/lib/github/client"
 import type { CodeIndex } from "@/lib/code/code-index"
-import { createEmptyIndex, createEmptyIndexWithStore, batchIndexFiles, invalidateLinesCache } from '@/lib/code/code-index'
+import { createEmptyIndex, createEmptyIndexWithStore, batchIndexFiles, invalidateLinesCache, flattenFiles } from '@/lib/code/code-index'
+import { buildTreeFromFiles, type FileRename } from '@/lib/code/rename-files'
 import { IDBContentStore, LazyContentStore } from '@/lib/code/content-store'
 import type { FetchQueue } from '@/lib/code/fetch-queue'
 import { getCachedRepo } from "@/lib/cache/repo-cache"
@@ -50,6 +51,8 @@ export interface RepositoryActionsContextType {
   pinFile: (path: string, type?: 'file' | 'directory') => void
   unpinFile: (path: string) => void
   clearPins: () => void
+  /** Virtually rename files (session-local): re-keys the tree, index, content store, edits and pins. Returns the count applied. */
+  renameFiles: (renames: FileRename[]) => Promise<number>
   getPinnedContents: () => Promise<PinnedContentsResult>
   getTabCache: <T>(key: string) => T | undefined
   setTabCache: (key: string, value: unknown) => void
@@ -86,6 +89,10 @@ export function RepositoryProvider({ children }: { children: ReactNode }) {
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [codeIndex, setCodeIndex] = useState<CodeIndex>(createEmptyIndex())
+  // Mirror codeIndex in a ref so stable actions (renameFiles) can read the
+  // current content-store instance without depending on codeIndex identity.
+  const codeIndexRef = useRef(codeIndex)
+  codeIndexRef.current = codeIndex
   const [indexingProgress, setIndexingProgress] = useState<IndexingProgress>(DEFAULT_INDEXING_PROGRESS)
   const indexingAbortRef = useRef<AbortController | null>(null)
   const [searchState, setSearchState] = useState<SearchState>(DEFAULT_SEARCH_STATE)
@@ -336,6 +343,79 @@ export function RepositoryProvider({ children }: { children: ReactNode }) {
     setPinnedFiles(new Map())
   }, [])
 
+  // Virtual rename — session-local, never pushed to GitHub (like content replace).
+  // Re-keys the file tree, code index (files + meta), content store, modified-content
+  // overlay, parsed files and pins. Returns the number of renames applied.
+  const renameFiles = useCallback(async (renames: FileRename[]): Promise<number> => {
+    if (renames.length === 0) return 0
+    const renameMap = new Map(renames.map(r => [r.from, r.to]))
+    const basename = (p: string) => p.split('/').pop() || p
+
+    // 1. Rebuild the file tree (handles cross-directory moves).
+    setFiles(prev => {
+      const flat = flattenFiles(prev).map(f => {
+        const to = renameMap.get(f.path)
+        return to ? { ...f, path: to, name: basename(to) } : f
+      })
+      return buildTreeFromFiles(flat)
+    })
+
+    // 2. Re-key the code index (files + metadata).
+    setCodeIndex(prev => {
+      const newFiles = new Map(prev.files)
+      const newMeta = new Map(prev.meta)
+      for (const { from, to } of renames) {
+        const f = newFiles.get(from)
+        if (f) {
+          newFiles.delete(from)
+          newFiles.set(to, { ...f, path: to, name: basename(to) })
+        }
+        const m = newMeta.get(from)
+        if (m) {
+          newMeta.delete(from)
+          newMeta.set(to, m)
+        }
+      }
+      return { ...prev, files: newFiles, meta: newMeta }
+    })
+
+    // 3. Move cached content to the new keys (async for IDB-backed stores).
+    //    The content store instance is stable across index updates.
+    const store = codeIndexRef.current.contentStore
+    await Promise.all(renames.map(async ({ from, to }) => {
+      const content = store.getSync(from) ?? (await store.get(from))
+      if (content != null) store.put(to, content)
+      store.delete(from)
+    }))
+
+    // 4. Re-key exact-path maps (edits + parsed cache) and pins.
+    const rekeyExact = <T,>(prev: Map<string, T>): Map<string, T> => {
+      if (prev.size === 0) return prev
+      const next = new Map(prev)
+      for (const { from, to } of renames) {
+        if (next.has(from)) {
+          next.set(to, next.get(from)!)
+          next.delete(from)
+        }
+      }
+      return next
+    }
+    setModifiedContents(rekeyExact)
+    setParsedFiles(rekeyExact)
+    setPinnedFiles(prev => {
+      if (prev.size === 0) return prev
+      const next = new Map<string, PinnedFile>()
+      for (const [path, pin] of prev) {
+        const to = renameMap.get(path)
+        if (to) next.set(to, { ...pin, path: to })
+        else next.set(path, pin)
+      }
+      return next
+    })
+
+    return renames.length
+  }, [])
+
   const getTabCache = useCallback(<T,>(key: string): T | undefined => {
     return tabCacheRef.current[key] as T | undefined
   }, [])
@@ -435,11 +515,11 @@ export function RepositoryProvider({ children }: { children: ReactNode }) {
 
   const actionsValue = useMemo<RepositoryActionsContextType>(() => ({
     connectRepository, disconnectRepository, loadFileContent, getFileByPath,
-    updateCodeIndex, pinFile, unpinFile, clearPins, getPinnedContents,
+    updateCodeIndex, pinFile, unpinFile, clearPins, renameFiles, getPinnedContents,
     getTabCache, setTabCache, setSearchState, setModifiedContents, getFileContent,
   }), [
     connectRepository, disconnectRepository, loadFileContent, getFileByPath,
-    updateCodeIndex, pinFile, unpinFile, clearPins, getPinnedContents,
+    updateCodeIndex, pinFile, unpinFile, clearPins, renameFiles, getPinnedContents,
     getTabCache, setTabCache, setSearchState, setModifiedContents, getFileContent,
   ])
 

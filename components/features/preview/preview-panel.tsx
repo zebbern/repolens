@@ -61,7 +61,7 @@ const PRReviewPanel = lazy(() =>
 export function PreviewPanel({ className }: { className?: string }) {
   const { previewUrl, isGenerating: isLoading } = useApp()
   const { repo, files, codeIndex, isCacheHit } = useRepositoryData()
-  const { connectRepository, disconnectRepository } = useRepositoryActions()
+  const { connectRepository, disconnectRepository, renameFiles } = useRepositoryActions()
   const { isLoading: isConnecting, error: repoError, loadingStage, indexingProgress } = useRepositoryProgress()
   const { getValidProviders, isHydrated } = useAPIKeys()
   const hasApiKey = isHydrated && getValidProviders().length > 0
@@ -328,6 +328,7 @@ export function PreviewPanel({ className }: { className?: string }) {
           allFiles={allFilesForOverlay}
           onSelect={handleGlobalSearchSelect}
           onClose={() => setShowGlobalSearch(false)}
+          onRename={renameFiles}
         />
       )}
     </div>

@@ -50,16 +50,19 @@ describe('fetchWithConcurrency', () => {
     const processed: number[] = []
     const items = [1, 2, 3, 4, 5]
 
-    // Item 3 throws, but other items should still process
+    // Item 3 throws, but rejections are swallowed so the pool keeps its
+    // concurrency slots and the overall run still resolves (does not reject).
     await expect(
       fetchWithConcurrency(items, async (item) => {
         if (item === 3) throw new Error('Item 3 failed')
         processed.push(item)
       }, 2),
-    ).rejects.toThrow('Item 3 failed')
+    ).resolves.toBeUndefined()
 
-    // At least items before the failure should be processed
-    expect(processed.length).toBeGreaterThan(0)
+    // Every non-failing item is processed; the sole production caller (the
+    // indexing pipeline) handles per-item errors itself. Sort before comparing
+    // so the assertion is robust to concurrent completion order.
+    expect([...processed].sort((a, b) => a - b)).toEqual([1, 2, 4, 5])
   })
 
   it('processes items concurrently, not sequentially', async () => {

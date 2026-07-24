@@ -299,8 +299,9 @@ describe('MarkdownRenderer', () => {
         expect(screen.getByText('typescript')).toBeInTheDocument()
       })
 
-      // Line numbers container should be rendered with aria-hidden
-      const lineNumbersContainer = document.querySelector('[aria-hidden="true"]')
+      // Line numbers gutter is located by its test id (it still carries
+      // aria-hidden, but the generic selector collides with header icons).
+      const lineNumbersContainer = screen.getByTestId('line-numbers')
       expect(lineNumbersContainer).toBeInTheDocument()
       // Should contain numbers 1 through 5
       expect(lineNumbersContainer?.textContent).toContain('1')
@@ -315,9 +316,8 @@ describe('MarkdownRenderer', () => {
         expect(screen.getByText('typescript')).toBeInTheDocument()
       })
 
-      // No aria-hidden line numbers container should exist
-      const lineNumbersContainer = document.querySelector('[aria-hidden="true"]')
-      expect(lineNumbersContainer).not.toBeInTheDocument()
+      // No line numbers gutter should exist (located by its test id)
+      expect(screen.queryByTestId('line-numbers')).not.toBeInTheDocument()
     })
   })
 

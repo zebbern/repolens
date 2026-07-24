@@ -1,6 +1,6 @@
 import { generateTreemap } from '@/lib/diagrams/generators/treemap'
 import { createMockCodeIndex, createMockFileTree } from '@/lib/diagrams/__fixtures__/mock-analysis'
-import type { CodeIndex } from '@/lib/code/code-index'
+import { createEmptyIndex, type CodeIndex } from '@/lib/code/code-index'
 import type { FileNode } from '@/types/repository'
 
 describe('generateTreemap', () => {
@@ -40,12 +40,7 @@ describe('generateTreemap', () => {
   })
 
   it('skips files with zero lines', () => {
-    const emptyCodeIndex: CodeIndex = {
-      files: new Map(),
-      totalFiles: 0,
-      totalLines: 0,
-      isIndexing: false,
-    }
+    const emptyCodeIndex: CodeIndex = createEmptyIndex()
     const files: FileNode[] = [
       { name: 'empty.ts', path: 'empty.ts', type: 'file' },
     ]

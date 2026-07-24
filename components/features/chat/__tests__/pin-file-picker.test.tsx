@@ -3,7 +3,7 @@ import { render, screen, fireEvent } from '@testing-library/react'
 import React from 'react'
 import { PinFilePicker } from '../pin-file-picker'
 import type { PinnedFile } from '@/types/types'
-import type { CodeIndex } from '@/lib/code/code-index'
+import { createEmptyIndex, type CodeIndex } from '@/lib/code/code-index'
 import { PINNED_CONTEXT_CONFIG } from '@/config/constants'
 
 // cmdk uses ResizeObserver and Element.scrollIntoView — polyfill for jsdom
@@ -42,10 +42,10 @@ function buildMockCodeIndex(
     })
   }
   return {
+    ...createEmptyIndex(),
     files: map,
     totalFiles: map.size,
     totalLines: Array.from(map.values()).reduce((s, f) => s + f.lineCount, 0),
-    isIndexing: false,
   }
 }
 

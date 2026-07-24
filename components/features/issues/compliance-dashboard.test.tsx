@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import type { CodeIndex } from '@/lib/code/code-index'
+import { createEmptyIndex, type CodeIndex } from '@/lib/code/code-index'
 import type { ScanResults } from '@/lib/code/scanner/types'
 import type { ComplianceReport } from '@/lib/code/scanner'
 
@@ -59,12 +59,7 @@ vi.mock('./cve-section', () => ({
 import { ComplianceDashboard } from './compliance-dashboard'
 
 function createCodeIndex(): CodeIndex {
-  return {
-    files: new Map(),
-    totalFiles: 0,
-    totalLines: 0,
-    isIndexing: false,
-  }
+  return createEmptyIndex()
 }
 
 function createScanResults(): ScanResults {

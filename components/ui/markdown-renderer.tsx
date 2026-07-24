@@ -153,6 +153,7 @@ function LineNumbers({ count }: { count: number }) {
     <div
       className="select-none text-right pr-3 border-r border-foreground/6 text-text-muted text-xs font-mono leading-[1.7142857] pt-4 pb-4 pl-3 shrink-0"
       aria-hidden="true"
+      data-testid="line-numbers"
     >
       {Array.from({ length: count }, (_, i) => (
         <div key={i}>{i + 1}</div>

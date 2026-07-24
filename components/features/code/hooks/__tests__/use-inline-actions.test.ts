@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { renderHook, act } from '@testing-library/react'
 import type { CodeIndex, SearchResult } from '@/lib/code/code-index'
+import { InMemoryContentStore } from '@/lib/code/content-store'
 import type { ExtractedSymbol } from '../use-symbol-extraction'
 import type { SymbolRange, InlineActionType } from '../../types'
 
@@ -26,6 +27,8 @@ function createMockCodeIndex(): CodeIndex {
     totalFiles: 0,
     totalLines: 0,
     isIndexing: false,
+    meta: new Map(),
+    contentStore: new InMemoryContentStore(),
   }
 }
 

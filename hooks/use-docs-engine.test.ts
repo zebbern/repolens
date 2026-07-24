@@ -137,7 +137,7 @@ describe('useDocsEngine', () => {
     }
 
     act(() => {
-      result.current.handleGenerate(preset, null, '', undefined, false)
+      result.current.handleGenerate(preset, null, '', undefined, [])
     })
 
     expect(mockSetMessages).toHaveBeenCalledWith([])
@@ -166,7 +166,7 @@ describe('useDocsEngine', () => {
     }
 
     act(() => {
-      result.current.handleGenerate(preset, null, '', undefined, false)
+      result.current.handleGenerate(preset, null, '', undefined, [])
     })
 
     expect(mockSetMessages).not.toHaveBeenCalled()
@@ -289,7 +289,7 @@ describe('useDocsEngine', () => {
 
     // Start generation (schedules a timer) but do NOT advance timers
     act(() => {
-      result.current.handleGenerate(preset, null, '', undefined, false)
+      result.current.handleGenerate(preset, null, '', undefined, [])
     })
 
     expect(mockSendMessage).not.toHaveBeenCalled()
@@ -424,7 +424,7 @@ describe('useDocsEngine', () => {
     }
 
     act(() => {
-      result.current.handleGenerate(preset, null, '', undefined, false)
+      result.current.handleGenerate(preset, null, '', undefined, [])
     })
 
     // Advance timer to fire the send
@@ -466,7 +466,7 @@ describe('useDocsEngine', () => {
     }
 
     act(() => {
-      result.current.handleGenerate(preset, 'src/utils/helpers.ts', '', undefined, false)
+      result.current.handleGenerate(preset, 'src/utils/helpers.ts', '', undefined, [])
     })
 
     act(() => {
@@ -507,7 +507,7 @@ describe('useDocsEngine', () => {
     const longPrompt = 'A'.repeat(60)
 
     act(() => {
-      result.current.handleGenerate(preset, null, longPrompt, undefined, false)
+      result.current.handleGenerate(preset, null, longPrompt, undefined, [])
     })
 
     act(() => {

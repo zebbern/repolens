@@ -5,6 +5,7 @@ import {
   exportSummaryClipboard,
 } from './markdown-export'
 import type { GitHubRepo } from '@/types/repository'
+import { createEmptyIndex } from '@/lib/code/code-index'
 import type { CodeIndex } from '@/lib/code/code-index'
 import type { FullAnalysis } from '@/lib/code/import-parser'
 import type { ScanResults, CodeIssue } from '@/lib/code/issue-scanner'
@@ -36,10 +37,9 @@ function createRepo(overrides: Partial<GitHubRepo> = {}): GitHubRepo {
 
 function createCodeIndex(overrides: Partial<CodeIndex> = {}): CodeIndex {
   return {
-    files: new Map(),
+    ...createEmptyIndex(),
     totalFiles: 50,
     totalLines: 3000,
-    isIndexing: false,
     ...overrides,
   }
 }

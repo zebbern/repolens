@@ -9,7 +9,7 @@ import {
   deserializeFullAnalysis,
 } from '../serialization'
 import type { ScanResults } from '../types'
-import type { FullAnalysis } from '../../parser/types'
+import type { FullAnalysis, FileAnalysis } from '../../parser/types'
 
 function buildTestIndex() {
   let index = createEmptyIndex()
@@ -53,14 +53,16 @@ function buildScanResults(): ScanResults {
     securityGrade: 'D',
     qualityGrade: 'A',
     issuesPerKloc: 3.5,
+    isPartialScan: false,
+    suppressionCount: 0,
   }
 }
 
 function buildFullAnalysis(): FullAnalysis {
   return {
-    files: new Map([
-      ['src/app.ts', { imports: ['./utils'], exports: ['default'], symbols: [], lines: 2, language: 'typescript' }],
-      ['src/utils.ts', { imports: [], exports: ['add'], symbols: ['add'], lines: 1, language: 'typescript' }],
+    files: new Map<string, FileAnalysis>([
+      ['src/app.ts', { path: 'src/app.ts', imports: [{ source: './utils', resolvedPath: 'src/utils.ts', specifiers: [], isExternal: false, isDefault: true }], exports: [{ name: 'default', kind: 'variable', isDefault: true }], types: [], classes: [], jsxComponents: [], language: 'typescript' }],
+      ['src/utils.ts', { path: 'src/utils.ts', imports: [], exports: [{ name: 'add', kind: 'function', isDefault: false }], types: [], classes: [], jsxComponents: [], language: 'typescript' }],
     ]),
     graph: {
       edges: new Map([['src/app.ts', new Set(['src/utils.ts'])]]),

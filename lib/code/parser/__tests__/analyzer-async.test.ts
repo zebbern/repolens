@@ -1,5 +1,5 @@
 import { analyzeCodebaseAsync } from '../analyzer'
-import type { CodeIndex } from '../../code-index'
+import { createEmptyIndex, type CodeIndex } from '../../code-index'
 import type { ExtractedType, ExtractedClass } from '../types'
 
 // ---------------------------------------------------------------------------
@@ -37,7 +37,7 @@ function makeCodeIndex(
       lineCount: lines.length,
     })
   }
-  return { files: map, totalFiles: map.size, totalLines: 0, isIndexing: false }
+  return { ...createEmptyIndex(), files: map, totalFiles: map.size, totalLines: 0 }
 }
 
 beforeEach(() => {

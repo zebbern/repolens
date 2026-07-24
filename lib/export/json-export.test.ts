@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest'
 import { buildExportableAnalysis, exportToJson } from './json-export'
 import type { GitHubRepo } from '@/types/repository'
+import { createEmptyIndex } from '@/lib/code/code-index'
 import type { CodeIndex } from '@/lib/code/code-index'
 import type { FullAnalysis } from '@/lib/code/import-parser'
 import type { ScanResults } from '@/lib/code/issue-scanner'
@@ -31,10 +32,9 @@ function createRepo(overrides: Partial<GitHubRepo> = {}): GitHubRepo {
 
 function createCodeIndex(overrides: Partial<CodeIndex> = {}): CodeIndex {
   return {
-    files: new Map(),
+    ...createEmptyIndex(),
     totalFiles: 10,
     totalLines: 500,
-    isIndexing: false,
     ...overrides,
   }
 }
@@ -104,6 +104,11 @@ function createScanResults(overrides: Partial<ScanResults> = {}): ScanResults {
     rulesEvaluated: 30,
     scannedFiles: 10,
     scannedAt: new Date('2025-01-15T12:00:00Z'),
+    securityGrade: 'A',
+    qualityGrade: 'A',
+    issuesPerKloc: 0,
+    isPartialScan: false,
+    suppressionCount: 0,
     ...overrides,
   }
 }

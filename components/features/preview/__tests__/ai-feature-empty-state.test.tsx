@@ -10,14 +10,14 @@ describe('AIFeatureEmptyState', () => {
 
   describe('docs tab', () => {
     it('renders title and description for docs', () => {
-      render(<AIFeatureEmptyState tabId="docs" />)
+      render(<AIFeatureEmptyState tabId="docs" onOpenSettings={vi.fn()} />)
 
       expect(screen.getByText('AI Documentation Generator')).toBeInTheDocument()
       expect(screen.getByText(/Generate professional documentation/)).toBeInTheDocument()
     })
 
     it('shows all feature bullet points for docs', () => {
-      render(<AIFeatureEmptyState tabId="docs" />)
+      render(<AIFeatureEmptyState tabId="docs" onOpenSettings={vi.fn()} />)
 
       expect(screen.getByText(/5 documentation templates/)).toBeInTheDocument()
       expect(screen.getByText(/Real-time streaming generation/)).toBeInTheDocument()
@@ -26,7 +26,7 @@ describe('AIFeatureEmptyState', () => {
     })
 
     it('renders the CTA button', () => {
-      render(<AIFeatureEmptyState tabId="docs" />)
+      render(<AIFeatureEmptyState tabId="docs" onOpenSettings={vi.fn()} />)
 
       expect(screen.getByRole('button', { name: /set up api key/i })).toBeInTheDocument()
     })
@@ -34,14 +34,14 @@ describe('AIFeatureEmptyState', () => {
 
   describe('diagram tab', () => {
     it('renders title and description for diagram', () => {
-      render(<AIFeatureEmptyState tabId="diagram" />)
+      render(<AIFeatureEmptyState tabId="diagram" onOpenSettings={vi.fn()} />)
 
       expect(screen.getByText('AI Diagram Generator')).toBeInTheDocument()
       expect(screen.getByText(/Create architecture diagrams/)).toBeInTheDocument()
     })
 
     it('shows all feature bullet points for diagram', () => {
-      render(<AIFeatureEmptyState tabId="diagram" />)
+      render(<AIFeatureEmptyState tabId="diagram" onOpenSettings={vi.fn()} />)
 
       expect(screen.getByText(/5 diagram types/)).toBeInTheDocument()
       expect(screen.getByText(/Interactive Mermaid rendering/)).toBeInTheDocument()
@@ -52,14 +52,14 @@ describe('AIFeatureEmptyState', () => {
 
   describe('changelog tab', () => {
     it('renders title and description for changelog', () => {
-      render(<AIFeatureEmptyState tabId="changelog" />)
+      render(<AIFeatureEmptyState tabId="changelog" onOpenSettings={vi.fn()} />)
 
       expect(screen.getByText('AI Changelog Generator')).toBeInTheDocument()
       expect(screen.getByText(/Generate changelogs from Git history/)).toBeInTheDocument()
     })
 
     it('shows all feature bullet points for changelog', () => {
-      render(<AIFeatureEmptyState tabId="changelog" />)
+      render(<AIFeatureEmptyState tabId="changelog" onOpenSettings={vi.fn()} />)
 
       expect(screen.getByText(/4 presets/)).toBeInTheDocument()
       expect(screen.getByText(/Tag and branch-based/)).toBeInTheDocument()
@@ -70,7 +70,7 @@ describe('AIFeatureEmptyState', () => {
 
   describe('unknown tab', () => {
     it('returns null for an unknown tabId', () => {
-      const { container } = render(<AIFeatureEmptyState tabId="unknown-tab" />)
+      const { container } = render(<AIFeatureEmptyState tabId="unknown-tab" onOpenSettings={vi.fn()} />)
       expect(container.innerHTML).toBe('')
     })
   })
@@ -86,7 +86,7 @@ describe('AIFeatureEmptyState', () => {
     })
 
     it('shows helper text below the CTA button', () => {
-      render(<AIFeatureEmptyState tabId="docs" />)
+      render(<AIFeatureEmptyState tabId="docs" onOpenSettings={vi.fn()} />)
 
       expect(
         screen.getByText(/Add your OpenAI, Anthropic, or Google API key/)

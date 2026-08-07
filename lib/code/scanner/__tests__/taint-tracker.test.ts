@@ -243,6 +243,141 @@ function handler(req, res) {
   })
 })
 
+describe('trackTaint — sink call text must not be read as its own sanitizer', () => {
+  // Regression: `db.query(` contains `query(`, which the express-validator
+  // sanitizer matches. Every inline SQL-injection flow was stamped sanitized
+  // and dropped, while the identical code via a local variable was reported.
+
+  it('detects req.body inlined directly into db.query() with no intermediate variable', () => {
+    const code = `
+function handler(req, res) {
+  db.query("SELECT * FROM users WHERE id = " + req.body.id);
+}
+`
+    const flows = getFlows(code)
+    const sqlFlows = flows.filter(f => f.sink.type === 'sql-injection')
+    expect(sqlFlows).toHaveLength(1)
+    expect(sqlFlows[0].sanitized).toBe(false)
+    expect(sqlFlows[0].source.name).toBe('req.body')
+    const sqlIssues = taintFlowsToIssues(flows).filter(i => i.ruleId === 'taint-sql-injection')
+    expect(sqlIssues).toHaveLength(1)
+    expect(sqlIssues[0].severity).toBe('critical')
+    expect(sqlIssues[0].cwe).toBe('CWE-89')
+  })
+
+  it('detects req.params inlined directly into pool.query()', () => {
+    const code = `
+function handler(req, res) {
+  pool.query("SELECT * FROM items WHERE id = " + req.params.x);
+}
+`
+    const flows = getFlows(code)
+    const sqlFlows = flows.filter(f => f.sink.type === 'sql-injection')
+    expect(sqlFlows).toHaveLength(1)
+    expect(sqlFlows[0].sanitized).toBe(false)
+    expect(sqlFlows[0].source.name).toBe('req.params')
+  })
+
+  it('detects req.query inlined directly into knex.raw()', () => {
+    const code = `
+function handler(req, res) {
+  knex.raw("SELECT " + req.query.q);
+}
+`
+    const flows = getFlows(code)
+    const sqlFlows = flows.filter(f => f.sink.type === 'sql-injection')
+    expect(sqlFlows).toHaveLength(1)
+    expect(sqlFlows[0].sanitized).toBe(false)
+    expect(sqlFlows[0].source.name).toBe('req.query')
+  })
+
+  it('still detects an inlined source in client.execute()', () => {
+    const code = `
+function handler(req, res) {
+  client.execute("SELECT " + req.params.x);
+}
+`
+    const flows = getFlows(code)
+    const sqlFlows = flows.filter(f => f.sink.type === 'sql-injection')
+    expect(sqlFlows).toHaveLength(1)
+    expect(sqlFlows[0].sanitized).toBe(false)
+  })
+
+  // --- Negative regressions: genuinely safe parameterized SQL stays green ---
+  // These pin the trap. The first one PASSES today only because the
+  // express-validator bug suppresses it; the `sanitizer?.name` assertion is
+  // what makes it fail today and fail again if the overlap fix lands without
+  // the widened parameterized pattern.
+
+  it('treats a `?` placeholder query as sanitized BY the parameterized-query sanitizer', () => {
+    const code = `
+function handler(req, res) {
+  db.query("SELECT * FROM users WHERE id = ?", [req.body.id]);
+}
+`
+    const flows = getFlows(code)
+    const sqlFlows = flows.filter(f => f.sink.type === 'sql-injection')
+    expect(sqlFlows).toHaveLength(1)
+    expect(sqlFlows[0].sanitized).toBe(true)
+    expect(sqlFlows[0].sanitizer?.name).toBe('parameterized query')
+    expect(taintFlowsToIssues(flows)).toHaveLength(0)
+  })
+
+  it('treats a single-quoted `?` placeholder query as sanitized by the parameterized-query sanitizer', () => {
+    const code = `
+function handler(req, res) {
+  db.query('SELECT * FROM u WHERE id = ?', [req.params.id]);
+}
+`
+    const flows = getFlows(code)
+    const sqlFlows = flows.filter(f => f.sink.type === 'sql-injection')
+    expect(sqlFlows).toHaveLength(1)
+    expect(sqlFlows[0].sanitized).toBe(true)
+    expect(sqlFlows[0].sanitizer?.name).toBe('parameterized query')
+    expect(taintFlowsToIssues(flows)).toHaveLength(0)
+  })
+
+  it('treats a multi-`?` placeholder query as sanitized by the parameterized-query sanitizer', () => {
+    const code = `
+function handler(req, res) {
+  connection.query("INSERT INTO t (a,b) VALUES (?, ?)", [req.body.a, req.body.b]);
+}
+`
+    const flows = getFlows(code)
+    const sqlFlows = flows.filter(f => f.sink.type === 'sql-injection')
+    expect(sqlFlows).toHaveLength(1)
+    expect(sqlFlows[0].sanitized).toBe(true)
+    expect(sqlFlows[0].sanitizer?.name).toBe('parameterized query')
+    expect(taintFlowsToIssues(flows)).toHaveLength(0)
+  })
+
+  it('treats a `$1` placeholder query as sanitized by the parameterized-query sanitizer', () => {
+    const code = `
+function handler(req, res) {
+  pool.query("SELECT * FROM u WHERE id = $1", [req.body.id]);
+}
+`
+    const flows = getFlows(code)
+    const sqlFlows = flows.filter(f => f.sink.type === 'sql-injection')
+    expect(sqlFlows).toHaveLength(1)
+    expect(sqlFlows[0].sanitized).toBe(true)
+    expect(sqlFlows[0].sanitizer?.name).toBe('parameterized query')
+    expect(taintFlowsToIssues(flows)).toHaveLength(0)
+  })
+
+  it('does not mistake a ternary `?` for a query placeholder', () => {
+    const code = `
+function handler(req, res) {
+  db.query(cond ? "a" : "b", [req.body.id]);
+}
+`
+    const flows = getFlows(code)
+    const sqlFlows = flows.filter(f => f.sink.type === 'sql-injection')
+    expect(sqlFlows).toHaveLength(1)
+    expect(sqlFlows[0].sanitized).toBe(false)
+  })
+})
+
 describe('taintFlowsToIssues', () => {
   it('produces correct CodeIssue shape from unsanitized flows', () => {
     const flow: TaintFlow = {

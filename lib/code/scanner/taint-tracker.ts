@@ -133,7 +133,10 @@ export const DEFAULT_SANITIZERS: TaintSanitizer[] = [
   { type: 'sanitization', name: 'xss()', pattern: /\bxss\s*\(/ },
   { type: 'path-sanitization', name: 'path.basename()', pattern: /\bpath\.basename\s*\(/ },
   { type: 'path-sanitization', name: 'path.normalize()', pattern: /\bpath\.normalize\s*\(/ },
-  { type: 'parameterized', name: 'parameterized query', pattern: /\?\s*,|\$\d+/ },
+  // The `?` placeholder is the last char INSIDE the SQL string literal, so the
+  // next char is the closing quote, not the comma: `db.query("... = ?", [id])`.
+  // Allow one optional quote/backtick between the placeholder and the comma.
+  { type: 'parameterized', name: 'parameterized query', pattern: /\?\s*['"`]?\s*,|\$\d+/ },
   // HTML encoding
   { type: 'encoding', name: 'he.encode', pattern: /\bhe\.(encode|escape)\s*\(/ },
   // Schema validation (treats validated data as sanitized)
@@ -184,6 +187,58 @@ function matchesSanitizer(text: string, sanitizers: TaintSanitizer[]): TaintSani
 
 function matchesSink(text: string, sinks: TaintSink[]): TaintSink | undefined {
   return sinks.find(s => s.pattern.test(text))
+}
+
+interface MatchRange {
+  start: number
+  end: number
+}
+
+/** Exec a catalog pattern without letting a caller-supplied /g or /y regex carry lastIndex state. */
+function execPattern(pattern: RegExp, text: string): RegExpExecArray | null {
+  if (pattern.global || pattern.sticky) pattern.lastIndex = 0
+  return pattern.exec(text)
+}
+
+/** Like matchesSink, but also reports where in `text` the sink pattern matched. */
+function matchSinkRange(
+  text: string,
+  sinks: TaintSink[],
+): { sink: TaintSink; range: MatchRange } | undefined {
+  for (const s of sinks) {
+    const m = execPattern(s.pattern, text)
+    if (m) return { sink: s, range: { start: m.index, end: m.index + m[0].length } }
+  }
+  return undefined
+}
+
+/**
+ * Find the first sanitizer with a match that does NOT overlap `exclude`.
+ *
+ * A sink's own call text must never be read as its own sanitizer: `db.query(`
+ * contains `query(`, which the express-validator sanitizer pattern matches, so
+ * every inline SQL-injection flow was silently stamped as sanitized.
+ */
+function matchesSanitizerOutside(
+  text: string,
+  sanitizers: TaintSanitizer[],
+  exclude: MatchRange,
+): TaintSanitizer | undefined {
+  for (const s of sanitizers) {
+    const flags = s.pattern.flags.includes('g') ? s.pattern.flags : `${s.pattern.flags}g`
+    const scan = new RegExp(s.pattern.source, flags)
+    let m: RegExpExecArray | null
+    while ((m = scan.exec(text)) !== null) {
+      if (m[0].length === 0) {
+        scan.lastIndex++
+        continue
+      }
+      const start = m.index
+      const end = start + m[0].length
+      if (end <= exclude.start || start >= exclude.end) return s
+    }
+  }
+  return undefined
 }
 
 /** Extract identifier name from various node types. */
@@ -494,8 +549,9 @@ function checkCallSink(
   sources: TaintSource[],
 ): void {
   const callText = nodeToSource(node, getFileLines(file))
-  const sink = matchesSink(callText, sinks)
-  if (!sink) return
+  const sinkMatch = matchSinkRange(callText, sinks)
+  if (!sinkMatch) return
+  const { sink, range: sinkRange } = sinkMatch
 
   for (const arg of node.arguments) {
     if (!t.isExpression(arg)) continue
@@ -505,7 +561,7 @@ function checkCallSink(
     // Direct source in argument
     const directSource = matchesSource(argText, sources)
     if (directSource) {
-      const sanitizer = matchesSanitizer(callText, sanitizers)
+      const sanitizer = matchesSanitizerOutside(callText, sanitizers, sinkRange)
       flows.push({
         source: directSource,
         sink,

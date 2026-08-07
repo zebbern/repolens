@@ -1,7 +1,6 @@
-// Web Worker entry — runs scanIssues off the main thread.
+// Web Worker entry — runs scanIssuesAsync off the main thread.
 
-import { scanIssues, computeScanSummary } from './scanner'
-import { scanWithTreeSitter } from './tree-sitter-scanner'
+import { scanIssuesAsync } from './scanner'
 import {
   deserializeCodeIndex,
   deserializeFullAnalysis,
@@ -30,23 +29,14 @@ self.addEventListener('message', async (event: MessageEvent<ScanWorkerRequest>) 
     }
 
     const analysis = serializedAnalysis ? deserializeFullAnalysis(serializedAnalysis) : null
-    const results = scanIssues(codeIndex, analysis, changedFiles)
-
-    // Run async Tree-sitter analysis for multi-language support
-    try {
-      const treeSitterIssues = await scanWithTreeSitter(codeIndex.files)
-      if (treeSitterIssues.length > 0) {
-        const existingIds = new Set(results.issues.map(i => i.id))
-        for (const issue of treeSitterIssues) {
-          if (!existingIds.has(issue.id)) {
-            results.issues.push(issue)
-          }
-        }
-        // Recompute summary counts
-        results.summary = computeScanSummary(results.issues)
-      }
-    } catch (err) {
-      console.warn('[scanner.worker] Tree-sitter analysis failed:', err)
+    // scanIssuesAsync owns the whole pipeline: SCANNER_EXCLUDE_PATTERNS filtering,
+    // the Tree-sitter merge (phase 5b), the analysis cross-reference, the severity
+    // sort, per-issue risk scoring and the health/security/quality grades.
+    // It returns null only when an `isStale` callback aborts the scan; this worker
+    // never passes one, so null here means the contract changed.
+    const results = await scanIssuesAsync(codeIndex, analysis, { changedFiles })
+    if (!results) {
+      throw new Error('scanIssuesAsync returned null without an isStale callback')
     }
 
     const response: ScanWorkerResponse = {

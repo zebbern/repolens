@@ -120,6 +120,25 @@ describe('GET /api/github/branches', () => {
     expect(res.headers.get('Vary')).toBe('X-GitHub-Token, Cookie')
   })
 
+  it('handles access-token resolution failure without running the route handler', async () => {
+    mockGetAccessToken.mockRejectedValue(new Error('AUTH_SECRET is not configured'))
+
+    const res = await GET(createRequest({ owner: 'facebook', name: 'react' }))
+
+    expect(mockApplyRateLimit).not.toHaveBeenCalled()
+    expect(mockFetchBranches).not.toHaveBeenCalled()
+    expect(res.status).toBe(500)
+    await expect(res.json()).resolves.toEqual({
+      error: {
+        code: 'AUTH_RESOLUTION_ERROR',
+        message: 'Unable to resolve GitHub authentication',
+      },
+    })
+    expect(res.headers.get('Cache-Control')).toBe('private, no-store, max-age=0')
+    expect(res.headers.get('CDN-Cache-Control')).toBe('no-store')
+    expect(res.headers.get('Vary')).toBe('X-GitHub-Token, Cookie')
+  })
+
   it('returns 400 when owner is missing', async () => {
     const req = createRequest({ name: 'react' })
     const res = await GET(req)

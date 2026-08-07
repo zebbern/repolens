@@ -1,5 +1,6 @@
 import type { NextRequest } from 'next/server'
 
+import { apiError } from '@/lib/api/error'
 import { getAccessToken } from '@/lib/auth/token'
 
 const PRIVATE_CACHE_CONTROL = 'private, no-store, max-age=0'
@@ -12,6 +13,31 @@ type GitHubGetHandler<TArgs extends unknown[]> = (
   ...args: TArgs
 ) => Promise<Response>
 
+function getPrivateGitHubCacheHeaders(): Record<string, string> {
+  return {
+    'Cache-Control': PRIVATE_CACHE_CONTROL,
+    'CDN-Cache-Control': 'no-store',
+    Vary: GITHUB_CACHE_VARY,
+  }
+}
+
+function applyGitHubCacheHeaders(
+  response: Response,
+  cacheHeaders: Record<string, string>,
+): Response {
+  for (const [name, value] of Object.entries(cacheHeaders)) {
+    if (name === 'Vary') {
+      const existingVary = response.headers.get(name)
+      response.headers.set(name, existingVary ? `${existingVary}, ${value}` : value)
+      continue
+    }
+
+    response.headers.set(name, value)
+  }
+
+  return response
+}
+
 /**
  * Cache policy for GitHub proxy responses.
  *
@@ -22,11 +48,7 @@ export function getGitHubCacheHeaders(
   cdnCacheControl?: string,
 ): Record<string, string> {
   if (accessToken) {
-    return {
-      'Cache-Control': PRIVATE_CACHE_CONTROL,
-      'CDN-Cache-Control': 'no-store',
-      Vary: GITHUB_CACHE_VARY,
-    }
+    return getPrivateGitHubCacheHeaders()
   }
 
   return {
@@ -46,21 +68,21 @@ export function withGitHubCachePolicy<TArgs extends unknown[]>(
   cdnCacheControl?: string,
 ) {
   return async (request: NextRequest, ...args: TArgs): Promise<Response> => {
-    const accessToken = await getAccessToken(request)
-    const response = await handler(request, accessToken, ...args)
-
-    for (const [name, value] of Object.entries(
-      getGitHubCacheHeaders(accessToken, cdnCacheControl),
-    )) {
-      if (name === 'Vary') {
-        const existingVary = response.headers.get(name)
-        response.headers.set(name, existingVary ? `${existingVary}, ${value}` : value)
-        continue
-      }
-
-      response.headers.set(name, value)
+    let accessToken: string | undefined
+    try {
+      accessToken = await getAccessToken(request)
+    } catch {
+      return applyGitHubCacheHeaders(
+        apiError('AUTH_RESOLUTION_ERROR', 'Unable to resolve GitHub authentication', 500),
+        getPrivateGitHubCacheHeaders(),
+      )
     }
 
-    return response
+    const response = await handler(request, accessToken, ...args)
+
+    return applyGitHubCacheHeaders(
+      response,
+      getGitHubCacheHeaders(accessToken, cdnCacheControl),
+    )
   }
 }

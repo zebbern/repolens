@@ -69,6 +69,26 @@ describe('getGitHubCacheHeaders', () => {
     expect(response.headers.get('Vary')).toBe('Accept-Encoding, X-GitHub-Token, Cookie')
   })
 
+  it('handles access-token resolution failures without entering the route handler', async () => {
+    mockGetAccessToken.mockRejectedValue(new Error('AUTH_SECRET is not configured'))
+    const handler = vi.fn(async () => Response.json({ unexpected: true }))
+    const GET = withGitHubCachePolicy(handler)
+
+    const response = await GET({} as Parameters<typeof GET>[0])
+
+    expect(handler).not.toHaveBeenCalled()
+    expect(response.status).toBe(500)
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: 'AUTH_RESOLUTION_ERROR',
+        message: 'Unable to resolve GitHub authentication',
+      },
+    })
+    expect(response.headers.get('Cache-Control')).toBe('private, no-store, max-age=0')
+    expect(response.headers.get('CDN-Cache-Control')).toBe('no-store')
+    expect(response.headers.get('Vary')).toBe('X-GitHub-Token, Cookie')
+  })
+
   it('uses the shared wrapper for every token-aware GitHub GET handler', () => {
     const tokenAwareGetRoutes = findRouteFiles(GITHUB_ROUTES_DIRECTORY)
       .filter((routePath) => /export (?:const GET|async function GET)/.test(readFileSync(routePath, 'utf8')))

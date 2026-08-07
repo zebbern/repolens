@@ -48,7 +48,10 @@ vi.mock('@/providers/github-token-provider', () => ({
 }))
 
 import { RepositoryProvider, useRepository, useRepositoryData, useRepositoryActions, useRepositoryProgress } from '../repository-provider'
-import { fetchFileViaProxy } from '@/lib/github/client'
+import { fetchFileViaProxy, fetchRepoViaProxy, fetchTreeViaProxy } from '@/lib/github/client'
+import { buildFileTree } from '@/lib/github/fetcher'
+import { analyzeCodebase, type FullAnalysis } from '@/lib/code/import-parser'
+import { LazyContentStore } from '@/lib/code/content-store'
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -197,5 +200,73 @@ describe('RepositoryProvider memoization', () => {
     expect(result.current).toHaveProperty('contentLoadingStats')
     expect(result.current).toHaveProperty('pinnedFiles')
     expect(result.current).toHaveProperty('isPinned')
+  })
+})
+
+describe('B5 lazy-tier analysis gate', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('does not invoke analyzeCodebase when codeIndex.contentStore is a LazyContentStore', async () => {
+    const mockFetchRepo = vi.mocked(fetchRepoViaProxy)
+    const mockFetchTree = vi.mocked(fetchTreeViaProxy)
+    const mockBuildFileTree = vi.mocked(buildFileTree)
+    const mockAnalyze = vi.mocked(analyzeCodebase)
+
+    const emptyAnalysis: FullAnalysis = {
+      files: new Map(),
+      graph: { edges: new Map(), reverseEdges: new Map(), circular: [], externalDeps: new Map() },
+      topology: { entryPoints: [], hubs: [], orphans: [], leafNodes: [], connectors: [], clusters: [], depthMap: new Map(), maxDepth: 0 },
+      detectedFramework: null,
+      primaryLanguage: 'typescript',
+    }
+    // If the guard regresses and analyzeCodebase IS invoked, make sure it resolves
+    // like the real (Promise-returning) implementation, so the test fails on the
+    // assertion below rather than on an unrelated "(...).then is not a function".
+    mockAnalyze.mockResolvedValueOnce(emptyAnalysis)
+
+    mockFetchRepo.mockResolvedValue({
+      owner: 'acme',
+      name: 'bigrepo',
+      fullName: 'acme/bigrepo',
+      description: null,
+      defaultBranch: 'main',
+      stars: 0,
+      forks: 0,
+      language: null,
+      topics: [],
+      isPrivate: false,
+      url: 'https://github.com/acme/bigrepo',
+      size: 300_000, // KB — well above LAZY_CONTENT_THRESHOLD_KB (250,000)
+      openIssuesCount: 0,
+      pushedAt: '2024-01-01T00:00:00Z',
+      license: null,
+    })
+    mockFetchTree.mockResolvedValue({ sha: 'sha-lazy-1', tree: [], truncated: false })
+    mockBuildFileTree.mockReturnValue([
+      { name: 'a.ts', path: 'a.ts', type: 'file', size: 10 },
+    ])
+
+    const { result } = renderHook(() => useRepository(), {
+      wrapper: createWrapper(),
+    })
+
+    await act(async () => {
+      await result.current.connectRepository('https://github.com/acme/bigrepo')
+    })
+
+    // Sanity: confirm the lazy tier was actually reached (not IDB or in-memory tier)
+    expect(result.current.codeIndex.contentStore).toBeInstanceOf(LazyContentStore)
+    expect(result.current.indexingProgress.isComplete).toBe(true)
+    expect(result.current.codeIndex.totalFiles).toBeGreaterThan(0)
+
+    // Let the B5 effect's setTimeout(50) elapse
+    await act(async () => {
+      await new Promise(resolve => setTimeout(resolve, 100))
+    })
+
+    expect(mockAnalyze).not.toHaveBeenCalled()
+    expect(result.current.codebaseAnalysis).toBeNull()
   })
 })

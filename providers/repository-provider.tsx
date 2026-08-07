@@ -497,9 +497,20 @@ export function RepositoryProvider({ children }: { children: ReactNode }) {
     return { content, fileCount, totalBytes, skipped }
   }, [pinnedFiles, codeIndex])
 
-  // B5: Compute codebaseAnalysis once when indexing completes
+  // B5: Compute codebaseAnalysis once when indexing completes.
+  // Lazy-tier repos (contentStore is a LazyContentStore, size >= LAZY_CONTENT_THRESHOLD_KB)
+  // have no in-memory or IDB content yet — every file's `content` is ''. Running
+  // analyzeCodebase here would call getFileContent() for every file, which falls
+  // through to LazyContentStore.get() and enqueues a real network fetch for the
+  // entire repo the instant indexing reports isComplete, defeating the lazy tier.
+  // Skip analysis entirely for this tier (mirrors the `instanceof LazyContentStore`
+  // checks already used above for contentAvailability/contentLoadingStats/loadFileContent).
   useEffect(() => {
-    if (codeIndex.totalFiles === 0 || !indexingProgress.isComplete) {
+    if (
+      codeIndex.totalFiles === 0 ||
+      !indexingProgress.isComplete ||
+      codeIndex.contentStore instanceof LazyContentStore
+    ) {
       setCodebaseAnalysis(null)
       return
     }

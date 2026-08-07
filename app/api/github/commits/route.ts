@@ -2,6 +2,7 @@ import { NextResponse } from "next/server"
 import type { NextRequest } from "next/server"
 import { z } from "zod"
 import { getAccessToken } from "@/lib/auth/token"
+import { getGitHubCacheHeaders } from "@/lib/api/github-cache"
 import { fetchCommits } from "@/lib/github/fetcher"
 import { apiError } from "@/lib/api/error"
 import { GITHUB_NAME_RE } from "@/lib/github/validation"
@@ -56,7 +57,7 @@ export async function GET(request: NextRequest) {
     })
 
     return NextResponse.json(commits, {
-      headers: { 'Cache-Control': 's-maxage=300, stale-while-revalidate=60' },
+      headers: getGitHubCacheHeaders(token, 's-maxage=300, stale-while-revalidate=60'),
     })
   } catch (error) {
     const message = error instanceof Error ? error.message : "Failed to fetch commits"

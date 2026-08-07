@@ -2,6 +2,7 @@ import { NextResponse } from "next/server"
 import type { NextRequest } from "next/server"
 import { z } from "zod"
 import { getAccessToken } from "@/lib/auth/token"
+import { getGitHubCacheHeaders } from "@/lib/api/github-cache"
 import { fetchPullRequestComments } from "@/lib/github/fetcher"
 import { apiError } from "@/lib/api/error"
 import { GITHUB_NAME_RE } from "@/lib/github/validation"
@@ -50,7 +51,7 @@ export async function GET(
       page,
     })
     return NextResponse.json(comments, {
-      headers: { 'Cache-Control': 's-maxage=60, stale-while-revalidate=30' },
+      headers: getGitHubCacheHeaders(token, 's-maxage=60, stale-while-revalidate=30'),
     })
   } catch (error) {
     const message = error instanceof Error ? error.message : "Failed to fetch pull request comments"

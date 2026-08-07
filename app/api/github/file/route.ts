@@ -2,6 +2,7 @@ import { NextResponse } from "next/server"
 import type { NextRequest } from "next/server"
 import { z } from "zod"
 import { getAccessToken } from "@/lib/auth/token"
+import { getGitHubCacheHeaders } from "@/lib/api/github-cache"
 import { fetchFileContent } from "@/lib/github/fetcher"
 import { apiError } from "@/lib/api/error"
 import { GITHUB_NAME_RE } from "@/lib/github/validation"
@@ -40,7 +41,7 @@ export async function GET(request: NextRequest) {
       token,
     })
 
-    return NextResponse.json({ content })
+    return NextResponse.json({ content }, { headers: getGitHubCacheHeaders(token) })
   } catch (error) {
     const message = error instanceof Error ? error.message : "Failed to fetch file"
     return apiError('GITHUB_ERROR', message, 500)

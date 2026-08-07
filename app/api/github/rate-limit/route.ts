@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 import type { NextRequest } from "next/server"
 import { getAccessToken } from "@/lib/auth/token"
+import { getGitHubCacheHeaders } from "@/lib/api/github-cache"
 import { apiError } from "@/lib/api/error"
 import { applyRateLimit } from "@/lib/api/rate-limit"
 
@@ -39,13 +40,16 @@ export async function GET(request: NextRequest) {
         ? 'oauth'
         : 'none'
 
-    return NextResponse.json({
-      limit: core?.limit ?? 0,
-      remaining: core?.remaining ?? 0,
-      reset: core?.reset ?? 0,
-      authenticated: !!token,
-      authMethod,
-    })
+    return NextResponse.json(
+      {
+        limit: core?.limit ?? 0,
+        remaining: core?.remaining ?? 0,
+        reset: core?.reset ?? 0,
+        authenticated: !!token,
+        authMethod,
+      },
+      { headers: getGitHubCacheHeaders(token) },
+    )
   } catch (error) {
     const message = error instanceof Error ? error.message : "Failed to fetch rate limit"
     return apiError('RATE_LIMIT_ERROR', message, 500)

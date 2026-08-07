@@ -3,6 +3,7 @@ import type { NextRequest } from "next/server"
 import { z } from "zod"
 
 import { getAccessToken } from "@/lib/auth/token"
+import { getGitHubCacheHeaders } from "@/lib/api/github-cache"
 import { fetchCommitDetail } from "@/lib/github/fetcher"
 import { apiError } from "@/lib/api/error"
 import { GITHUB_NAME_RE } from "@/lib/github/validation"
@@ -45,7 +46,7 @@ export async function GET(
 
     const data = await fetchCommitDetail(owner, name, sha, { token })
 
-    return NextResponse.json(data)
+    return NextResponse.json(data, { headers: getGitHubCacheHeaders(token) })
   } catch (error) {
     const message = error instanceof Error ? error.message : "Failed to fetch commit detail"
 

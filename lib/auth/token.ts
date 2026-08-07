@@ -21,7 +21,7 @@ export async function getAccessToken(
   // 2. OAuth JWT fallback
   const token = await getToken({
     req: request,
-    secret: process.env.NEXTAUTH_SECRET,
+    secret: process.env.AUTH_SECRET ?? process.env.NEXTAUTH_SECRET,
   })
 
   return (token?.accessToken as string) ?? undefined

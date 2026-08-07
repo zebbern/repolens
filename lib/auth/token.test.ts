@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
 // Mock next-auth/jwt before importing our module
 vi.mock('next-auth/jwt', () => ({
@@ -9,10 +9,22 @@ import { getAccessToken } from './token'
 import { getToken } from 'next-auth/jwt'
 
 const mockGetToken = vi.mocked(getToken)
+const originalAuthSecret = process.env.AUTH_SECRET
+const originalNextAuthSecret = process.env.NEXTAUTH_SECRET
 
 describe('getAccessToken', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    delete process.env.AUTH_SECRET
+    delete process.env.NEXTAUTH_SECRET
+  })
+
+  afterAll(() => {
+    if (originalAuthSecret === undefined) delete process.env.AUTH_SECRET
+    else process.env.AUTH_SECRET = originalAuthSecret
+
+    if (originalNextAuthSecret === undefined) delete process.env.NEXTAUTH_SECRET
+    else process.env.NEXTAUTH_SECRET = originalNextAuthSecret
   })
 
   /** Helper: build a mock NextRequest with optional X-GitHub-Token header. */
@@ -34,6 +46,7 @@ describe('getAccessToken', () => {
   })
 
   it('returns the access token when the user is authenticated via OAuth', async () => {
+    process.env.NEXTAUTH_SECRET = 'nextauth-secret'
     mockGetToken.mockResolvedValue({
       accessToken: 'gho_abc123',
       sub: 'user-1',
@@ -44,7 +57,23 @@ describe('getAccessToken', () => {
     expect(result).toBe('gho_abc123')
     expect(mockGetToken).toHaveBeenCalledWith({
       req: expect.anything(),
-      secret: process.env.NEXTAUTH_SECRET,
+      secret: 'nextauth-secret',
+    })
+  })
+
+  it('prefers AUTH_SECRET when resolving an OAuth JWT', async () => {
+    process.env.AUTH_SECRET = 'auth-secret'
+    process.env.NEXTAUTH_SECRET = 'nextauth-secret'
+    mockGetToken.mockResolvedValue({
+      accessToken: 'gho_abc123',
+      sub: 'user-1',
+    } as Awaited<ReturnType<typeof getToken>>)
+
+    await getAccessToken(mockRequest())
+
+    expect(mockGetToken).toHaveBeenCalledWith({
+      req: expect.anything(),
+      secret: 'auth-secret',
     })
   })
 

@@ -6,6 +6,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 const mockGetAccessToken = vi.fn()
 const mockFetchBranches = vi.fn()
+const mockApplyRateLimit = vi.fn()
 
 vi.mock('@/lib/auth/token', () => ({
   getAccessToken: (...args: unknown[]) => mockGetAccessToken(...args),
@@ -22,6 +23,10 @@ vi.mock('@/lib/api/error', () => ({
       { status },
     )
   },
+}))
+
+vi.mock('@/lib/api/rate-limit', () => ({
+  applyRateLimit: (...args: unknown[]) => mockApplyRateLimit(...args),
 }))
 
 import { GET } from '@/app/api/github/branches/route'
@@ -46,10 +51,11 @@ function createRequest(params: Record<string, string>): NextRequest {
 describe('GET /api/github/branches', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    mockGetAccessToken.mockResolvedValue('mock-token')
+    mockGetAccessToken.mockResolvedValue(undefined)
+    mockApplyRateLimit.mockReturnValue(undefined)
   })
 
-  it('returns branches for a valid request', async () => {
+  it('returns public cache headers for an anonymous success response', async () => {
     const mockBranches = [
       { name: 'main', commitSha: 'abc123', isProtected: true },
       { name: 'develop', commitSha: 'def456', isProtected: false },
@@ -60,8 +66,58 @@ describe('GET /api/github/branches', () => {
     const res = await GET(req)
 
     expect(res.status).toBe(200)
+    expect(res.headers.get('Cache-Control')).toBe('public, max-age=0, must-revalidate')
+    expect(res.headers.get('CDN-Cache-Control')).toBe('s-maxage=300, stale-while-revalidate=60')
+    expect(res.headers.get('Vercel-Cache-Tag')).toBe('github-public')
+    expect(res.headers.get('Vary')).toBe('X-GitHub-Token, Cookie')
     const body = await res.json()
     expect(body).toEqual(mockBranches)
+  })
+
+  it('returns no-store cache headers for a PAT success response', async () => {
+    mockGetAccessToken.mockResolvedValue('ghp_pat_token')
+    mockFetchBranches.mockResolvedValue([])
+
+    const res = await GET(createRequest({ owner: 'facebook', name: 'react' }))
+
+    expect(res.headers.get('Cache-Control')).toBe('private, no-store, max-age=0')
+    expect(res.headers.get('CDN-Cache-Control')).toBe('no-store')
+    expect(res.headers.get('Vercel-Cache-Tag')).toBeNull()
+    expect(res.headers.get('Vary')).toBe('X-GitHub-Token, Cookie')
+  })
+
+  it('returns no-store cache headers for an OAuth success response', async () => {
+    mockGetAccessToken.mockResolvedValue('gho_oauth_token')
+    mockFetchBranches.mockResolvedValue([])
+
+    const res = await GET(createRequest({ owner: 'facebook', name: 'react' }))
+
+    expect(res.headers.get('Cache-Control')).toBe('private, no-store, max-age=0')
+    expect(res.headers.get('CDN-Cache-Control')).toBe('no-store')
+    expect(res.headers.get('Vary')).toBe('X-GitHub-Token, Cookie')
+  })
+
+  it('returns no-store cache headers for a PAT validation error', async () => {
+    mockGetAccessToken.mockResolvedValue('ghp_pat_token')
+
+    const res = await GET(createRequest({ name: 'react' }))
+
+    expect(res.status).toBe(400)
+    expect(res.headers.get('Cache-Control')).toBe('private, no-store, max-age=0')
+    expect(res.headers.get('CDN-Cache-Control')).toBe('no-store')
+    expect(res.headers.get('Vary')).toBe('X-GitHub-Token, Cookie')
+  })
+
+  it('returns no-store cache headers for an OAuth rate-limit error', async () => {
+    mockGetAccessToken.mockResolvedValue('gho_oauth_token')
+    mockApplyRateLimit.mockReturnValue(Response.json({ error: 'Too many requests' }, { status: 429 }))
+
+    const res = await GET(createRequest({ owner: 'facebook', name: 'react' }))
+
+    expect(res.status).toBe(429)
+    expect(res.headers.get('Cache-Control')).toBe('private, no-store, max-age=0')
+    expect(res.headers.get('CDN-Cache-Control')).toBe('no-store')
+    expect(res.headers.get('Vary')).toBe('X-GitHub-Token, Cookie')
   })
 
   it('returns 400 when owner is missing', async () => {

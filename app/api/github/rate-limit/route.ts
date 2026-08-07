@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server"
 import type { NextRequest } from "next/server"
-import { getAccessToken } from "@/lib/auth/token"
-import { getGitHubCacheHeaders } from "@/lib/api/github-cache"
+import { withGitHubCachePolicy } from "@/lib/api/github-cache"
 import { apiError } from "@/lib/api/error"
 import { applyRateLimit } from "@/lib/api/rate-limit"
 
@@ -9,14 +8,12 @@ export const runtime = 'edge'
 
 const GITHUB_API_BASE = "https://api.github.com"
 
-export async function GET(request: NextRequest) {
+export const GET = withGitHubCachePolicy(async function GET(request: NextRequest, token: string | undefined) {
   const rateLimited = applyRateLimit(request)
   if (rateLimited) return rateLimited
 
   try {
     const hasPAT = !!request.headers.get("X-GitHub-Token")
-    const token = await getAccessToken(request)
-
     const headers: HeadersInit = {
       Accept: "application/vnd.github.v3+json",
     }
@@ -40,18 +37,15 @@ export async function GET(request: NextRequest) {
         ? 'oauth'
         : 'none'
 
-    return NextResponse.json(
-      {
-        limit: core?.limit ?? 0,
-        remaining: core?.remaining ?? 0,
-        reset: core?.reset ?? 0,
-        authenticated: !!token,
-        authMethod,
-      },
-      { headers: getGitHubCacheHeaders(token) },
-    )
+    return NextResponse.json({
+      limit: core?.limit ?? 0,
+      remaining: core?.remaining ?? 0,
+      reset: core?.reset ?? 0,
+      authenticated: !!token,
+      authMethod,
+    })
   } catch (error) {
     const message = error instanceof Error ? error.message : "Failed to fetch rate limit"
     return apiError('RATE_LIMIT_ERROR', message, 500)
   }
-}
+})

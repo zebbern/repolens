@@ -1,8 +1,7 @@
 import { NextResponse } from "next/server"
 import type { NextRequest } from "next/server"
 import { z } from "zod"
-import { getAccessToken } from "@/lib/auth/token"
-import { getGitHubCacheHeaders } from "@/lib/api/github-cache"
+import { withGitHubCachePolicy } from "@/lib/api/github-cache"
 import { fetchRepoLanguages } from "@/lib/github/fetcher"
 import { apiError } from "@/lib/api/error"
 import { GITHUB_NAME_RE } from "@/lib/github/validation"
@@ -15,7 +14,7 @@ const languagesQuerySchema = z.object({
   name: z.string().min(1).regex(GITHUB_NAME_RE, 'Invalid repo name'),
 })
 
-export async function GET(request: NextRequest) {
+export const GET = withGitHubCachePolicy(async function GET(request: NextRequest, token: string | undefined) {
   const rateLimited = applyRateLimit(request)
   if (rateLimited) return rateLimited
 
@@ -31,12 +30,9 @@ export async function GET(request: NextRequest) {
   const { owner, name } = params.data
 
   try {
-    const token = await getAccessToken(request)
     const languages = await fetchRepoLanguages(owner, name, { token })
 
-    return NextResponse.json(languages, {
-      headers: getGitHubCacheHeaders(token, 's-maxage=600, stale-while-revalidate=120'),
-    })
+    return NextResponse.json(languages)
   } catch (error) {
     const message = error instanceof Error ? error.message : "Failed to fetch languages"
 
@@ -49,4 +45,4 @@ export async function GET(request: NextRequest) {
 
     return apiError('GITHUB_ERROR', message, 500)
   }
-}
+}, 's-maxage=600, stale-while-revalidate=120')

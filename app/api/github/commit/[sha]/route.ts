@@ -2,8 +2,7 @@ import { NextResponse } from "next/server"
 import type { NextRequest } from "next/server"
 import { z } from "zod"
 
-import { getAccessToken } from "@/lib/auth/token"
-import { getGitHubCacheHeaders } from "@/lib/api/github-cache"
+import { withGitHubCachePolicy } from "@/lib/api/github-cache"
 import { fetchCommitDetail } from "@/lib/github/fetcher"
 import { apiError } from "@/lib/api/error"
 import { GITHUB_NAME_RE } from "@/lib/github/validation"
@@ -17,8 +16,9 @@ const commitDetailSchema = z.object({
   name: z.string().min(1).regex(GITHUB_NAME_RE, 'Invalid repo name'),
 })
 
-export async function GET(
+export const GET = withGitHubCachePolicy(async function GET(
   request: NextRequest,
+  token: string | undefined,
   { params }: { params: Promise<{ sha: string }> },
 ) {
   const rateLimited = applyRateLimit(request)
@@ -42,11 +42,9 @@ export async function GET(
   const { owner, name } = query.data
 
   try {
-    const token = await getAccessToken(request)
-
     const data = await fetchCommitDetail(owner, name, sha, { token })
 
-    return NextResponse.json(data, { headers: getGitHubCacheHeaders(token) })
+    return NextResponse.json(data)
   } catch (error) {
     const message = error instanceof Error ? error.message : "Failed to fetch commit detail"
 
@@ -60,4 +58,4 @@ export async function GET(
     console.error('[commit-detail] GitHub API error:', message)
     return apiError('GITHUB_ERROR', 'Failed to fetch commit detail', 500)
   }
-}
+})

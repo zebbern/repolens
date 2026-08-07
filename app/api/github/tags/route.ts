@@ -1,8 +1,7 @@
 import { NextResponse } from "next/server"
 import type { NextRequest } from "next/server"
 import { z } from "zod"
-import { getAccessToken } from "@/lib/auth/token"
-import { getGitHubCacheHeaders } from "@/lib/api/github-cache"
+import { withGitHubCachePolicy } from "@/lib/api/github-cache"
 import { fetchTags } from "@/lib/github/fetcher"
 import { apiError } from "@/lib/api/error"
 import { GITHUB_NAME_RE } from "@/lib/github/validation"
@@ -17,7 +16,7 @@ const tagsQuerySchema = z.object({
   page: z.coerce.number().int().min(1).optional(),
 })
 
-export async function GET(request: NextRequest) {
+export const GET = withGitHubCachePolicy(async function GET(request: NextRequest, token: string | undefined) {
   const rateLimited = applyRateLimit(request)
   if (rateLimited) return rateLimited
 
@@ -35,17 +34,13 @@ export async function GET(request: NextRequest) {
   const { owner, name, per_page, page } = params.data
 
   try {
-    const token = await getAccessToken(request)
-
     const tags = await fetchTags(owner, name, {
       token,
       perPage: per_page,
       page,
     })
 
-    return NextResponse.json(tags, {
-      headers: getGitHubCacheHeaders(token, 's-maxage=600, stale-while-revalidate=120'),
-    })
+    return NextResponse.json(tags)
   } catch (error) {
     const message = error instanceof Error ? error.message : "Failed to fetch tags"
 
@@ -58,4 +53,4 @@ export async function GET(request: NextRequest) {
 
     return apiError('GITHUB_ERROR', message, 500)
   }
-}
+}, 's-maxage=600, stale-while-revalidate=120')

@@ -1,8 +1,7 @@
 import { NextResponse } from "next/server"
 import type { NextRequest } from "next/server"
 import { z } from "zod"
-import { getAccessToken } from "@/lib/auth/token"
-import { getGitHubCacheHeaders } from "@/lib/api/github-cache"
+import { withGitHubCachePolicy } from "@/lib/api/github-cache"
 import { fetchRepoTree } from "@/lib/github/fetcher"
 import { apiError } from "@/lib/api/error"
 import { GITHUB_NAME_RE } from "@/lib/github/validation"
@@ -16,7 +15,7 @@ const treeQuerySchema = z.object({
   sha: z.string().min(1).default("HEAD"),
 })
 
-export async function GET(request: NextRequest) {
+export const GET = withGitHubCachePolicy(async function GET(request: NextRequest, token: string | undefined) {
   const rateLimited = applyRateLimit(request)
   if (rateLimited) return rateLimited
 
@@ -33,17 +32,13 @@ export async function GET(request: NextRequest) {
   const { owner, name, sha } = params.data
 
   try {
-    const token = await getAccessToken(request)
-
     const tree = await fetchRepoTree(owner, name, sha, {
       token,
     })
 
-    return NextResponse.json(tree, {
-      headers: getGitHubCacheHeaders(token, 's-maxage=600, stale-while-revalidate=120'),
-    })
+    return NextResponse.json(tree)
   } catch (error) {
     const message = error instanceof Error ? error.message : "Failed to fetch tree"
     return apiError('GITHUB_ERROR', message, 500)
   }
-}
+}, 's-maxage=600, stale-while-revalidate=120')

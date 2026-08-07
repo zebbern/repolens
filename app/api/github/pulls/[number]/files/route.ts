@@ -1,8 +1,7 @@
 import { NextResponse } from "next/server"
 import type { NextRequest } from "next/server"
 import { z } from "zod"
-import { getAccessToken } from "@/lib/auth/token"
-import { getGitHubCacheHeaders } from "@/lib/api/github-cache"
+import { withGitHubCachePolicy } from "@/lib/api/github-cache"
 import { fetchPullRequestFiles } from "@/lib/github/fetcher"
 import { apiError } from "@/lib/api/error"
 import { GITHUB_NAME_RE } from "@/lib/github/validation"
@@ -17,8 +16,9 @@ const filesQuerySchema = z.object({
   page: z.coerce.number().int().min(1).optional(),
 })
 
-export async function GET(
+export const GET = withGitHubCachePolicy(async function GET(
   request: NextRequest,
+  token: string | undefined,
   { params }: { params: Promise<{ number: string }> },
 ) {
   const rateLimited = applyRateLimit(request)
@@ -44,15 +44,12 @@ export async function GET(
   const { owner, name, per_page, page } = query.data
 
   try {
-    const token = await getAccessToken(request)
     const files = await fetchPullRequestFiles(owner, name, prNumber, {
       token,
       perPage: per_page,
       page,
     })
-    return NextResponse.json(files, {
-      headers: getGitHubCacheHeaders(token, 's-maxage=60, stale-while-revalidate=30'),
-    })
+    return NextResponse.json(files)
   } catch (error) {
     const message = error instanceof Error ? error.message : "Failed to fetch pull request files"
 
@@ -65,4 +62,4 @@ export async function GET(
 
     return apiError('GITHUB_ERROR', message, 500)
   }
-}
+}, 's-maxage=60, stale-while-revalidate=30')

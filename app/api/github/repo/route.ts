@@ -1,8 +1,7 @@
 import { NextResponse } from "next/server"
 import type { NextRequest } from "next/server"
 import { z } from "zod"
-import { getAccessToken } from "@/lib/auth/token"
-import { getGitHubCacheHeaders } from "@/lib/api/github-cache"
+import { withGitHubCachePolicy } from "@/lib/api/github-cache"
 import { fetchRepoMetadata } from "@/lib/github/fetcher"
 import { apiError } from "@/lib/api/error"
 import { GITHUB_NAME_RE } from "@/lib/github/validation"
@@ -15,7 +14,7 @@ const repoQuerySchema = z.object({
   name: z.string().min(1).regex(GITHUB_NAME_RE, 'Invalid repo name'),
 })
 
-export async function GET(request: NextRequest) {
+export const GET = withGitHubCachePolicy(async function GET(request: NextRequest, token: string | undefined) {
   const rateLimited = applyRateLimit(request)
   if (rateLimited) return rateLimited
 
@@ -31,15 +30,11 @@ export async function GET(request: NextRequest) {
   const { owner, name } = params.data
 
   try {
-    const token = await getAccessToken(request)
-
     const repo = await fetchRepoMetadata(owner, name, {
       token,
     })
 
-    return NextResponse.json(repo, {
-      headers: getGitHubCacheHeaders(token, 's-maxage=300, stale-while-revalidate=60'),
-    })
+    return NextResponse.json(repo)
   } catch (error) {
     const message = error instanceof Error ? error.message : "Failed to fetch repository"
 
@@ -52,4 +47,4 @@ export async function GET(request: NextRequest) {
 
     return apiError('GITHUB_ERROR', message, 500)
   }
-}
+}, 's-maxage=300, stale-while-revalidate=60')

@@ -1,8 +1,7 @@
 import { NextResponse } from "next/server"
 import type { NextRequest } from "next/server"
 import { z } from "zod"
-import { getAccessToken } from "@/lib/auth/token"
-import { getGitHubCacheHeaders } from "@/lib/api/github-cache"
+import { withGitHubCachePolicy } from "@/lib/api/github-cache"
 import { fetchFileContent } from "@/lib/github/fetcher"
 import { apiError } from "@/lib/api/error"
 import { GITHUB_NAME_RE } from "@/lib/github/validation"
@@ -17,7 +16,7 @@ const fileQuerySchema = z.object({
   path: z.string().min(1).refine(s => !s.includes('..'), 'Invalid path'),
 })
 
-export async function GET(request: NextRequest) {
+export const GET = withGitHubCachePolicy(async function GET(request: NextRequest, token: string | undefined) {
   const rateLimited = applyRateLimit(request, { limit: 500, windowMs: 60_000 })
   if (rateLimited) return rateLimited
 
@@ -35,15 +34,13 @@ export async function GET(request: NextRequest) {
   const { owner, name, branch, path } = params.data
 
   try {
-    const token = await getAccessToken(request)
-
     const content = await fetchFileContent(owner, name, branch, path, {
       token,
     })
 
-    return NextResponse.json({ content }, { headers: getGitHubCacheHeaders(token) })
+    return NextResponse.json({ content })
   } catch (error) {
     const message = error instanceof Error ? error.message : "Failed to fetch file"
     return apiError('GITHUB_ERROR', message, 500)
   }
-}
+})

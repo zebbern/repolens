@@ -1,8 +1,7 @@
 import { NextResponse } from "next/server"
 import type { NextRequest } from "next/server"
 import { z } from "zod"
-import { getAccessToken } from "@/lib/auth/token"
-import { getGitHubCacheHeaders } from "@/lib/api/github-cache"
+import { withGitHubCachePolicy } from "@/lib/api/github-cache"
 import { fetchCommits } from "@/lib/github/fetcher"
 import { apiError } from "@/lib/api/error"
 import { GITHUB_NAME_RE } from "@/lib/github/validation"
@@ -22,7 +21,7 @@ const commitsQuerySchema = z.object({
   path: z.string().min(1).max(4096).optional(),
 })
 
-export async function GET(request: NextRequest) {
+export const GET = withGitHubCachePolicy(async function GET(request: NextRequest, token: string | undefined) {
   const rateLimited = applyRateLimit(request)
   if (rateLimited) return rateLimited
 
@@ -44,8 +43,6 @@ export async function GET(request: NextRequest) {
   const { owner, name, sha, since, until, per_page, page, path } = params.data
 
   try {
-    const token = await getAccessToken(request)
-
     const commits = await fetchCommits(owner, name, {
       token,
       sha,
@@ -56,9 +53,7 @@ export async function GET(request: NextRequest) {
       path,
     })
 
-    return NextResponse.json(commits, {
-      headers: getGitHubCacheHeaders(token, 's-maxage=300, stale-while-revalidate=60'),
-    })
+    return NextResponse.json(commits)
   } catch (error) {
     const message = error instanceof Error ? error.message : "Failed to fetch commits"
 
@@ -71,4 +66,4 @@ export async function GET(request: NextRequest) {
 
     return apiError('GITHUB_ERROR', message, 500)
   }
-}
+}, 's-maxage=300, stale-while-revalidate=60')

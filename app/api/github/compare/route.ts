@@ -1,8 +1,7 @@
 import { NextResponse } from "next/server"
 import type { NextRequest } from "next/server"
 import { z } from "zod"
-import { getAccessToken } from "@/lib/auth/token"
-import { getGitHubCacheHeaders } from "@/lib/api/github-cache"
+import { withGitHubCachePolicy } from "@/lib/api/github-cache"
 import { fetchCompare } from "@/lib/github/fetcher"
 import { apiError } from "@/lib/api/error"
 import { GITHUB_NAME_RE } from "@/lib/github/validation"
@@ -17,7 +16,7 @@ const compareQuerySchema = z.object({
   head: z.string().min(1).max(256).regex(/^[^\x00-\x1f\x7f]+$/, 'Invalid ref'),
 })
 
-export async function GET(request: NextRequest) {
+export const GET = withGitHubCachePolicy(async function GET(request: NextRequest, token: string | undefined) {
   const rateLimited = applyRateLimit(request)
   if (rateLimited) return rateLimited
 
@@ -35,13 +34,11 @@ export async function GET(request: NextRequest) {
   const { owner, name, base, head } = params.data
 
   try {
-    const token = await getAccessToken(request)
-
     const comparison = await fetchCompare(owner, name, base, head, {
       token,
     })
 
-    return NextResponse.json(comparison, { headers: getGitHubCacheHeaders(token) })
+    return NextResponse.json(comparison)
   } catch (error) {
     const message = error instanceof Error ? error.message : "Failed to fetch comparison"
 
@@ -57,4 +54,4 @@ export async function GET(request: NextRequest) {
 
     return apiError('GITHUB_ERROR', message, 500)
   }
-}
+})

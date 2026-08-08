@@ -44,7 +44,7 @@ function assistantMsgWithToolCall(id = 'tool-msg'): UIMessage {
     role: 'assistant',
     content: '',
     parts: [
-      { type: 'tool-invocation', toolCallId: 'tc-1', toolName: 'readFile', state: 'result' } as any,
+      { type: 'tool-invocation', toolCallId: 'tc-1', toolName: 'readFile', state: 'result' } as never,
       { type: 'text', text: 'Analysis result' },
     ],
     createdAt: new Date(),

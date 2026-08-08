@@ -7,8 +7,8 @@ import React from 'react'
 // ---------------------------------------------------------------------------
 
 const mockGetValidProviders = vi.fn(() => ['openai'])
-let mockRepo: any = { fullName: 'owner/repo', owner: 'owner', name: 'repo', description: 'A repo' }
-let mockSelectedModel: any = { provider: 'openai', id: 'gpt-4o' }
+let mockRepo: { fullName: string; owner: string; name: string; description: string } | null = { fullName: 'owner/repo', owner: 'owner', name: 'repo', description: 'A repo' }
+let mockSelectedModel: { provider: string; id: string } | null = { provider: 'openai', id: 'gpt-4o' }
 
 vi.mock('@/providers', () => ({
   useAPIKeys: () => ({
@@ -67,12 +67,12 @@ vi.mock('@/lib/export', () => ({
 
 vi.mock('../changelog-helpers', () => ({
   getPresetIcon: vi.fn(() => React.createElement('span', null, '📋')),
-  ChangelogMarkdownContent: vi.fn(({ messages }: any) => React.createElement('div', { 'data-testid': 'md-content' }, 'Markdown')),
+  ChangelogMarkdownContent: vi.fn(() => React.createElement('div', { 'data-testid': 'md-content' }, 'Markdown')),
   QUALITY_STEPS: { fast: 10, balanced: 30, thorough: 50 },
 }))
 
 vi.mock('../new-changelog-view', () => ({
-  NewChangelogView: vi.fn((props: any) => React.createElement('div', { 'data-testid': 'new-changelog-view' }, 'New Changelog Form')),
+  NewChangelogView: vi.fn(() => React.createElement('div', { 'data-testid': 'new-changelog-view' }, 'New Changelog Form')),
 }))
 
 import { ChangelogViewer } from '../changelog-viewer'

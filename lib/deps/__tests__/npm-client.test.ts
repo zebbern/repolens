@@ -167,7 +167,7 @@ describe('fetchDependencyMeta', () => {
 
     // Pre-cache react via getCached returning a value for that key
     vi.mocked(getCached).mockImplementation((key: string) => {
-      if (key === 'deps:react') return reactMeta as any
+      if (key === 'deps:react') return reactMeta as never
       return null
     })
 

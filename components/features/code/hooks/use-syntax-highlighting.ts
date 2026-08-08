@@ -135,10 +135,7 @@ export function useSyntaxHighlighting(
   const requestIdRef = useRef(0)
 
   useEffect(() => {
-    if (lang === "text") {
-      setTokenizedLines(null)
-      return
-    }
+    if (lang === "text") return
 
     const requestId = ++requestIdRef.current
 
@@ -169,5 +166,5 @@ export function useSyntaxHighlighting(
     })()
   }, [content, lang, themeName])
 
-  return tokenizedLines ?? plainLines
+  return lang === "text" ? plainLines : (tokenizedLines ?? plainLines)
 }

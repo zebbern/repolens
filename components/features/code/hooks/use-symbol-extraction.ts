@@ -231,20 +231,26 @@ export function useSymbolExtraction(content: string | null | undefined, language
     return extractSymbols(content, language)
   }, [content, language])
 
-  const [symbols, setSymbols] = useState(syncSymbols)
+  const [asyncResult, setAsyncResult] = useState<{
+    content: string
+    language: string
+    symbols: ExtractedSymbol[]
+  } | null>(null)
 
   useEffect(() => {
-    setSymbols(syncSymbols)
     if (!content || !language) return
 
     let cancelled = false
     extractSymbolsTreeSitter(content, language).then(tsSymbols => {
       if (!cancelled && tsSymbols && tsSymbols.length > 0) {
-        setSymbols(tsSymbols)
+        setAsyncResult({ content, language, symbols: tsSymbols })
       }
     }).catch(() => { /* regex fallback already set */ })
     return () => { cancelled = true }
-  }, [content, language, syncSymbols])
+  }, [content, language])
 
-  return symbols
+  if (asyncResult && asyncResult.content === content && asyncResult.language === language) {
+    return asyncResult.symbols
+  }
+  return syncSymbols
 }

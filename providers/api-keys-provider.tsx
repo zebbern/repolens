@@ -55,15 +55,15 @@ export function APIKeysProvider({ children }: { children: ReactNode }) {
   // Hydrate state from localStorage after mount (avoids SSR/client mismatch)
   useEffect(() => {
     const storedKeys = loadKeys()
-    if (storedKeys) setAPIKeys(storedKeys)
-
     const storedModel = loadSelectedModel()
-    if (storedModel) {
-      setSelectedModel(storedModel)
-      selectedModelRef.current = storedModel
-    }
-
-    setIsHydrated(true)
+    queueMicrotask(() => {
+      if (storedKeys) setAPIKeys(storedKeys)
+      if (storedModel) {
+        setSelectedModel(storedModel)
+        selectedModelRef.current = storedModel
+      }
+      setIsHydrated(true)
+    })
   }, [])
 
   // Save keys to localStorage when changed (skip before hydration)

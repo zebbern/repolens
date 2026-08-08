@@ -272,7 +272,7 @@ function SummaryDashboard({ data, onNavigate }: { data: ProjectSummary; onNaviga
               <ChevronRight className="h-3 w-3 text-emerald-400" />
               Entry Points ({data.entryPoints.length})
             </h3>
-            <p className="text-[10px] text-text-muted mb-2">Starting files that nothing else imports. Often the app's main files or test runners.</p>
+            <p className="text-[10px] text-text-muted mb-2">{"Starting files that nothing else imports. Often the app's main files or test runners."}</p>
             <div className="flex flex-col gap-0.5">
               {(expandedSections.entryPoints ? data.entryPoints : data.entryPoints.slice(0, 6)).map(ep => (
                 <button
@@ -328,7 +328,7 @@ function SummaryDashboard({ data, onNavigate }: { data: ProjectSummary; onNaviga
             <FileWarning className="h-3 w-3 text-gray-400" />
             Unused Files ({data.orphanFiles.length})
           </h3>
-          <p className="text-[10px] text-text-muted mb-2">Files that don't import anything and aren't imported by other files. May be dead code, configs, or standalone scripts.</p>
+          <p className="text-[10px] text-text-muted mb-2">{"Files that don't import anything and aren't imported by other files. May be dead code, configs, or standalone scripts."}</p>
           <div className="flex flex-wrap gap-1">
             {(expandedSections.orphans ? data.orphanFiles : data.orphanFiles.slice(0, 12)).map(o => (
               <button

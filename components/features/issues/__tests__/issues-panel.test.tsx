@@ -1,13 +1,22 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import type { CodeIndex } from '@/lib/code/code-index'
+
+interface MockIssue {
+  id: string
+  title: string
+}
 
 // Mock child components and providers
 vi.mock('../issue-summary', () => ({
   IssueSummary: () => <div data-testid="issue-summary">summary</div>,
 }))
 vi.mock('../issue-filters', () => ({
-  IssueFilters: ({ onFilterChange, onViewModeChange }: any) => (
+  IssueFilters: ({ onFilterChange, onViewModeChange }: {
+    onFilterChange: (category: string) => void
+    onViewModeChange: (mode: string) => void
+  }) => (
     <div data-testid="issue-filters">
       <button onClick={() => onFilterChange('security')}>filter-security</button>
       <button onClick={() => onViewModeChange('compliance')}>view-compliance</button>
@@ -15,11 +24,14 @@ vi.mock('../issue-filters', () => ({
   ),
 }))
 vi.mock('../issue-list', () => ({
-  IssueList: ({ groupedByFile, filteredIssueCount }: any) => (
+  IssueList: ({ groupedByFile, filteredIssueCount }: {
+    groupedByFile?: Map<string, MockIssue[]>
+    filteredIssueCount?: number
+  }) => (
     <div data-testid="issue-list">
       <span data-testid="issue-count">{filteredIssueCount ?? 0}</span>
-      {groupedByFile && Array.from((groupedByFile as Map<string, any[]>).entries()).map(([file, issues]) =>
-        issues.map((i: any) => <div key={i.id}>{i.title}</div>)
+      {groupedByFile && Array.from(groupedByFile.entries()).map(([file, issues]) =>
+        issues.map(issue => <div key={`${file}:${issue.id}`}>{issue.title}</div>)
       )}
     </div>
   ),
@@ -81,7 +93,7 @@ const mockScanResults = {
 }
 
 vi.mock('@/lib/code/issue-scanner', () => ({
-  scanInWorker: vi.fn((codeIndex: any) => {
+  scanInWorker: vi.fn((codeIndex: { totalFiles: number }) => {
     if (codeIndex.totalFiles === 0) return Promise.resolve(null)
     return Promise.resolve(mockScanResults)
   }),
@@ -132,7 +144,7 @@ import { IssuesPanel } from '../issues-panel'
 
 // Also mock issue-types to avoid import issues
 vi.mock('../issue-types', async (importOriginal) => {
-  const actual = await importOriginal() as any
+  const actual = await importOriginal<typeof import('../issue-types')>()
   return {
     ...actual,
     isSupplyChainIssue: vi.fn(() => false),
@@ -154,21 +166,21 @@ describe('IssuesPanel', () => {
   })
 
   it('renders issue summary', async () => {
-    render(<IssuesPanel codeIndex={mockCodeIndex as any} />)
+    render(<IssuesPanel codeIndex={mockCodeIndex as unknown as CodeIndex} />)
     await waitFor(() => {
       expect(screen.getByTestId('issue-summary')).toBeInTheDocument()
     })
   })
 
   it('renders issue filters', async () => {
-    render(<IssuesPanel codeIndex={mockCodeIndex as any} />)
+    render(<IssuesPanel codeIndex={mockCodeIndex as unknown as CodeIndex} />)
     await waitFor(() => {
       expect(screen.getByTestId('issue-filters')).toBeInTheDocument()
     })
   })
 
   it('renders issue list with filtered issues', async () => {
-    render(<IssuesPanel codeIndex={mockCodeIndex as any} />)
+    render(<IssuesPanel codeIndex={mockCodeIndex as unknown as CodeIndex} />)
     await waitFor(() => {
       expect(screen.getByTestId('issue-list')).toBeInTheDocument()
     })
@@ -180,7 +192,7 @@ describe('IssuesPanel', () => {
 
   it('renders nothing useful when codeIndex has zero files', () => {
     const emptyIndex = { totalFiles: 0, files: new Map() }
-    const { container } = render(<IssuesPanel codeIndex={emptyIndex as any} />)
+    const { container } = render(<IssuesPanel codeIndex={emptyIndex as unknown as CodeIndex} />)
     // With 0 files, scanInWorker is not called → no issue-summary rendered
     expect(screen.queryByTestId('issue-summary')).not.toBeInTheDocument()
   })

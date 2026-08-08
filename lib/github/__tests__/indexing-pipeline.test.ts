@@ -24,7 +24,7 @@ const mockFlattenFiles = vi.fn((tree) => tree)
 const mockSetCachedRepo = vi.fn().mockResolvedValue(undefined)
 
 vi.mock('@/lib/github/zipball', () => ({
-  streamUnzipFiles: (...args: unknown[]) => mockStreamUnzipFiles(...args),
+  streamUnzipFiles: (...args: unknown[]) => mockStreamUnzipFiles(args[0], args[1], args[2]),
   isFileIndexable: (name: string) => {
     const ext = name.split('.').pop()?.toLowerCase()
     return ['ts', 'tsx', 'js', 'md', 'json'].includes(ext ?? '')
@@ -32,19 +32,19 @@ vi.mock('@/lib/github/zipball', () => ({
 }))
 
 vi.mock('@/lib/github/fetcher', () => ({
-  detectLanguage: (...args: unknown[]) => mockDetectLanguage(...args),
+  detectLanguage: (name: string) => mockDetectLanguage(name),
 }))
 
 vi.mock('@/lib/github/client', () => ({
-  fetchFileViaProxy: (...args: unknown[]) => mockFetchFileViaProxy(...args),
+  fetchFileViaProxy: (...args: unknown[]) => mockFetchFileViaProxy(args[0], args[1], args[2], args[3]),
 }))
 
 vi.mock('@/lib/code/code-index', () => ({
-  createEmptyIndex: (...args: unknown[]) => mockCreateEmptyIndex(...args),
-  createEmptyIndexWithStore: (...args: unknown[]) => mockCreateEmptyIndex(...args),
-  batchIndexFiles: (...args: unknown[]) => mockBatchIndexFiles(...args),
+  createEmptyIndex: () => mockCreateEmptyIndex(),
+  createEmptyIndexWithStore: () => mockCreateEmptyIndex(),
+  batchIndexFiles: (...args: unknown[]) => mockBatchIndexFiles(args[0], args[1]),
   batchIndexMetadataOnly: vi.fn(),
-  flattenFiles: (...args: unknown[]) => mockFlattenFiles(...args),
+  flattenFiles: (...args: unknown[]) => mockFlattenFiles(args[0]),
 }))
 
 vi.mock('@/lib/code/content-store', () => ({
@@ -59,7 +59,7 @@ vi.mock('@/lib/code/fetch-queue', () => ({
 }))
 
 vi.mock('@/lib/cache/repo-cache', () => ({
-  setCachedRepo: (...args: unknown[]) => mockSetCachedRepo(...args),
+  setCachedRepo: (...args: unknown[]) => mockSetCachedRepo(args[0], args[1], args[2]),
 }))
 
 vi.mock('@/lib/github/fetch-utils', () => ({

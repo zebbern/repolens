@@ -23,6 +23,7 @@ const mockedInitTreeSitter = vi.mocked(initTreeSitter)
 const mockedParseFile = vi.mocked(parseFile)
 const mockedQueryTree = vi.mocked(queryTree)
 const mockedGetLanguageForFile = vi.mocked(getLanguageForFile)
+type QueryResult = Awaited<ReturnType<typeof queryTree>>
 
 function makeFile(content: string): IndexedFile {
   return {
@@ -119,7 +120,7 @@ describe('scanWithTreeSitter', () => {
 
     mockedQueryTree.mockResolvedValue([
       { captures: { fn: [fakeNode] } },
-    ] as unknown[])
+    ] as unknown as QueryResult)
 
     const pyContent = 'import os\n\n\ndef run():\n    eval(x)\n'
     const files = new Map<string, IndexedFile>()
@@ -180,7 +181,7 @@ describe('scanWithTreeSitter', () => {
       },
     }))
 
-    mockedQueryTree.mockResolvedValue(manyMatches as unknown[])
+    mockedQueryTree.mockResolvedValue(manyMatches as unknown as QueryResult)
 
     const files = new Map<string, IndexedFile>()
     const lines = Array.from({ length: 25 }, () => 'eval(x)')
@@ -222,7 +223,7 @@ describe('scanWithTreeSitter', () => {
       },
     ]
 
-    mockedQueryTree.mockResolvedValue(duplicateMatches as unknown[])
+    mockedQueryTree.mockResolvedValue(duplicateMatches as unknown as QueryResult)
 
     const files = new Map<string, IndexedFile>()
     files.set('dup.py', makeFile('eval(x); eval(y)'))
@@ -259,7 +260,7 @@ describe('scanWithTreeSitter', () => {
 
     mockedQueryTree.mockResolvedValue([
       { captures: { _fn: [fakeNode(0)] } },
-    ] as unknown[])
+    ] as unknown as QueryResult)
 
     const files = new Map<string, IndexedFile>()
     files.set('app.py', makeFile('os.system("ls")'))
@@ -282,7 +283,7 @@ describe('scanWithTreeSitter', () => {
 
     mockedQueryTree.mockResolvedValue([
       { captures: { fn: [fakeNode] } },
-    ] as unknown[])
+    ] as unknown as QueryResult)
 
     const lines = Array.from({ length: 15 }, () => 'pass')
     lines[9] = 'eval(x)'

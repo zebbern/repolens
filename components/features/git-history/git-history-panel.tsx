@@ -115,7 +115,9 @@ export function GitHistoryPanel({ navigateToFile }: GitHistoryPanelProps) {
     if (viewMode === 'blame') {
       fetchBlame(owner, name, defaultBranch, activeFile)
       // Also fetch file content for the blame view
-      setIsLoadingFile(true)
+      queueMicrotask(() => {
+        if (!cancelled) setIsLoadingFile(true)
+      })
       fetchFileViaProxy(owner, name, defaultBranch, activeFile)
         .then((content) => {
           if (cancelled) return

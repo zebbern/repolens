@@ -2,6 +2,9 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { renderHook, act } from '@testing-library/react'
 import type { ReactNode } from 'react'
 
+type MockRecord = Record<string, unknown>
+type MockStateUpdate = MockRecord[] | ((previous: MockRecord[]) => MockRecord[])
+
 // Mock the providers that useDocsEngine depends on
 const mockSetGeneratedDocs = vi.fn()
 const mockSetActiveDocId = vi.fn()
@@ -12,10 +15,10 @@ const mockStop = vi.fn()
 const mockSetGenContext = vi.fn()
 
 let mockStatus = 'ready'
-let mockMessages: any[] = []
+let mockMessages: MockRecord[] = []
 let mockIsGenerating = false
 let mockError: Error | null = null
-let mockGeneratedDocs: any[] = []
+let mockGeneratedDocs: MockRecord[] = []
 let mockActiveDocId: string | null = null
 
 vi.mock('@/providers/docs-provider', () => ({
@@ -86,7 +89,7 @@ describe('useDocsEngine', () => {
     mockActiveDocId = null
 
     // Make setGeneratedDocs work like a real state setter
-    mockSetGeneratedDocs.mockImplementation((updater: any) => {
+    mockSetGeneratedDocs.mockImplementation((updater: MockStateUpdate) => {
       if (typeof updater === 'function') {
         mockGeneratedDocs = updater(mockGeneratedDocs)
       } else {
@@ -368,7 +371,7 @@ describe('useDocsEngine', () => {
 
     const doc = {
       id: 'doc-42',
-      type: 'nonexistent-type' as any,
+      type: 'nonexistent-type' as never,
       title: 'Unknown',
       messages: [],
       createdAt: new Date(),
@@ -446,7 +449,7 @@ describe('useDocsEngine', () => {
     // The saved doc should use the preset label as title
     expect(mockSetGeneratedDocs).toHaveBeenCalledWith(expect.any(Function))
     const setterFn = mockSetGeneratedDocs.mock.calls.find(
-      (call: any) => typeof call[0] === 'function',
+      call => typeof call[0] === 'function',
     )?.[0]
     if (setterFn) {
       const result = setterFn([])
@@ -485,7 +488,7 @@ describe('useDocsEngine', () => {
 
     expect(mockSetGeneratedDocs).toHaveBeenCalledWith(expect.any(Function))
     const setterFn = mockSetGeneratedDocs.mock.calls.find(
-      (call: any) => typeof call[0] === 'function',
+      call => typeof call[0] === 'function',
     )?.[0]
     if (setterFn) {
       const result = setterFn([])
@@ -526,7 +529,7 @@ describe('useDocsEngine', () => {
 
     expect(mockSetGeneratedDocs).toHaveBeenCalledWith(expect.any(Function))
     const setterFn = mockSetGeneratedDocs.mock.calls.find(
-      (call: any) => typeof call[0] === 'function',
+      call => typeof call[0] === 'function',
     )?.[0]
     if (setterFn) {
       const result = setterFn([])

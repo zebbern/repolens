@@ -132,7 +132,7 @@ describe('APIKeysProvider', () => {
       })
 
       // Should have been called for openai and anthropic
-      const urls = mockFetch.mock.calls.map((call: [string, ...unknown[]]) => call[0]) as string[]
+      const urls = mockFetch.mock.calls.map(call => String(call[0]))
       expect(urls).toContain('/api/models/openai')
       expect(urls).toContain('/api/models/anthropic')
     })

@@ -36,8 +36,10 @@ build-log.txt
 # testing output
 playwright-report/
 test-results/
+test-artifacts/
 coverage/
 /test-screenshots/
+*-output.txt
 test-output*.txt
 build-output.txt
 git-log-temp.txt

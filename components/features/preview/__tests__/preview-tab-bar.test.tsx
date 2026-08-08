@@ -3,20 +3,22 @@ import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { PreviewTabBar } from '../preview-tab-bar'
 import type { PreviewTab } from '../tab-config'
+import type { ComponentProps } from 'react'
+import type { LucideIcon } from 'lucide-react'
 
 // Stub lucide icons as simple SVG elements
-const StubIcon = (props: any) => <svg data-testid="stub-icon" {...props} />
+const StubIcon = ((props: ComponentProps<'svg'>) => <svg data-testid="stub-icon" {...props} />) as LucideIcon
 
-const AI_TAB: PreviewTab = { id: 'docs', label: 'Docs', icon: StubIcon as any, requiresAI: true }
-const NON_AI_TAB: PreviewTab = { id: 'issues', label: 'Issues', icon: StubIcon as any }
+const AI_TAB: PreviewTab = { id: 'docs', label: 'Docs', icon: StubIcon, requiresAI: true }
+const NON_AI_TAB: PreviewTab = { id: 'issues', label: 'Issues', icon: StubIcon }
 
 const TABS: PreviewTab[] = [
-  { id: 'repo', label: 'Repo', icon: StubIcon as any },
+  { id: 'repo', label: 'Repo', icon: StubIcon },
   NON_AI_TAB,
   AI_TAB,
-  { id: 'diagram', label: 'Diagram', icon: StubIcon as any },
-  { id: 'code', label: 'Code', icon: StubIcon as any },
-  { id: 'changelog', label: 'Changelog', icon: StubIcon as any, requiresAI: true },
+  { id: 'diagram', label: 'Diagram', icon: StubIcon },
+  { id: 'code', label: 'Code', icon: StubIcon },
+  { id: 'changelog', label: 'Changelog', icon: StubIcon, requiresAI: true },
 ]
 
 const DEFAULT_PROPS = {

@@ -15,6 +15,8 @@ export default defineConfig({
   test: {
     globals: true,
     environment: 'jsdom',
+    pool: 'threads',
+    maxWorkers: 4,
     setupFiles: ['./test/setup.ts'],
     server: {
       deps: {

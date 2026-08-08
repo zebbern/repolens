@@ -266,10 +266,12 @@ export function MermaidDiagram({ chart, className, onNodeClick, onShowRawCode, r
 
     // Keep darkSvg in sync with the primary svgContent
     useEffect(() => {
-      setDarkSvg(svgContent)
-      // Invalidate cached light SVG when source changes
-      setLightSvg('')
-      setPreviewTheme('dark')
+      queueMicrotask(() => {
+        setDarkSvg(svgContent)
+        // Invalidate cached light SVG when source changes
+        setLightSvg('')
+        setPreviewTheme('dark')
+      })
     }, [svgContent])
 
     // Expose SVG element to parent via ref

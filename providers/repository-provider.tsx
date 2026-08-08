@@ -92,7 +92,7 @@ export function RepositoryProvider({ children }: { children: ReactNode }) {
   // Mirror codeIndex in a ref so stable actions (renameFiles) can read the
   // current content-store instance without depending on codeIndex identity.
   const codeIndexRef = useRef(codeIndex)
-  codeIndexRef.current = codeIndex
+  useEffect(() => { codeIndexRef.current = codeIndex }, [codeIndex])
   const [indexingProgress, setIndexingProgress] = useState<IndexingProgress>(DEFAULT_INDEXING_PROGRESS)
   const indexingAbortRef = useRef<AbortController | null>(null)
   const [searchState, setSearchState] = useState<SearchState>(DEFAULT_SEARCH_STATE)
@@ -122,7 +122,7 @@ export function RepositoryProvider({ children }: { children: ReactNode }) {
     if (codeIndex.contentStore instanceof LazyContentStore) {
       const fq = codeIndex.contentStore.getFetchQueue()
       fetchQueueRef.current = fq
-      setContentAvailability('metadata-only')
+      queueMicrotask(() => setContentAvailability('metadata-only'))
     } else {
       fetchQueueRef.current = null
     }
@@ -511,7 +511,7 @@ export function RepositoryProvider({ children }: { children: ReactNode }) {
       !indexingProgress.isComplete ||
       codeIndex.contentStore instanceof LazyContentStore
     ) {
-      setCodebaseAnalysis(null)
+      queueMicrotask(() => setCodebaseAnalysis(null))
       return
     }
     const timer = setTimeout(() => {

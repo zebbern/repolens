@@ -108,10 +108,14 @@ export function DiagramViewer({ files, codeIndex, className, onNavigateToFile }:
   const activeDiagramType = focusTarget ? 'focus' as DiagramType : selectedType
   const [diagram, setDiagram] = useState<AnyDiagramResult | null>(null)
   useEffect(() => {
-    if (!activeDiagramType) { setDiagram(null); return }
-    if (!files || files.length === 0 || codeIndex.totalFiles === 0) { setDiagram(null); return }
-    if (!analysis && activeDiagramType !== 'treemap') { setDiagram(null); return }
+    if (!activeDiagramType || !files?.length || codeIndex.totalFiles === 0 || (!analysis && activeDiagramType !== 'treemap')) {
+      queueMicrotask(() => setDiagram(null))
+      return
+    }
     let cancelled = false
+    queueMicrotask(() => {
+      if (!cancelled) setDiagram(null)
+    })
     generateDiagram(activeDiagramType, codeIndex, files, analysis || undefined, focusTarget || undefined, focusHops)
       .then(result => { if (!cancelled) setDiagram(result) })
       .catch(err => {
@@ -125,10 +129,13 @@ export function DiagramViewer({ files, codeIndex, className, onNavigateToFile }:
   const [asyncDiagram, setAsyncDiagram] = useState<AnyDiagramResult | null>(null)
   useEffect(() => {
     if (activeDiagramType !== 'classes' || !files || files.length === 0 || codeIndex.totalFiles === 0) {
-      setAsyncDiagram(null)
+      queueMicrotask(() => setAsyncDiagram(null))
       return
     }
     let cancelled = false
+    queueMicrotask(() => {
+      if (!cancelled) setAsyncDiagram(null)
+    })
     generateDiagramAsync('classes', codeIndex, files).then(result => {
       if (!cancelled) setAsyncDiagram(result)
     }).catch(() => { /* sync fallback is already showing */ })
@@ -139,7 +146,12 @@ export function DiagramViewer({ files, codeIndex, className, onNavigateToFile }:
   const activeDiagram = (activeDiagramType === 'classes' && asyncDiagram) ? asyncDiagram : diagram
 
   // Reset pan/zoom on change
-  useEffect(() => { setZoom(1); setPan({ x: 0, y: 0 }) }, [viewMode, focusTarget])
+  useEffect(() => {
+    queueMicrotask(() => {
+      setZoom(1)
+      setPan({ x: 0, y: 0 })
+    })
+  }, [viewMode, focusTarget])
 
   const handleWheel = useCallback((e: React.WheelEvent) => {
     e.preventDefault()

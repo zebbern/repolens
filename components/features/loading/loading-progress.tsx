@@ -157,7 +157,7 @@ export function LoadingProgress({
   const isComplete = stage === "ready" || stage === "cached"
 
   // Track elapsed time for cache hit display
-  const startTimeRef = useRef(Date.now())
+  const startTimeRef = useRef<number | null>(null)
   const [elapsedMs, setElapsedMs] = useState(0)
 
   useEffect(() => {
@@ -166,7 +166,7 @@ export function LoadingProgress({
 
   useEffect(() => {
     if (isComplete) {
-      setElapsedMs(Date.now() - startTimeRef.current)
+      setElapsedMs(Date.now() - (startTimeRef.current ?? Date.now()))
     }
   }, [isComplete])
 

@@ -307,13 +307,17 @@ export function CodeBrowser({ navigateToFile, navigateToLine, onNavigateComplete
 
   useEffect(() => {
     if (codeIndex.totalFiles === 0 || !codebaseAnalysis) {
-      setIssueCountByFile(new Map())
-      setAllIssues([])
+      queueMicrotask(() => {
+        setIssueCountByFile(new Map())
+        setAllIssues([])
+      })
       return
     }
 
     let stale = false
-    setScanLoading(true)
+    queueMicrotask(() => {
+      if (!stale) setScanLoading(true)
+    })
 
     scanInWorker(codeIndex, codebaseAnalysis)
       .then(results => {
@@ -342,12 +346,14 @@ export function CodeBrowser({ navigateToFile, navigateToLine, onNavigateComplete
   const activeFileIssues = useMemo<CodeIssue[]>(() => {
     if (!activeTab?.path || allIssues.length === 0) return []
     return allIssues.filter(issue => issue.file === activeTab.path)
-  }, [allIssues, activeTab?.path])
+  }, [allIssues, activeTab])
 
   // Reset inline action panel and hovered symbol when switching files
   useEffect(() => {
-    dismissAction()
-    setHoveredSymbolRange(null)
+    queueMicrotask(() => {
+      dismissAction()
+      setHoveredSymbolRange(null)
+    })
   }, [activeTabPath]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Debounce search query

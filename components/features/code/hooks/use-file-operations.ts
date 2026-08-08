@@ -118,14 +118,18 @@ export function useFileOperations({
     const allFiles = flattenFiles(files)
     const exactFile = allFiles.find(f => f.path === navigateToFile)
     if (exactFile) {
-      openFile(exactFile)
-      onNavigateComplete?.()
+      queueMicrotask(() => {
+        void openFile(exactFile)
+        onNavigateComplete?.()
+      })
       return
     }
     const childFile = allFiles.find(f => f.path.startsWith(navigateToFile + '/'))
     if (childFile) {
-      openFile(childFile)
-      onNavigateComplete?.()
+      queueMicrotask(() => {
+        void openFile(childFile)
+        onNavigateComplete?.()
+      })
     }
   }, [navigateToFile, files, openFile, onNavigateComplete])
 

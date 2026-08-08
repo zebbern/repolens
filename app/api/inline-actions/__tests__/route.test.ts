@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { NextRequest } from 'next/server'
 import * as z from 'zod'
 
 // ---------------------------------------------------------------------------
@@ -174,7 +175,7 @@ describe('Inline Actions API — POST handler', () => {
   })
 
   it('returns 400 for invalid JSON body', async () => {
-    const req = new Request('http://localhost/api/inline-actions', {
+    const req = new NextRequest('http://localhost/api/inline-actions', {
       method: 'POST',
       body: 'not json!!!',
       headers: { 'Content-Type': 'application/json' },
@@ -187,7 +188,7 @@ describe('Inline Actions API — POST handler', () => {
   })
 
   it('returns 422 for missing required fields', async () => {
-    const req = new Request('http://localhost/api/inline-actions', {
+    const req = new NextRequest('http://localhost/api/inline-actions', {
       method: 'POST',
       body: JSON.stringify({}),
       headers: { 'Content-Type': 'application/json' },
@@ -200,7 +201,7 @@ describe('Inline Actions API — POST handler', () => {
   })
 
   it('returns 422 for invalid action type', async () => {
-    const req = new Request('http://localhost/api/inline-actions', {
+    const req = new NextRequest('http://localhost/api/inline-actions', {
       method: 'POST',
       body: JSON.stringify(validRequest({ action: 'hack' })),
       headers: { 'Content-Type': 'application/json' },
@@ -211,7 +212,7 @@ describe('Inline Actions API — POST handler', () => {
   })
 
   it('returns 422 for invalid provider', async () => {
-    const req = new Request('http://localhost/api/inline-actions', {
+    const req = new NextRequest('http://localhost/api/inline-actions', {
       method: 'POST',
       body: JSON.stringify(validRequest({ provider: 'invalid-provider' })),
       headers: { 'Content-Type': 'application/json' },
@@ -222,7 +223,7 @@ describe('Inline Actions API — POST handler', () => {
   })
 
   it('calls createAIModel with correct provider, model, and apiKey', async () => {
-    const req = new Request('http://localhost/api/inline-actions', {
+    const req = new NextRequest('http://localhost/api/inline-actions', {
       method: 'POST',
       body: JSON.stringify(validRequest({
         provider: 'anthropic',
@@ -238,7 +239,7 @@ describe('Inline Actions API — POST handler', () => {
   })
 
   it('calls streamText with action-specific system prompt', async () => {
-    const req = new Request('http://localhost/api/inline-actions', {
+    const req = new NextRequest('http://localhost/api/inline-actions', {
       method: 'POST',
       body: JSON.stringify(validRequest({ action: 'complexity' })),
       headers: { 'Content-Type': 'application/json' },
@@ -254,7 +255,7 @@ describe('Inline Actions API — POST handler', () => {
   })
 
   it('returns a streaming response for a valid request', async () => {
-    const req = new Request('http://localhost/api/inline-actions', {
+    const req = new NextRequest('http://localhost/api/inline-actions', {
       method: 'POST',
       body: JSON.stringify(validRequest()),
       headers: { 'Content-Type': 'application/json' },
@@ -268,7 +269,7 @@ describe('Inline Actions API — POST handler', () => {
 
   it('passes abortSignal from request to streamText', async () => {
     const controller = new AbortController()
-    const req = new Request('http://localhost/api/inline-actions', {
+    const req = new NextRequest('http://localhost/api/inline-actions', {
       method: 'POST',
       body: JSON.stringify(validRequest()),
       headers: { 'Content-Type': 'application/json' },
@@ -284,7 +285,7 @@ describe('Inline Actions API — POST handler', () => {
   it('returns 500 when streamText throws', async () => {
     mockStreamText.mockImplementation(() => { throw new Error('AI unavailable') })
 
-    const req = new Request('http://localhost/api/inline-actions', {
+    const req = new NextRequest('http://localhost/api/inline-actions', {
       method: 'POST',
       body: JSON.stringify(validRequest()),
       headers: { 'Content-Type': 'application/json' },

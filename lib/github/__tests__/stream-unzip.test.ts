@@ -3,6 +3,12 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { zipSync, strToU8 } from 'fflate'
 import { streamUnzipFiles } from '../zipball'
 
+function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {
+  const buffer = new ArrayBuffer(bytes.byteLength)
+  new Uint8Array(buffer).set(bytes)
+  return buffer
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -20,7 +26,7 @@ function createZipResponse(
     archive[`${rootPrefix}/${path}`] = typeof content === 'string' ? strToU8(content) : content
   }
   const compressed = zipSync(archive)
-  return new Response(new Blob([compressed]).stream())
+  return new Response(new Blob([toArrayBuffer(compressed)]).stream())
 }
 
 /**
@@ -255,7 +261,7 @@ describe('streamUnzipFiles', () => {
   it('returns { count: 0, totalSize: 0 } for a zip with no indexable files', async () => {
     // Empty zip
     const compressed = zipSync({})
-    const response = new Response(new Blob([compressed]).stream())
+    const response = new Response(new Blob([toArrayBuffer(compressed)]).stream())
 
     const received: string[] = []
     const result = await streamUnzipFiles(response, (path) => {

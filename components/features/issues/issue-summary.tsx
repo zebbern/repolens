@@ -168,7 +168,7 @@ export function IssueSummary({
             </div>
           </TooltipTrigger>
           <TooltipContent side="bottom">
-            <p className="text-xs">Issues suppressed via inline comments (e.g. <code>// repolens-ignore</code>)</p>
+            <p className="text-xs">Issues suppressed via inline comments (e.g. <code>{'// repolens-ignore'}</code>)</p>
           </TooltipContent>
         </Tooltip>
       </div>

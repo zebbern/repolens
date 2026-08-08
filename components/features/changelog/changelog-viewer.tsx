@@ -87,8 +87,11 @@ export function ChangelogViewer({ className }: ChangelogViewerProps) {
   useEffect(() => {
     if (!repo) return
     let cancelled = false
-    setRefsLoading(true)
-    setRefsError(null)
+    queueMicrotask(() => {
+      if (cancelled) return
+      setRefsLoading(true)
+      setRefsError(null)
+    })
 
     Promise.all([
       fetchTagsViaProxy(repo.owner, repo.name, 100).catch(() => [] as GitHubTag[]),

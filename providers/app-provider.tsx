@@ -54,7 +54,9 @@ export function AppProvider({ children }: AppProviderProps) {
   // Restore the persisted chat-collapsed preference after mount (avoids SSR mismatch).
   useEffect(() => {
     try {
-      if (localStorage.getItem(CHAT_COLLAPSED_KEY) === '1') setIsChatCollapsed(true)
+      if (localStorage.getItem(CHAT_COLLAPSED_KEY) === '1') {
+        queueMicrotask(() => setIsChatCollapsed(true))
+      }
     } catch {
       // localStorage unavailable (private mode / SSR) — ignore.
     }

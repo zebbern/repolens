@@ -105,9 +105,11 @@ export function PreviewPanel({ className }: { className?: string }) {
     const shared = parseShareableUrl()
     if (!shared) return
     hasAutoLoaded.current = true
-    setRepoUrl(shared.repoUrl)
+    queueMicrotask(() => {
+      setRepoUrl(shared.repoUrl)
+      if (shared.view) setActiveTab(shared.view)
+    })
     connectRepository(shared.repoUrl)
-    if (shared.view) setActiveTab(shared.view)
   }, [isTokenHydrated, repo, connectRepository])
 
   // Shareable URL: sync URL bar when repo or tab changes
@@ -159,11 +161,6 @@ export function PreviewPanel({ className }: { className?: string }) {
     }
   }, [])
 
-  const handleGlobalSearchSelect = useCallback((path: string, line?: number) => {
-    setShowGlobalSearch(false)
-    handleNavigateToFile(path, line)
-  }, [])
-
   // Navigate to a file from diagrams — switch to code tab
   const [pendingNavigateFile, setPendingNavigateFile] = useState<string | null>(null)
   const [pendingNavigateLine, setPendingNavigateLine] = useState<number | null>(null)
@@ -172,6 +169,10 @@ export function PreviewPanel({ className }: { className?: string }) {
     setPendingNavigateLine(line ?? null)
     setActiveTab("code")
   }, [])
+  const handleGlobalSearchSelect = useCallback((path: string, line?: number) => {
+    setShowGlobalSearch(false)
+    handleNavigateToFile(path, line)
+  }, [handleNavigateToFile])
   const handleNavigateComplete = useCallback(() => {
     setPendingNavigateFile(null)
     setPendingNavigateLine(null)

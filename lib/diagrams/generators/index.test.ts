@@ -53,7 +53,7 @@ describe('generateDiagram dispatcher', () => {
   })
 
   it('defaults to topology for unrecognized type', async () => {
-    const result = await generateDiagram('unknown' as any, codeIndex, files, analysis)
+    const result = await generateDiagram('unknown' as never, codeIndex, files, analysis)
     expect(result.type).toBe('topology')
   })
 

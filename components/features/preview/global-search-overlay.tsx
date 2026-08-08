@@ -288,8 +288,10 @@ export function GlobalSearchOverlay({
 
   // Reset selected index when query or tab changes
   useEffect(() => {
-    setSelectedIndex(0)
-    setCollapsedFiles(new Set())
+    queueMicrotask(() => {
+      setSelectedIndex(0)
+      setCollapsedFiles(new Set())
+    })
   }, [debouncedQuery, activeTab])
 
   /* ── File search ──────────────────────────────────────────────── */
@@ -334,14 +336,18 @@ export function GlobalSearchOverlay({
 
   useEffect(() => {
     if (activeTab !== 'code' || !debouncedQuery.trim()) {
-      setCodeResults([])
-      setTotalCodeMatches(0)
-      setIsSearching(false)
+      queueMicrotask(() => {
+        setCodeResults([])
+        setTotalCodeMatches(0)
+        setIsSearching(false)
+      })
       return
     }
 
     let stale = false
-    setIsSearching(true)
+    queueMicrotask(() => {
+      if (!stale) setIsSearching(true)
+    })
     cancelPendingSearches()
 
     searchInWorker(codeIndex, debouncedQuery, codeSearchOptions)
@@ -427,7 +433,9 @@ export function GlobalSearchOverlay({
     if (activeTab !== 'symbols') return
 
     let stale = false
-    setIsExtractingSymbols(true)
+    queueMicrotask(() => {
+      if (!stale) setIsExtractingSymbols(true)
+    })
 
     // Collect all file paths and fetch content in batch
     const paths = Array.from(codeIndex.files.keys())
@@ -475,7 +483,9 @@ export function GlobalSearchOverlay({
 
   // Clamp selectedIndex when itemCount shrinks (e.g. file collapse)
   useEffect(() => {
-    setSelectedIndex(prev => Math.min(prev, Math.max(0, itemCount - 1)))
+    queueMicrotask(() => {
+      setSelectedIndex(prev => Math.min(prev, Math.max(0, itemCount - 1)))
+    })
   }, [itemCount])
 
   const selectItem = useCallback((index: number) => {

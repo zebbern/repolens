@@ -31,21 +31,10 @@ export function PRReviewPanel() {
     }
   }, [owner, name, loadPRList])
 
-  // Auto-select first file when PR is loaded
-  useEffect(() => {
-    if (files.length > 0 && !selectedFilename) {
-      setSelectedFilename(files[0].filename)
-    }
-  }, [files, selectedFilename])
-
-  // Reset selected file when switching PRs
-  useEffect(() => {
-    setSelectedFilename(null)
-  }, [pr?.number])
-
   const handleSelectPR = useCallback(
     (prMeta: { number: number }) => {
       if (owner && name) {
+        setSelectedFilename(null)
         selectPR(owner, name, prMeta.number)
       }
     },
@@ -122,7 +111,8 @@ export function PRReviewPanel() {
   }
 
   // PR selected — show header + sidebar + diff view
-  const selectedFile = files.find((f) => f.filename === selectedFilename) ?? files[0] ?? null
+  const effectiveSelectedFilename = selectedFilename ?? files[0]?.filename ?? null
+  const selectedFile = files.find((f) => f.filename === effectiveSelectedFilename) ?? files[0] ?? null
   const fileFindings = findings.filter((f) => f.file === selectedFile?.filename)
 
   return (
@@ -145,7 +135,7 @@ export function PRReviewPanel() {
       <div className="flex flex-1 overflow-hidden">
         <FileNavigator
           files={files}
-          selectedFile={selectedFilename}
+          selectedFile={effectiveSelectedFilename}
           onSelectFile={setSelectedFilename}
           totalChangedFiles={pr?.changedFiles}
           isFileTruncated={isFileTruncated}

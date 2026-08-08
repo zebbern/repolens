@@ -43,12 +43,12 @@ vi.mock('@/lib/diagrams/diagram-data', () => ({
   generateProjectSummary: vi.fn(() => ({ data: null })),
 }))
 
-const mockDownloadFile = vi.fn<(...args: any[]) => void>()
-const mockCopyToClipboard = vi.fn<(...args: any[]) => Promise<boolean>>().mockResolvedValue(true)
-const mockExportToJson = vi.fn<(...args: any[]) => string>(() => '{}')
-const mockExportToMarkdown = vi.fn<(...args: any[]) => string>(() => '# Report')
-const mockExportSummaryClipboard = vi.fn<(...args: any[]) => string>(() => 'Summary text')
-const mockBuildShareableUrl = vi.fn<(...args: any[]) => string>(() => 'https://example.com/share')
+const mockDownloadFile = vi.fn<(...args: unknown[]) => void>()
+const mockCopyToClipboard = vi.fn<(...args: unknown[]) => Promise<boolean>>().mockResolvedValue(true)
+const mockExportToJson = vi.fn<(...args: unknown[]) => string>(() => '{}')
+const mockExportToMarkdown = vi.fn<(...args: unknown[]) => string>(() => '# Report')
+const mockExportSummaryClipboard = vi.fn<(...args: unknown[]) => string>(() => 'Summary text')
+const mockBuildShareableUrl = vi.fn<(...args: unknown[]) => string>(() => 'https://example.com/share')
 
 vi.mock('@/lib/export', () => ({
   downloadFile: (...args: unknown[]) => mockDownloadFile(...(args as Parameters<typeof mockDownloadFile>)),

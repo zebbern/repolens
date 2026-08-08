@@ -1,6 +1,18 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import type { ChangeEvent } from 'react'
+
+interface LandingPageProps {
+  onConnect: () => void
+  repoUrl: string
+  onRepoUrlChange: (url: string) => void
+}
+
+interface PreviewTabBarProps {
+  activeTab: string
+  onTabChange: (tab: string) => void
+}
 
 // ---------------------------------------------------------------------------
 // Provider mock — default returns with API key present
@@ -81,13 +93,13 @@ vi.mock('@/components/features/repo/project-summary', () => ({
 }))
 
 vi.mock('@/components/features/landing/landing-page', () => ({
-  LandingPage: (props: any) => (
+  LandingPage: (props: LandingPageProps) => (
     <div data-testid="landing-page">
       <button onClick={props.onConnect}>Connect</button>
       <input
         data-testid="repo-url-input"
         value={props.repoUrl}
-        onChange={(e: any) => props.onRepoUrlChange(e.target.value)}
+        onChange={(event: ChangeEvent<HTMLInputElement>) => props.onRepoUrlChange(event.target.value)}
       />
     </div>
   ),
@@ -123,7 +135,7 @@ vi.mock('../preview-repo-header', () => ({
 }))
 
 vi.mock('../preview-tab-bar', () => ({
-  PreviewTabBar: ({ activeTab, onTabChange }: any) => (
+  PreviewTabBar: ({ activeTab, onTabChange }: PreviewTabBarProps) => (
     <div data-testid="tab-bar">
       <button onClick={() => onTabChange('issues')}>issues-tab</button>
       <button onClick={() => onTabChange('docs')}>docs-tab</button>

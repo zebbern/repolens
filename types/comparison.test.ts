@@ -21,6 +21,9 @@ describe('comparison types', () => {
       languageBreakdown: { TypeScript: 80, CSS: 20 },
       stars: 50,
       forks: 10,
+      openIssues: 3,
+      pushedAt: '2026-08-01T00:00:00Z',
+      license: 'MIT',
     }
 
     const comparisonRepo: ComparisonRepo = {
@@ -33,6 +36,9 @@ describe('comparison types', () => {
         defaultBranch: 'main',
         stars: 50,
         forks: 10,
+        openIssuesCount: 3,
+        pushedAt: '2026-08-01T00:00:00Z',
+        license: 'MIT',
         language: 'TypeScript',
         topics: [],
         isPrivate: false,

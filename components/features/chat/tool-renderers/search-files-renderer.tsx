@@ -98,25 +98,20 @@ function SearchResultEntry({ entry, query }: { entry: SearchResult; query: strin
 function HighlightedText({ text, query }: { text: string; query: string }) {
   if (!query) return <>{text}</>
 
-  try {
-    const escaped = query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
-    const regex = new RegExp(`(${escaped})`, "gi")
-    const parts = text.split(regex)
+  const escaped = query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+  const parts = text.split(new RegExp(`(${escaped})`, "gi"))
 
-    return (
-      <>
-        {parts.map((part, i) =>
-          regex.test(part) ? (
-            <mark key={i} className="bg-yellow-300/30 text-yellow-700 dark:text-yellow-300 rounded-sm px-px">
-              {part}
-            </mark>
-          ) : (
-            <span key={i}>{part}</span>
-          ),
-        )}
-      </>
-    )
-  } catch {
-    return <>{text}</>
-  }
+  return (
+    <>
+      {parts.map((part, index) =>
+        index % 2 === 1 ? (
+          <mark key={index} className="bg-yellow-300/30 text-yellow-700 dark:text-yellow-300 rounded-sm px-px">
+            {part}
+          </mark>
+        ) : (
+          <span key={index}>{part}</span>
+        ),
+      )}
+    </>
+  )
 }

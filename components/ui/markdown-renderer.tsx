@@ -335,7 +335,9 @@ function MermaidDiagramBlock({ children }: { children: string }) {
   }, [resolvedTheme])
 
   // Reset raw code panel when chart content changes
-  useEffect(() => { setShowRawCode(false) }, [children])
+  useEffect(() => {
+    queueMicrotask(() => setShowRawCode(false))
+  }, [children])
 
   const handleDownloadSvg = useCallback(() => {
     const svgEl = mermaidRef.current?.getSvgElement()

@@ -123,13 +123,17 @@ export function DepsPanel({ codeIndex }: DepsPanelProps) {
     if (codeIndex.totalFiles > 0) {
       const cached = getTabCache<{ healthData: DependencyHealth[]; depTypes: Map<string, 'production' | 'dev'>; cveResults: CveResult[] }>('deps')
       if (cached) {
-        setHealthData(cached.healthData)
-        setDepTypes(cached.depTypes)
-        setCveResults(cached.cveResults)
-        setLoadState('loaded')
+        queueMicrotask(() => {
+          setHealthData(cached.healthData)
+          setDepTypes(cached.depTypes)
+          setCveResults(cached.cveResults)
+          setLoadState('loaded')
+        })
         return
       }
-      loadDependencies()
+      queueMicrotask(() => {
+        void loadDependencies()
+      })
     }
   }, [codeIndex, loadDependencies, getTabCache])
 

@@ -34,11 +34,13 @@ export function GitHubTokenProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const stored = loadGitHubToken()
     if (stored) {
-      setTokenState(stored)
       tokenRef.current = stored
       setGitHubPAT(stored)
     }
-    setIsHydrated(true)
+    queueMicrotask(() => {
+      if (stored) setTokenState(stored)
+      setIsHydrated(true)
+    })
   }, [])
 
   const setToken = useCallback((newToken: string) => {

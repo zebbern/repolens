@@ -1,6 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { renderHook, act } from '@testing-library/react'
 
+type MockRecord = Record<string, unknown>
+type MockStateUpdate = MockRecord[] | ((previous: MockRecord[]) => MockRecord[])
+
 // ---------------------------------------------------------------------------
 // Mock the provider hooks that useChangelogEngine depends on
 // ---------------------------------------------------------------------------
@@ -14,10 +17,10 @@ const mockStop = vi.fn()
 const mockSetGenContext = vi.fn()
 
 let mockStatus = 'ready'
-let mockMessages: any[] = []
+let mockMessages: MockRecord[] = []
 let mockIsGenerating = false
 let mockError: Error | null = null
-let mockGeneratedChangelogs: any[] = []
+let mockGeneratedChangelogs: MockRecord[] = []
 let mockActiveChangelogId: string | null = null
 
 vi.mock('@/providers/changelog-provider', () => ({
@@ -67,7 +70,7 @@ describe('useChangelogEngine', () => {
     mockError = null
     mockGeneratedChangelogs = []
     mockActiveChangelogId = null
-    mockSetGeneratedChangelogs.mockImplementation((updater: any) => {
+    mockSetGeneratedChangelogs.mockImplementation((updater: MockStateUpdate) => {
       if (typeof updater === 'function') mockGeneratedChangelogs = updater(mockGeneratedChangelogs)
       else mockGeneratedChangelogs = updater
     })
@@ -163,7 +166,7 @@ describe('useChangelogEngine', () => {
 
   it('handleRegenerate is no-op for unknown preset type', () => {
     const { result } = renderHook(() => useChangelogEngine())
-    act(() => { result.current.handleRegenerate({ id: 'cl-42', type: 'nonexistent' as any, title: 'Unknown', messages: [], createdAt: new Date() }) })
+    act(() => { result.current.handleRegenerate({ id: 'cl-42', type: 'nonexistent' as never, title: 'Unknown', messages: [], createdAt: new Date() }) })
     expect(mockSetMessages).not.toHaveBeenCalled()
   })
 
@@ -222,7 +225,7 @@ describe('useChangelogEngine', () => {
     rerender()
     mockStatus = 'ready'; rerender()
     expect(mockSetGeneratedChangelogs).toHaveBeenCalledWith(expect.any(Function))
-    const setterFn = mockSetGeneratedChangelogs.mock.calls.find((call: any) => typeof call[0] === 'function')?.[0]
+    const setterFn = mockSetGeneratedChangelogs.mock.calls.find(call => typeof call[0] === 'function')?.[0]
     if (setterFn) {
       const saved = setterFn([])
       expect(saved[0]?.type).toBe('conventional')
@@ -237,7 +240,7 @@ describe('useChangelogEngine', () => {
     act(() => { vi.advanceTimersByTime(100) })
     mockStatus = 'streaming'; mockMessages = [{ role: 'user', content: 'p', parts: [] }, { role: 'assistant', content: 'n', parts: [{ type: 'text', text: 'n' }] }]; rerender()
     mockStatus = 'ready'; rerender()
-    const setterFn = mockSetGeneratedChangelogs.mock.calls.find((call: any) => typeof call[0] === 'function')?.[0]
+    const setterFn = mockSetGeneratedChangelogs.mock.calls.find(call => typeof call[0] === 'function')?.[0]
     if (setterFn) { const r = setterFn([]); expect(r[0]?.title).toContain('v1.0..v2.0') }
   })
 
@@ -249,7 +252,7 @@ describe('useChangelogEngine', () => {
     act(() => { vi.advanceTimersByTime(100) })
     mockStatus = 'streaming'; mockMessages = [{ role: 'user', content: 'p', parts: [] }, { role: 'assistant', content: 'o', parts: [{ type: 'text', text: 'o' }] }]; rerender()
     mockStatus = 'ready'; rerender()
-    const setterFn = mockSetGeneratedChangelogs.mock.calls.find((call: any) => typeof call[0] === 'function')?.[0]
+    const setterFn = mockSetGeneratedChangelogs.mock.calls.find(call => typeof call[0] === 'function')?.[0]
     if (setterFn) { const r = setterFn([]); expect(r[0]?.title).toHaveLength(53); expect(r[0]?.title).toMatch(/\.{3}$/) }
   })
 })

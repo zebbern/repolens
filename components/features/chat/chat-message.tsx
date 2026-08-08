@@ -83,18 +83,22 @@ function cleanControlChars(text: string): string {
   return text.replace(/<ctrl\d+>/gi, "")
 }
 
+function parseObject(text: string): object | null {
+  try {
+    const parsed: unknown = JSON.parse(text)
+    return typeof parsed === "object" && parsed !== null ? parsed : null
+  } catch {
+    return null
+  }
+}
+
 /** Render a tool result in a readable, contained format */
 function ToolResultContent({ result }: { result: unknown }) {
   if (typeof result === "string") {
     const cleaned = cleanControlChars(result)
-    // Try parsing as JSON for better formatting
-    try {
-      const parsed: unknown = JSON.parse(cleaned)
-      if (typeof parsed === "object" && parsed !== null) {
-        return <FormattedObject value={parsed} />
-      }
-    } catch {
-      // Not JSON — render as plain text
+    const parsed = parseObject(cleaned)
+    if (parsed) {
+      return <FormattedObject value={parsed} />
     }
     return (
       <div className="whitespace-pre-wrap wrap-break-word text-[11px] font-mono text-text-secondary">

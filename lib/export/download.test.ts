@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { downloadFile } from './download'
 
 describe('downloadFile', () => {
-  let mockClick: ReturnType<typeof vi.fn>
+  let mockClick = vi.fn<() => void>()
   let appendedElement: HTMLAnchorElement | null
 
   beforeEach(() => {

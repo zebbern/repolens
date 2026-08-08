@@ -2,10 +2,21 @@ import { describe, it, expect, vi } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import React from 'react'
 
+interface MockPart {
+  type: string
+  text?: string
+  toolName?: string
+}
+
+interface MockMessage {
+  role: string
+  parts?: MockPart[]
+}
+
 // Mock AI module
 vi.mock('ai', () => ({
-  isToolUIPart: (part: any) => part.type === 'tool-invocation',
-  getToolName: (part: any) => part.toolName || 'unknown',
+  isToolUIPart: (part: MockPart) => part.type === 'tool-invocation',
+  getToolName: (part: MockPart) => part.toolName || 'unknown',
 }))
 
 vi.mock('@/components/ui/markdown-renderer', () => ({
@@ -14,10 +25,10 @@ vi.mock('@/components/ui/markdown-renderer', () => ({
 }))
 
 vi.mock('@/providers/changelog-provider', () => ({
-  getAssistantText: (msgs: any[]) => {
+  getAssistantText: (msgs: MockMessage[]) => {
     return msgs
-      .filter((m: any) => m.role === 'assistant')
-      .flatMap((m: any) => (m.parts || []).filter((p: any) => p.type === 'text').map((p: any) => p.text))
+      .filter(m => m.role === 'assistant')
+      .flatMap(m => (m.parts || []).filter(p => p.type === 'text').map(p => p.text))
       .join('')
   },
 }))
@@ -55,7 +66,7 @@ describe('getPresetIcon', () => {
   })
 
   it('returns fallback icon for unknown type', () => {
-    const icon = getPresetIcon('nonexistent' as any)
+    const icon = getPresetIcon('nonexistent' as never)
     expect(icon).toBeDefined()
   })
 
@@ -105,14 +116,14 @@ describe('ChangelogMarkdownContent', () => {
     const messages = [
       { role: 'assistant', parts: [{ type: 'text', text: '# Changelog\n- Feature A' }] },
     ]
-    render(React.createElement(ChangelogMarkdownContent, { messages: messages as any }))
+    render(React.createElement(ChangelogMarkdownContent, { messages: messages as never }))
     expect(screen.getByTestId('markdown-renderer')).toBeDefined()
     expect(screen.getByTestId('markdown-renderer').textContent).toContain('# Changelog')
   })
 
   it('renders nothing when no assistant text', () => {
     const messages = [{ role: 'user', parts: [{ type: 'text', text: 'Hello' }] }]
-    const { container } = render(React.createElement(ChangelogMarkdownContent, { messages: messages as any }))
+    const { container } = render(React.createElement(ChangelogMarkdownContent, { messages: messages as never }))
     expect(container.innerHTML).toBe('')
   })
 
@@ -129,7 +140,7 @@ describe('ChangelogMarkdownContent', () => {
 describe('ChangelogToolActivity', () => {
   it('shows "Starting changelog generation..." with no tool calls or text', () => {
     const messages = [{ role: 'assistant', parts: [] }]
-    render(React.createElement(ChangelogToolActivity, { messages: messages as any }))
+    render(React.createElement(ChangelogToolActivity, { messages: messages as never }))
     expect(screen.getByText('Starting changelog generation...')).toBeDefined()
   })
 
@@ -144,7 +155,7 @@ describe('ChangelogToolActivity', () => {
         state: 'call',
       }],
     }]
-    render(React.createElement(ChangelogToolActivity, { messages: messages as any }))
+    render(React.createElement(ChangelogToolActivity, { messages: messages as never }))
     expect(screen.getByText('Reading codebase...')).toBeDefined()
   })
 
@@ -157,7 +168,7 @@ describe('ChangelogToolActivity', () => {
         { type: 'text', text: 'Changelog output' },
       ],
     }]
-    render(React.createElement(ChangelogToolActivity, { messages: messages as any }))
+    render(React.createElement(ChangelogToolActivity, { messages: messages as never }))
     expect(screen.getByText('Read 2 files')).toBeDefined()
   })
 
@@ -169,7 +180,7 @@ describe('ChangelogToolActivity', () => {
         { type: 'text', text: 'done' },
       ],
     }]
-    render(React.createElement(ChangelogToolActivity, { messages: messages as any }))
+    render(React.createElement(ChangelogToolActivity, { messages: messages as never }))
     expect(screen.getByText('1 searches')).toBeDefined()
   })
 })

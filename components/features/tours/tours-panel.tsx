@@ -76,7 +76,7 @@ export function ToursPanel({ className, onNavigateToFile }: ToursPanelProps) {
         setIsGenerating(false)
       }
     },
-    [repo?.fullName, codeIndex, saveTour, loadTours],
+    [repo, codeIndex, saveTour, loadTours],
   )
 
   const handleDelete = useCallback(

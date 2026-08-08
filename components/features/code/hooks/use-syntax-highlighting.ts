@@ -131,13 +131,17 @@ export function useSyntaxHighlighting(
     return content.split("\n").map((line) => [{ content: line || " " }])
   }, [content])
 
-  const [tokenizedLines, setTokenizedLines] = useState<SyntaxToken[][] | null>(null)
+  const [tokenizedResult, setTokenizedResult] = useState<{
+    content: string
+    language: string
+    theme: string
+    lines: SyntaxToken[][]
+  } | null>(null)
   const requestIdRef = useRef(0)
 
   useEffect(() => {
-    if (lang === "text") return
-
     const requestId = ++requestIdRef.current
+    if (lang === "text") return
 
     ;(async () => {
       try {
@@ -156,15 +160,19 @@ export function useSyntaxHighlighting(
           lineTokens.map((t) => ({ content: t.content, color: t.color })),
         )
 
-        setTokenizedLines(mapped)
+        setTokenizedResult({ content, language: lang, theme: themeName, lines: mapped })
       } catch {
         // Fallback to plain text on error
         if (requestId === requestIdRef.current) {
-          setTokenizedLines(null)
+          setTokenizedResult(null)
         }
       }
     })()
   }, [content, lang, themeName])
 
-  return lang === "text" ? plainLines : (tokenizedLines ?? plainLines)
+  const matchesCurrentInput = tokenizedResult?.content === content &&
+    tokenizedResult.language === lang &&
+    tokenizedResult.theme === themeName
+
+  return matchesCurrentInput ? tokenizedResult.lines : plainLines
 }

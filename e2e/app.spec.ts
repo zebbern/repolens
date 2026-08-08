@@ -1,4 +1,9 @@
 import { test, expect, type Page } from '@playwright/test';
+import {
+  FIXTURE_OWNER,
+  FIXTURE_REPO,
+  installGitHubRepositoryFixture,
+} from './fixtures/github-repository'
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -31,23 +36,21 @@ test.describe('App', () => {
 // ---------------------------------------------------------------------------
 
 test.describe('URL rewrite', () => {
-  test.describe.configure({ retries: 2 })
-
   test('/{owner}/{repo} path loads the repo the same as ?repo= query param', async ({ page }) => {
-    test.setTimeout(180_000)
+    await installGitHubRepositoryFixture(page)
 
     // Navigate using the path-based URL — proxy internally rewrites
-    // to /?repo=https://github.com/public-apis/public-apis (rewrite, NOT redirect,
+    // to /?repo=https://github.com/repolens-fixtures/sample-repository (rewrite, NOT redirect,
     // so browser URL stays as the original path)
-    await page.goto('/public-apis/public-apis', { waitUntil: 'networkidle' })
+    await page.goto(`/${FIXTURE_OWNER}/${FIXTURE_REPO}`, { waitUntil: 'networkidle' })
     await expect(page).toHaveTitle(/RepoLens/i)
 
     // URL should NOT have changed (rewrite, not redirect)
-    expect(page.url()).toContain('/public-apis/public-apis')
+    expect(page.url()).toContain(`/${FIXTURE_OWNER}/${FIXTURE_REPO}`)
 
     // The page should load and auto-connect. Wait for the repo name to appear
     // in the page body (e.g. in recently analyzed, file tree, or header)
-    await waitForBodyText(page, 'public-apis', 30_000)
+    await waitForBodyText(page, `${FIXTURE_OWNER}/${FIXTURE_REPO}`, 30_000)
   })
 
   test('reserved segment /compare is not rewritten', async ({ page }) => {

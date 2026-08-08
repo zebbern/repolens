@@ -44,8 +44,6 @@ async function waitForBodyText(page: Page, text: string, timeoutMs = 30_000) {
 // ---------------------------------------------------------------------------
 
 test.describe('Git history tool integration', () => {
-  test.describe.configure({ retries: 2 })
-
   test('app loads without JS errors with getGitHistory tool registered', async ({ page }) => {
     test.setTimeout(120_000)
 

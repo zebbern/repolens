@@ -80,8 +80,6 @@ test.describe('Page load', () => {
 // ---------------------------------------------------------------------------
 
 test.describe('Tab switching', () => {
-  test.describe.configure({ retries: 2 })
-
   test('all tabs show correct empty states when no repo is connected', async ({ page }) => {
     test.setTimeout(300_000) // generous for dev compilation
 

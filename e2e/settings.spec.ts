@@ -38,8 +38,6 @@ async function loadApp(page: Page) {
 // ---------------------------------------------------------------------------
 
 test.describe('Settings modal', () => {
-  test.describe.configure({ retries: 2 })
-
   test('settings modal open, tabs, input, and close all work correctly', async ({ page }) => {
     test.setTimeout(180_000) // generous for dev compilation
 

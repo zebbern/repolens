@@ -20,7 +20,7 @@ const pullsQuerySchema = z.object({
 })
 
 export const GET = withGitHubCachePolicy(async function GET(request: NextRequest, token: string | undefined) {
-  const rateLimited = applyRateLimit(request)
+  const rateLimited = applyRateLimit(request, { bucket: '/api/github/pulls' })
   if (rateLimited) return rateLimited
 
   const params = pullsQuerySchema.safeParse({

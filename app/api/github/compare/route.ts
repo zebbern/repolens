@@ -17,7 +17,7 @@ const compareQuerySchema = z.object({
 })
 
 export const GET = withGitHubCachePolicy(async function GET(request: NextRequest, token: string | undefined) {
-  const rateLimited = applyRateLimit(request)
+  const rateLimited = applyRateLimit(request, { bucket: '/api/github/compare' })
   if (rateLimited) return rateLimited
 
   const params = compareQuerySchema.safeParse({

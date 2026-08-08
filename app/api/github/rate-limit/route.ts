@@ -9,7 +9,7 @@ export const runtime = 'edge'
 const GITHUB_API_BASE = "https://api.github.com"
 
 export const GET = withGitHubCachePolicy(async function GET(request: NextRequest, token: string | undefined) {
-  const rateLimited = applyRateLimit(request)
+  const rateLimited = applyRateLimit(request, { bucket: '/api/github/rate-limit' })
   if (rateLimited) return rateLimited
 
   try {

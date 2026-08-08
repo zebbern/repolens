@@ -15,7 +15,7 @@ const zipballSchema = z.object({
 })
 
 export async function POST(request: NextRequest): Promise<Response> {
-  const rateLimited = applyRateLimit(request)
+  const rateLimited = applyRateLimit(request, { bucket: '/api/github/zipball' })
   if (rateLimited) return rateLimited
 
   let body: unknown

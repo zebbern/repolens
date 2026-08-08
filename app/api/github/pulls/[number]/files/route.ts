@@ -21,7 +21,7 @@ export const GET = withGitHubCachePolicy(async function GET(
   token: string | undefined,
   { params }: { params: Promise<{ number: string }> },
 ) {
-  const rateLimited = applyRateLimit(request)
+  const rateLimited = applyRateLimit(request, { bucket: '/api/github/pulls/[number]/files' })
   if (rateLimited) return rateLimited
 
   const { number: numberStr } = await params

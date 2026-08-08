@@ -18,7 +18,7 @@ const blameBodySchema = z.object({
 })
 
 export async function POST(request: NextRequest) {
-  const rateLimited = applyRateLimit(request)
+  const rateLimited = applyRateLimit(request, { bucket: '/api/github/blame' })
   if (rateLimited) return rateLimited
 
   let body: unknown

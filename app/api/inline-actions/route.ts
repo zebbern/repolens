@@ -44,7 +44,7 @@ Use markdown formatting. Be precise and reference specific lines or expressions 
 }
 
 export async function POST(req: NextRequest) {
-  const rateLimited = applyRateLimit(req)
+  const rateLimited = applyRateLimit(req, { bucket: '/api/inline-actions' })
   if (rateLimited) return rateLimited
 
   let raw: unknown

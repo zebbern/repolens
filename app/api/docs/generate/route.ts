@@ -31,7 +31,7 @@ const docsRequestSchema = z.object({
 })
 
 export async function POST(req: NextRequest) {
-  const rateLimited = applyRateLimit(req, { limit: 10, windowMs: 60_000 })
+  const rateLimited = applyRateLimit(req, { bucket: '/api/docs/generate', limit: 10, windowMs: 60_000 })
   if (rateLimited) return rateLimited
 
   let raw: unknown

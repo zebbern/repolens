@@ -40,7 +40,7 @@ const validateRequestSchema = z.object({
 })
 
 export async function POST(req: NextRequest) {
-  const rateLimited = applyRateLimit(req)
+  const rateLimited = applyRateLimit(req, { bucket: '/api/issues/validate' })
   if (rateLimited) return rateLimited
 
   let raw: unknown

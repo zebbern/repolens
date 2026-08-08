@@ -17,7 +17,7 @@ const branchesQuerySchema = z.object({
 })
 
 export const GET = withGitHubCachePolicy(async function GET(request: NextRequest, token: string | undefined) {
-  const rateLimited = applyRateLimit(request)
+  const rateLimited = applyRateLimit(request, { bucket: '/api/github/branches' })
   if (rateLimited) return rateLimited
 
   const params = branchesQuerySchema.safeParse({

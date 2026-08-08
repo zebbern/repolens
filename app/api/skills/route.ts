@@ -4,7 +4,7 @@ import { skillRegistry } from '@/lib/ai/skills/registry'
 import { applyRateLimit } from '@/lib/api/rate-limit'
 
 export async function GET(request: NextRequest) {
-  const rateLimited = applyRateLimit(request)
+  const rateLimited = applyRateLimit(request, { bucket: '/api/skills' })
   if (rateLimited) return rateLimited
 
   const skills = skillRegistry.listSkills()

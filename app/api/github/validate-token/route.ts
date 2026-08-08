@@ -8,7 +8,7 @@ export const runtime = 'edge'
 const GITHUB_API_BASE = "https://api.github.com"
 
 export async function POST(request: NextRequest) {
-  const rateLimited = applyRateLimit(request, { limit: 10, windowMs: 60_000 })
+  const rateLimited = applyRateLimit(request, { bucket: '/api/github/validate-token', limit: 10, windowMs: 60_000 })
   if (rateLimited) return rateLimited
 
   try {

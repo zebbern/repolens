@@ -16,7 +16,7 @@ const treeQuerySchema = z.object({
 })
 
 export const GET = withGitHubCachePolicy(async function GET(request: NextRequest, token: string | undefined) {
-  const rateLimited = applyRateLimit(request)
+  const rateLimited = applyRateLimit(request, { bucket: '/api/github/tree' })
   if (rateLimited) return rateLimited
 
   const params = treeQuerySchema.safeParse({

@@ -17,7 +17,7 @@ const fileQuerySchema = z.object({
 })
 
 export const GET = withGitHubCachePolicy(async function GET(request: NextRequest, token: string | undefined) {
-  const rateLimited = applyRateLimit(request, { limit: 500, windowMs: 60_000 })
+  const rateLimited = applyRateLimit(request, { bucket: '/api/github/file', limit: 500, windowMs: 60_000 })
   if (rateLimited) return rateLimited
 
   const params = fileQuerySchema.safeParse({

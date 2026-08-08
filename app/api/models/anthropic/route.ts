@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { apiKeyRequestSchema } from '@/types/types'
 import { apiError } from '@/lib/api/error'
+import { applyRateLimit } from '@/lib/api/rate-limit'
 
 // Anthropic doesn't have a models endpoint, so we validate the key
 // and return known available models
@@ -11,6 +12,9 @@ const ANTHROPIC_MODELS = [
 ]
 
 export async function POST(request: Request) {
+  const rateLimited = applyRateLimit(request, { bucket: '/api/models/anthropic' })
+  if (rateLimited) return rateLimited
+
   try {
     const body: unknown = await request.json()
     const parsed = apiKeyRequestSchema.safeParse(body)

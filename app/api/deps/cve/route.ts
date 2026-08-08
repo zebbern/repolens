@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { z } from 'zod'
 import { apiError } from '@/lib/api/error'
+import { applyRateLimit } from '@/lib/api/rate-limit'
 import { queryOSV } from '@/lib/code/scanner/cve-lookup'
 
 export const runtime = 'edge'
@@ -31,6 +32,9 @@ const cveRequestSchema = z.object({
 // ---------------------------------------------------------------------------
 
 export async function POST(request: Request): Promise<NextResponse> {
+  const rateLimited = applyRateLimit(request, { bucket: '/api/deps/cve' })
+  if (rateLimited) return rateLimited
+
   let body: unknown
   try {
     body = await request.json()

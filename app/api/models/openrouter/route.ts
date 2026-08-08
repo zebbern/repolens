@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { z } from 'zod'
 import { apiKeyRequestSchema } from '@/types/types'
 import { apiError } from '@/lib/api/error'
+import { applyRateLimit } from '@/lib/api/rate-limit'
 
 const openRouterModelsResponseSchema = z.object({
   data: z.array(z.object({
@@ -15,6 +16,9 @@ const openRouterModelsResponseSchema = z.object({
 })
 
 export async function POST(request: Request): Promise<NextResponse> {
+  const rateLimited = applyRateLimit(request, { bucket: '/api/models/openrouter' })
+  if (rateLimited) return rateLimited
+
   try {
     const body: unknown = await request.json()
     const parsed = apiKeyRequestSchema.safeParse(body)

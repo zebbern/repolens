@@ -1,4 +1,3 @@
-import type { NextRequest } from 'next/server'
 import { NextResponse } from 'next/server'
 import { apiError } from './error'
 
@@ -88,7 +87,7 @@ export function rateLimit(
  * Prefers Vercel's unmodified forwarding header. Local development falls back
  * to x-forwarded-for, x-real-ip, then loopback.
  */
-export function getClientIp(request: NextRequest): string {
+export function getClientIp(request: Request): string {
   const vercelForwarded = request.headers.get('x-vercel-forwarded-for')?.trim()
   if (vercelForwarded) return vercelForwarded
 
@@ -109,7 +108,7 @@ export function getClientIp(request: NextRequest): string {
  * exceeded, or null if the request is allowed.
  */
 export function applyRateLimit(
-  request: NextRequest,
+  request: Request,
   policy: RateLimitPolicy,
 ): NextResponse | null {
   const ip = getClientIp(request)

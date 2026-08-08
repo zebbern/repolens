@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { z } from 'zod'
 import { apiError } from '@/lib/api/error'
+import { applyRateLimit } from '@/lib/api/rate-limit'
 import type { DepsApiResponse, DownloadPoint, NpmPackageMeta } from '@/lib/deps/types'
 
 export const runtime = 'edge'
@@ -185,6 +186,9 @@ async function fetchDownloads(
 // ---------------------------------------------------------------------------
 
 export async function POST(req: Request) {
+  const rateLimitResponse = applyRateLimit(req, { bucket: '/api/deps' })
+  if (rateLimitResponse) return rateLimitResponse
+
   let raw: unknown
   try {
     raw = await req.json()

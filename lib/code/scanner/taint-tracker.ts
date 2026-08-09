@@ -166,7 +166,7 @@ export const DEFAULT_SINKS: readonly TaintSink[] = [
   { type: 'code-injection', name: 'vm.runInThisContext()', pattern: /\bvm\.runInThisContext\s*\(/, cwe: 'CWE-94', severity: 'critical', description: 'Executes code in current V8 context' },
   { type: 'code-injection', name: 'new vm.Script()', pattern: /\bnew\s+vm\.Script\s*\(/, cwe: 'CWE-94', severity: 'critical', description: 'Compiles code as V8 Script' },
   // NoSQL injection
-  { type: 'nosql-injection', name: 'Model.find()', pattern: /(?:\b(?:Model|model|collection|[A-Za-z_$][\w$]*(?:Model|Collection))|\b[A-Z][\w$]*|\b(?:db\.collection|mongoose\.model)\s*\([^)]*\))\.(?:find|findOne|findById|findOneAndUpdate|aggregate|where)\s*\(/, cwe: 'CWE-943', severity: 'warning', description: 'MongoDB/Mongoose query with potential operator injection' },
+  { type: 'nosql-injection', name: 'Model.find()', pattern: /(?:\b[A-Za-z_$][\w$]*|\b(?:db\.collection|mongoose\.model)\s*\([^)]*\))\.(?:find|findOne|findById|findOneAndUpdate|aggregate|where)\s*\(/, cwe: 'CWE-943', severity: 'warning', description: 'MongoDB/Mongoose query with potential operator injection' },
   // Template injection
   { type: 'code-injection', name: 'template literal eval', pattern: /\bnew\s+Function\s*\(\s*`/, cwe: 'CWE-94', severity: 'critical', description: 'Template literal passed to Function constructor' },
 ]
@@ -280,10 +280,21 @@ interface TaintAlternative {
 interface TaintState {
   tainted: Map<string, TaintAlternative[]>
   aliases: Map<string, TaintSanitizer>
+  sourceAliases: Map<string, string>
+  staticValues: Map<string, string>
+  noSqlReceivers: Set<string>
+  knownLocations: Set<string>
 }
 
 function createTaintState(): TaintState {
-  return { tainted: new Map(), aliases: new Map() }
+  return {
+    tainted: new Map(),
+    aliases: new Map(),
+    sourceAliases: new Map(),
+    staticValues: new Map(),
+    noSqlReceivers: new Set(),
+    knownLocations: new Set(),
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -334,6 +345,7 @@ export function trackTaint(
       ) {
         const state = createTaintState()
         const node = fnPath.node as t.Function
+        const branchMerges = new WeakMap<t.IfStatement, TaintState>()
 
         // Mark function params with source-like names as tainted
         for (const param of node.params) {
@@ -387,6 +399,7 @@ export function trackTaint(
               file,
               sources,
               isControlFlowApproximate(path, fnPath),
+              path,
             )
           },
 
@@ -400,7 +413,18 @@ export function trackTaint(
               file,
               sources,
               isControlFlowApproximate(path, fnPath),
+              path,
             )
+          },
+
+          IfStatement: {
+            enter(path: NodePath<t.IfStatement>) {
+              branchMerges.set(path.node, analyzeIfBranches(path, state, sources, sanitizers, lines))
+            },
+            exit(path: NodePath<t.IfStatement>) {
+              const merged = branchMerges.get(path.node)
+              if (merged) replaceState(state, merged)
+            },
           },
         })
       },
@@ -430,6 +454,97 @@ function isControlFlowApproximate(path: NodePath, functionPath: NodePath): boole
     parent = parent.parentPath
   }
   return false
+}
+
+function cloneState(state: TaintState): TaintState {
+  return {
+    tainted: new Map([...state.tainted].map(([path, alternatives]) => [path, cloneAlternatives(alternatives)])),
+    aliases: new Map(state.aliases),
+    sourceAliases: new Map(state.sourceAliases),
+    staticValues: new Map(state.staticValues),
+    noSqlReceivers: new Set(state.noSqlReceivers),
+    knownLocations: new Set(state.knownLocations),
+  }
+}
+
+function replaceState(target: TaintState, source: TaintState): void {
+  target.tainted = source.tainted
+  target.aliases = source.aliases
+  target.sourceAliases = source.sourceAliases
+  target.staticValues = source.staticValues
+  target.noSqlReceivers = source.noSqlReceivers
+  target.knownLocations = source.knownLocations
+}
+
+function analyzeIfBranches(
+  path: NodePath<t.IfStatement>,
+  state: TaintState,
+  sources: readonly TaintSource[],
+  sanitizers: readonly TaintSanitizer[],
+  lines: string[],
+): TaintState {
+  const baseline = cloneState(state)
+  const consequent = simulateBranch(path.get('consequent') as NodePath, baseline, sources, sanitizers, lines)
+  const alternatePath = path.get('alternate') as NodePath | null
+  const alternate = alternatePath?.node
+    ? simulateBranch(alternatePath, baseline, sources, sanitizers, lines)
+    : baseline
+  return mergeBranchStates(consequent, alternate)
+}
+
+function simulateBranch(
+  path: NodePath,
+  baseline: TaintState,
+  sources: readonly TaintSource[],
+  sanitizers: readonly TaintSanitizer[],
+  lines: string[],
+): TaintState {
+  const branch = cloneState(baseline)
+  if (path.isAssignmentExpression()) {
+    processAssignment(path.node, branch, sources, sanitizers, lines, false)
+  }
+  path.traverse({
+    'FunctionDeclaration|FunctionExpression|ArrowFunctionExpression|ObjectMethod|ClassMethod|ClassPrivateMethod'(nestedPath: NodePath) {
+      nestedPath.skip()
+    },
+    VariableDeclarator(declaratorPath: NodePath<t.VariableDeclarator>) {
+      processDeclarator(
+        declaratorPath.node,
+        branch,
+        sources,
+        sanitizers,
+        lines,
+        false,
+        declaratorPath.parentPath?.isVariableDeclaration({ kind: 'const' }) ?? false,
+      )
+    },
+    AssignmentExpression(assignmentPath: NodePath<t.AssignmentExpression>) {
+      processAssignment(assignmentPath.node, branch, sources, sanitizers, lines, false)
+    },
+  })
+  return branch
+}
+
+function mergeBranchStates(left: TaintState, right: TaintState): TaintState {
+  const merged = createTaintState()
+  const paths = new Set([...left.tainted.keys(), ...right.tainted.keys()])
+  for (const path of paths) {
+    const alternatives = dedupeAlternatives([
+      ...(left.tainted.get(path) ?? []).map(markApproximate),
+      ...(right.tainted.get(path) ?? []).map(markApproximate),
+    ])
+    if (alternatives.length > 0) merged.tainted.set(path, alternatives)
+  }
+  merged.knownLocations = new Set([...left.knownLocations, ...right.knownLocations])
+  merged.aliases = intersectMaps(left.aliases, right.aliases)
+  merged.sourceAliases = intersectMaps(left.sourceAliases, right.sourceAliases)
+  merged.staticValues = intersectMaps(left.staticValues, right.staticValues)
+  merged.noSqlReceivers = new Set([...left.noSqlReceivers].filter(name => right.noSqlReceivers.has(name)))
+  return merged
+}
+
+function intersectMaps<T>(left: Map<string, T>, right: Map<string, T>): Map<string, T> {
+  return new Map([...left].filter(([key, value]) => right.get(key) === value))
 }
 
 // ---------------------------------------------------------------------------
@@ -500,13 +615,24 @@ function processDeclarator(
   immutable: boolean,
 ): void {
   if (!node.init) return
+  let sourcePrefix: string | null = null
+  let staticValue: string | null = null
+  let noSqlReceiver = false
   if (immutable && t.isIdentifier(node.id)) {
-    const alias = matchSanitizerReference(node.init, sanitizers, lines)
+    const alias = matchSanitizerReference(node.init, state, sanitizers, lines)
     if (alias) {
       state.aliases.set(node.id.name, alias)
       state.tainted.delete(node.id.name)
       return
     }
+    sourcePrefix = resolveSourcePrefix(node.init, state, sources)
+    staticValue = resolveStaticValue(node.init, state)
+    noSqlReceiver = isNoSqlReceiverInitializer(node.init, lines)
+  }
+  if (t.isIdentifier(node.id) && (t.isObjectExpression(node.init) || t.isArrayExpression(node.init))) {
+    bindContainer(node.id.name, node.init, state, sources, sanitizers, lines, controlFlowApproximate)
+    if (noSqlReceiver) state.noSqlReceivers.add(node.id.name)
+    return
   }
   const alternatives = expressionAlternatives(node.init, state, sources, sanitizers, lines)
   bindPattern(
@@ -519,6 +645,11 @@ function processDeclarator(
     lines,
     getMemberPath(node.init),
   )
+  if (immutable && t.isIdentifier(node.id)) {
+    if (sourcePrefix) state.sourceAliases.set(node.id.name, sourcePrefix)
+    if (staticValue !== null) state.staticValues.set(node.id.name, staticValue)
+    if (noSqlReceiver) state.noSqlReceivers.add(node.id.name)
+  }
 }
 
 function processAssignment(
@@ -529,7 +660,23 @@ function processAssignment(
   lines: string[],
   controlFlowApproximate: boolean,
 ): void {
-  const alternatives = expressionAlternatives(node.right, state, sources, sanitizers, lines)
+  const alternatives = assignmentAlternatives(node, state, sources, sanitizers, lines)
+  const targetPath = getMemberPath(node.left)
+  if (!targetPath && (t.isMemberExpression(node.left) || t.isOptionalMemberExpression(node.left))) {
+    const objectPath = getMemberPath(node.left.object)
+    if (objectPath) assignLocation(`${objectPath}.*`, alternatives, state, controlFlowApproximate)
+    return
+  }
+  if (targetPath && (t.isObjectExpression(node.right) || t.isArrayExpression(node.right))) {
+    clearLocationTree(targetPath, state)
+    state.tainted.delete(targetPath)
+    state.aliases.delete(targetPath)
+    state.sourceAliases.delete(targetPath)
+    state.staticValues.delete(targetPath)
+    state.noSqlReceivers.delete(targetPath)
+    bindContainer(targetPath, node.right, state, sources, sanitizers, lines, controlFlowApproximate)
+    return
+  }
   bindPattern(
     node.left,
     alternatives,
@@ -554,6 +701,10 @@ function bindPattern(
 ): void {
   if (t.isIdentifier(pattern)) {
     state.aliases.delete(pattern.name)
+    state.sourceAliases.delete(pattern.name)
+    state.staticValues.delete(pattern.name)
+    state.noSqlReceivers.delete(pattern.name)
+    clearLocationTree(pattern.name, state)
     const assigned = alternatives.map(alternative => ({
       ...alternative,
       chain: [...alternative.chain, pattern.name],
@@ -579,10 +730,12 @@ function bindPattern(
         const childSourcePath = sourceBasePath && propertyName !== null
           ? `${sourceBasePath}.${propertyName}`
           : null
-        const explicitSource = childSourcePath ? matchesSource(childSourcePath, sources) : undefined
+        const selected = childSourcePath
+          ? alternativesForLocation(childSourcePath, state, sources)
+          : { known: false, alternatives: [] }
         bindPattern(
           property.value,
-          explicitSource ? [sourceAlternative(explicitSource)] : alternatives,
+          selected.known ? selected.alternatives : alternatives,
           state,
           controlFlowApproximate,
           sources,
@@ -592,6 +745,9 @@ function bindPattern(
         )
       }
       if (t.isRestElement(property)) {
+        if (sourceBasePath && bindObjectRest(pattern, property.argument, sourceBasePath, state, controlFlowApproximate)) {
+          continue
+        }
         const explicitRestSources = sourceBasePath
           ? sources.filter(source => source.name.startsWith(`${sourceBasePath}.`)).map(sourceAlternative)
           : []
@@ -610,9 +766,31 @@ function bindPattern(
     return
   }
   if (t.isArrayPattern(pattern)) {
-    for (const element of pattern.elements) {
+    for (const [index, element] of pattern.elements.entries()) {
       if (element) {
-        bindPattern(element, alternatives, state, controlFlowApproximate, sources, sanitizers, lines, sourceBasePath)
+        if (t.isRestElement(element) && sourceBasePath && bindArrayRest(
+          element.argument,
+          sourceBasePath,
+          index,
+          state,
+          controlFlowApproximate,
+        )) {
+          continue
+        }
+        const childSourcePath = sourceBasePath ? `${sourceBasePath}.${index}` : null
+        const selected = childSourcePath
+          ? alternativesForLocation(childSourcePath, state, sources)
+          : { known: false, alternatives: [] }
+        bindPattern(
+          element,
+          selected.known ? selected.alternatives : alternatives,
+          state,
+          controlFlowApproximate,
+          sources,
+          sanitizers,
+          lines,
+          childSourcePath,
+        )
       }
     }
     return
@@ -646,6 +824,7 @@ function bindPattern(
   }
   const memberName = getMemberPath(pattern)
   if (!memberName) return
+  state.knownLocations.add(memberName)
   if (controlFlowApproximate) {
     const previous = (state.tainted.get(memberName) ?? []).map(markApproximate)
     const merged = dedupeAlternatives([...previous, ...alternatives.map(markApproximate)])
@@ -657,11 +836,266 @@ function bindPattern(
   }
 }
 
+function bindArrayRest(
+  target: t.LVal,
+  sourceBasePath: string,
+  startIndex: number,
+  state: TaintState,
+  controlFlowApproximate: boolean,
+): boolean {
+  const targetPath = getMemberPath(target)
+  if (!targetPath) return false
+  const descendants = [...state.knownLocations].flatMap(path => {
+    if (!path.startsWith(`${sourceBasePath}.`)) return []
+    const suffix = path.slice(sourceBasePath.length + 1)
+    const [indexText, ...rest] = suffix.split('.')
+    const index = Number(indexText)
+    if (!Number.isInteger(index) || index < startIndex) return []
+    return [{ sourcePath: path, targetPath: [targetPath, String(index - startIndex), ...rest].join('.') }]
+  })
+  if (descendants.length === 0) return false
+  state.aliases.delete(targetPath)
+  state.sourceAliases.delete(targetPath)
+  state.staticValues.delete(targetPath)
+  clearLocationTree(targetPath, state)
+  state.knownLocations.add(targetPath)
+  for (const descendant of descendants) {
+    assignLocation(
+      descendant.targetPath,
+      state.tainted.get(descendant.sourcePath) ?? [],
+      state,
+      controlFlowApproximate,
+    )
+  }
+  return true
+}
+
+function bindObjectRest(
+  pattern: t.ObjectPattern,
+  target: t.LVal,
+  sourceBasePath: string,
+  state: TaintState,
+  controlFlowApproximate: boolean,
+): boolean {
+  const targetPath = getMemberPath(target)
+  if (!targetPath) return false
+  const excluded = new Set(pattern.properties.flatMap(property => {
+    if (!t.isObjectProperty(property)) return []
+    const name = getObjectPropertyName(property)
+    return name === null ? [] : [name]
+  }))
+  const descendants = [...state.knownLocations].filter(path => {
+    if (!path.startsWith(`${sourceBasePath}.`)) return false
+    const firstSegment = path.slice(sourceBasePath.length + 1).split('.')[0]
+    return !excluded.has(firstSegment)
+  })
+  if (descendants.length === 0) return false
+  state.aliases.delete(targetPath)
+  state.sourceAliases.delete(targetPath)
+  state.staticValues.delete(targetPath)
+  clearLocationTree(targetPath, state)
+  state.knownLocations.add(targetPath)
+  for (const path of descendants) {
+    const copiedPath = `${targetPath}${path.slice(sourceBasePath.length)}`
+    assignLocation(copiedPath, state.tainted.get(path) ?? [], state, controlFlowApproximate)
+  }
+  return true
+}
+
 function getObjectPropertyName(property: t.ObjectProperty): string | null {
   if (!property.computed && t.isIdentifier(property.key)) return property.key.name
   if (t.isStringLiteral(property.key)) return property.key.value
   if (t.isNumericLiteral(property.key)) return String(property.key.value)
   return null
+}
+
+function assignLocation(
+  path: string,
+  alternatives: readonly TaintAlternative[],
+  state: TaintState,
+  controlFlowApproximate: boolean,
+): void {
+  state.knownLocations.add(path)
+  const assigned = alternatives.map(alternative => ({
+    ...alternative,
+    chain: [...alternative.chain, path],
+    transformations: [...alternative.transformations],
+    precision: controlFlowApproximate
+      ? 'control-flow-approximate' as const
+      : promotePrecision(alternative.precision, 'linear'),
+  }))
+  if (controlFlowApproximate) {
+    const previous = (state.tainted.get(path) ?? []).map(markApproximate)
+    const merged = dedupeAlternatives([...previous, ...assigned])
+    if (merged.length > 0) state.tainted.set(path, merged)
+    return
+  }
+  if (assigned.length > 0) state.tainted.set(path, dedupeAlternatives(assigned))
+  else state.tainted.delete(path)
+}
+
+function bindContainer(
+  targetPath: string,
+  value: t.ObjectExpression | t.ArrayExpression,
+  state: TaintState,
+  sources: readonly TaintSource[],
+  sanitizers: readonly TaintSanitizer[],
+  lines: string[],
+  controlFlowApproximate: boolean,
+): void {
+  state.knownLocations.add(targetPath)
+  if (t.isObjectExpression(value)) {
+    for (const property of value.properties) {
+      if (t.isSpreadElement(property)) {
+        copyLocationTree(targetPath, getMemberPath(property.argument), property.argument, state, sources, sanitizers, lines, controlFlowApproximate)
+        continue
+      }
+      if (!t.isObjectProperty(property)) continue
+      const propertyName = getObjectPropertyName(property)
+      if (propertyName === null) continue
+      const childPath = `${targetPath}.${propertyName}`
+      state.knownLocations.add(childPath)
+      if (t.isObjectExpression(property.value) || t.isArrayExpression(property.value)) {
+        bindContainer(childPath, property.value, state, sources, sanitizers, lines, controlFlowApproximate)
+      } else {
+        assignLocation(
+          childPath,
+          expressionAlternatives(property.value, state, sources, sanitizers, lines),
+          state,
+          controlFlowApproximate,
+        )
+      }
+    }
+    return
+  }
+  for (const [index, element] of value.elements.entries()) {
+    if (!element) continue
+    const childPath = `${targetPath}.${index}`
+    state.knownLocations.add(childPath)
+    if (t.isSpreadElement(element)) {
+      copyLocationTree(targetPath, getMemberPath(element.argument), element.argument, state, sources, sanitizers, lines, controlFlowApproximate)
+    } else if (t.isObjectExpression(element) || t.isArrayExpression(element)) {
+      bindContainer(childPath, element, state, sources, sanitizers, lines, controlFlowApproximate)
+    } else {
+      assignLocation(
+        childPath,
+        expressionAlternatives(element, state, sources, sanitizers, lines),
+        state,
+        controlFlowApproximate,
+      )
+    }
+  }
+}
+
+function copyLocationTree(
+  targetPath: string,
+  sourcePath: string | null,
+  sourceNode: t.Node,
+  state: TaintState,
+  sources: readonly TaintSource[],
+  sanitizers: readonly TaintSanitizer[],
+  lines: string[],
+  controlFlowApproximate: boolean,
+): void {
+  if (sourcePath) {
+    const descendants = [...state.knownLocations].filter(path => path.startsWith(`${sourcePath}.`))
+    for (const path of descendants) {
+      const suffix = path.slice(sourcePath.length)
+      const copiedPath = `${targetPath}${suffix}`
+      state.knownLocations.add(copiedPath)
+      assignLocation(copiedPath, state.tainted.get(path) ?? [], state, controlFlowApproximate)
+    }
+    if (descendants.length > 0) return
+  }
+  assignLocation(
+    `${targetPath}.*`,
+    expressionAlternatives(sourceNode, state, sources, sanitizers, lines),
+    state,
+    controlFlowApproximate,
+  )
+}
+
+function clearLocationTree(path: string, state: TaintState): void {
+  for (const location of [...state.knownLocations]) {
+    if (location === path || location.startsWith(`${path}.`)) {
+      state.knownLocations.delete(location)
+      state.tainted.delete(location)
+    }
+  }
+}
+
+function alternativesForLocation(
+  path: string,
+  state: TaintState,
+  sources: readonly TaintSource[],
+): { known: boolean; alternatives: TaintAlternative[] } {
+  const canonicalPath = resolveAliasedPath(path, state)
+  const source = matchesSource(canonicalPath, sources)
+  if (source) return { known: true, alternatives: [sourceAlternative(source)] }
+  const exact = state.tainted.get(path)
+  const segments = path.split('.')
+  const wildcardKeys = new Set(segments.slice(1).map((_, index) => (
+    `${segments.slice(0, index + 1).join('.')}.*`
+  )))
+  const wildcard = [...state.tainted.entries()]
+    .filter(([key]) => wildcardKeys.has(key))
+    .flatMap(([, items]) => cloneAlternatives(items))
+  if (exact || wildcard.length > 0 || state.knownLocations.has(path)) {
+    return {
+      known: true,
+      alternatives: dedupeAlternatives([...cloneAlternatives(exact ?? []), ...wildcard]),
+    }
+  }
+  return { known: false, alternatives: [] }
+}
+
+function resolveAliasedPath(path: string, state: TaintState): string {
+  const [root, ...rest] = path.split('.')
+  const alias = state.sourceAliases.get(root)
+  return alias ? [alias, ...rest].join('.') : path
+}
+
+function resolveSourcePrefix(
+  node: t.Expression,
+  state: TaintState,
+  sources: readonly TaintSource[],
+): string | null {
+  const path = getMemberPath(node)
+  if (!path) return null
+  const canonicalPath = resolveAliasedPath(path, state)
+  if (sources.some(source => source.name.startsWith(`${canonicalPath}.`))) return canonicalPath
+  const rootAlternative = state.tainted.get(path)?.find(alternative => (
+    alternative.source.origin === 'synthetic-handler-param'
+  ))
+  return rootAlternative ? rootAlternative.source.name : null
+}
+
+function resolveStaticValue(node: t.Expression, state: TaintState): string | null {
+  if (t.isStringLiteral(node)) return node.value
+  if (t.isTemplateLiteral(node) && node.expressions.length === 0) {
+    return node.quasis.map(quasi => quasi.value.cooked ?? quasi.value.raw).join('')
+  }
+  if (t.isIdentifier(node)) return state.staticValues.get(node.name) ?? null
+  return null
+}
+
+function isNoSqlReceiverInitializer(node: t.Expression, lines: string[]): boolean {
+  if (!t.isCallExpression(node) && !t.isOptionalCallExpression(node)) return false
+  return /^(?:mongoose\.model|db\.collection)$/.test(nodeToSource(node.callee, lines))
+}
+
+function assignmentAlternatives(
+  node: t.AssignmentExpression,
+  state: TaintState,
+  sources: readonly TaintSource[],
+  sanitizers: readonly TaintSanitizer[],
+  lines: string[],
+): TaintAlternative[] {
+  const right = expressionAlternatives(node.right, state, sources, sanitizers, lines)
+  if (node.operator === '=') return right
+  const left = expressionAlternatives(node.left, state, sources, sanitizers, lines)
+  const combined = dedupeAlternatives([...left, ...right])
+  return ['||=', '&&=', '??='].includes(node.operator) ? combined.map(markApproximate) : combined
 }
 
 function markApproximate(alternative: TaintAlternative): TaintAlternative {
@@ -696,12 +1130,13 @@ function dedupeAlternatives(alternatives: readonly TaintAlternative[]): TaintAlt
 
 function sourceForNode(
   node: t.Node,
+  state: TaintState,
   sources: readonly TaintSource[],
   lines: string[],
 ): TaintSource | undefined {
   if (t.isMemberExpression(node) || t.isOptionalMemberExpression(node)) {
     const memberPath = getMemberPath(node)
-    return memberPath ? matchesSource(memberPath, sources) : undefined
+    return memberPath ? matchesSource(resolveAliasedPath(memberPath, state), sources) : undefined
   }
   if (t.isCallExpression(node) || t.isOptionalCallExpression(node)) {
     return matchesSource(`${nodeToSource(node.callee, lines)}(`, sources)
@@ -723,7 +1158,7 @@ function expressionAlternatives(
   sanitizers: readonly TaintSanitizer[],
   lines: string[],
 ): TaintAlternative[] {
-  const directSource = sourceForNode(node, sources, lines)
+  const directSource = sourceForNode(node, state, sources, lines)
   if (directSource) return [sourceAlternative(directSource)]
 
   if (t.isIdentifier(node)) {
@@ -731,8 +1166,18 @@ function expressionAlternatives(
   }
   if (t.isMemberExpression(node) || t.isOptionalMemberExpression(node)) {
     const memberName = getMemberPath(node)
-    const exact = memberName ? state.tainted.get(memberName) : undefined
-    if (exact) return cloneAlternatives(exact)
+    if (memberName) {
+      const selected = alternativesForLocation(memberName, state, sources)
+      if (selected.known) return selected.alternatives
+    } else {
+      const objectName = getMemberPath(node.object)
+      if (objectName) {
+        const descendants = [...state.tainted.entries()]
+          .filter(([path]) => path.startsWith(`${objectName}.`))
+          .flatMap(([, alternatives]) => cloneAlternatives(alternatives))
+        if (descendants.length > 0) return dedupeAlternatives(descendants)
+      }
+    }
     return expressionAlternatives(node.object, state, sources, sanitizers, lines)
   }
   if (t.isTemplateLiteral(node)) {
@@ -748,7 +1193,11 @@ function expressionAlternatives(
     return combineNodes(nodes, state, sources, sanitizers, lines).map(markApproximate)
   }
   if (t.isCallExpression(node) || t.isOptionalCallExpression(node) || t.isNewExpression(node)) {
-    const alternatives = combineArguments(node.arguments, state, sources, sanitizers, lines)
+    const argumentAlternatives = combineArguments(node.arguments, state, sources, sanitizers, lines)
+    const receiverAlternatives = (t.isMemberExpression(node.callee) || t.isOptionalMemberExpression(node.callee))
+      ? expressionAlternatives(node.callee.object, state, sources, sanitizers, lines)
+      : []
+    const alternatives = dedupeAlternatives([...receiverAlternatives, ...argumentAlternatives])
     const sanitizer = matchSanitizerInvocation(node, state, sanitizers, lines)
     return sanitizer ? applyTransformation(alternatives, sanitizer, node) : alternatives
   }
@@ -775,7 +1224,7 @@ function expressionAlternatives(
     return expressionAlternatives(node.argument, state, sources, sanitizers, lines)
   }
   if (t.isAssignmentExpression(node)) {
-    return expressionAlternatives(node.right, state, sources, sanitizers, lines)
+    return assignmentAlternatives(node, state, sources, sanitizers, lines)
   }
   if (t.isSequenceExpression(node)) {
     const last = node.expressions.at(-1)
@@ -857,10 +1306,15 @@ function matchSanitizerInvocation(
 
 function matchSanitizerReference(
   node: t.Expression,
+  state: TaintState,
   sanitizers: readonly TaintSanitizer[],
   lines: string[],
 ): TaintSanitizer | undefined {
   if (!t.isIdentifier(node) && !t.isMemberExpression(node) && !t.isOptionalMemberExpression(node)) return undefined
+  if (t.isIdentifier(node)) {
+    const alias = state.aliases.get(node.name)
+    if (alias) return alias
+  }
   const sanitizer = selectSpecificSanitizer(`${nodeToSource(node, lines)}(`, sanitizers)
   return sanitizer?.effect === 'sanitizes' ? sanitizer : undefined
 }
@@ -898,9 +1352,10 @@ function checkInvocationSink(
   file: IndexedFile,
   sources: readonly TaintSource[],
   controlFlowApproximate: boolean,
+  invocationPath: NodePath,
 ): void {
   const lines = getFileLines(file)
-  const sink = matchInvocationSink(node, sinks, lines)
+  const sink = matchInvocationSink(node, sinks, lines, state, invocationPath)
   if (!sink) return
 
   const argumentNodes = node.arguments.filter((arg): arg is t.Expression | t.SpreadElement => (
@@ -911,7 +1366,7 @@ function checkInvocationSink(
     const queryAlternatives = expressionAlternatives(argumentNodes[0], state, sources, sanitizers, lines)
     let parameterAlternatives = combineNodes(argumentNodes.slice(1), state, sources, sanitizers, lines)
     const parameterized = sanitizers.find(item => item.name === 'parameterized query')
-    if (parameterized && hasSqlPlaceholder(argumentNodes[0])) {
+    if (parameterized && hasSqlPlaceholder(argumentNodes[0], state)) {
       parameterAlternatives = applyTransformation(parameterAlternatives, parameterized, node)
     }
     alternatives = dedupeAlternatives([...queryAlternatives, ...parameterAlternatives])
@@ -926,6 +1381,8 @@ function matchInvocationSink(
   node: InvocationNode,
   sinks: readonly TaintSink[],
   lines: string[],
+  state: TaintState,
+  invocationPath: NodePath,
 ): TaintSink | undefined {
   const callee = nodeToSource(node.callee, lines)
   const setAttributeSink = sinks.find(sink => sink.name === 'setAttribute(on*)')
@@ -934,15 +1391,44 @@ function matchInvocationSink(
     if (t.isStringLiteral(firstArgument) && /^on/i.test(firstArgument.value)) return setAttributeSink
   }
   const prefix = t.isNewExpression(node) ? 'new ' : ''
-  return sinks
+  const sink = sinks
     .filter(sink => sink.name !== 'setAttribute(on*)')
     .find(sink => execPattern(sink.pattern, `${prefix}${callee}(`))
+  if (sink?.type === 'nosql-injection' && !hasNoSqlReceiverEvidence(node, state, invocationPath, lines)) {
+    return undefined
+  }
+  return sink
 }
 
-function hasSqlPlaceholder(node: t.Node): boolean {
+function hasSqlPlaceholder(node: t.Node, state: TaintState): boolean {
   if (t.isStringLiteral(node)) return /\?|\$\d+/.test(node.value)
   if (t.isTemplateLiteral(node) && node.expressions.length === 0) {
     return node.quasis.some(quasi => /\?|\$\d+/.test(quasi.value.cooked ?? quasi.value.raw))
+  }
+  if (t.isIdentifier(node)) return /\?|\$\d+/.test(state.staticValues.get(node.name) ?? '')
+  return false
+}
+
+function hasNoSqlReceiverEvidence(
+  node: InvocationNode,
+  state: TaintState,
+  invocationPath: NodePath,
+  lines: string[],
+): boolean {
+  if (!t.isMemberExpression(node.callee) && !t.isOptionalMemberExpression(node.callee)) return false
+  const receiver = nodeToSource(node.callee.object, lines)
+  if (/^(?:db\.collection|mongoose\.model)\s*\(/.test(receiver)) return true
+  if (state.noSqlReceivers.has(receiver)) return true
+  const root = getMemberPath(node.callee.object)?.split('.')[0]
+  if (!root) return false
+  const binding = invocationPath.scope.getBinding(root)
+  if (!binding) return true
+  if (binding.path.isImportSpecifier() || binding.path.isImportDefaultSpecifier() || binding.path.isImportNamespaceSpecifier()) {
+    return true
+  }
+  if (binding.path.isVariableDeclarator()) {
+    const init = binding.path.node.init
+    return Boolean(init && t.isExpression(init) && isNoSqlReceiverInitializer(init, lines))
   }
   return false
 }
@@ -957,48 +1443,48 @@ function createFlow(
   file: IndexedFile,
   location: FlowLocation,
 ): TaintFlow {
-  const applicableByAlternative = alternatives.map(alternative => alternative.transformations.filter(item => (
-    item.sanitizer.appliesTo.includes(sink.type)
-  )))
-  const sanitizersByAlternative = applicableByAlternative.map(items => items.filter(item => (
-    item.sanitizer.effect === 'sanitizes'
-  )))
-  const sanitized = alternatives.length > 0 && sanitizersByAlternative.every(items => items.length > 0)
-  const occurrences = new Map<string, TaintTransformationOccurrence>()
-  for (const items of applicableByAlternative) {
-    for (const item of items) occurrences.set(item.occurrence, item)
-  }
-  const mitigationOccurrences = [...occurrences.values()].filter(item => (
-    item.sanitizer.effect === 'validates' || !sanitized
+  const candidates = alternatives.map(alternative => {
+    const applicable = alternative.transformations.filter(item => item.sanitizer.appliesTo.includes(sink.type))
+    const sanitizers = applicable.filter(item => item.sanitizer.effect === 'sanitizes')
+    const evidence = applicable.filter(item => item.sanitizer.effect === 'validates')
+    const sanitized = sanitizers.length > 0
+    return {
+      alternative,
+      sanitizers,
+      evidence,
+      sanitized,
+      confidence: flowConfidence(alternative.source.baseConfidence, alternative.precision, evidence.length),
+    }
+  })
+  const unsanitized = candidates.filter(candidate => !candidate.sanitized)
+  const pool = unsanitized.length > 0 ? unsanitized : candidates
+  const confidenceOrder: Record<IssueConfidence, number> = { high: 2, medium: 1, low: 0 }
+  pool.sort((left, right) => (
+    confidenceOrder[right.confidence] - confidenceOrder[left.confidence]
+    || left.evidence.length - right.evidence.length
+    || left.alternative.source.name.localeCompare(right.alternative.source.name)
+    || left.alternative.chain.join('\u0000').localeCompare(right.alternative.chain.join('\u0000'))
+    || left.alternative.precision.localeCompare(right.alternative.precision)
   ))
+  const selected = pool[0]
+  const alternative = selected.alternative
+  const occurrences = new Map<string, TaintTransformationOccurrence>()
+  for (const item of selected.evidence) occurrences.set(item.occurrence, item)
+  const mitigationOccurrences = [...occurrences.values()]
   const mitigationEvidence = mitigationOccurrences.map(item => item.sanitizer)
-  const source = alternatives[0].source
-  const precision = alternatives.reduce<TaintPathPrecision>(
-    (current, alternative) => promotePrecision(current, alternative.precision),
-    'direct',
-  )
-  const baseConfidence = alternatives.reduce<IssueConfidence>(
-    (current, alternative) => lowerConfidence(current, alternative.source.baseConfidence),
-    'high',
-  )
   return {
-    source,
+    source: alternative.source,
     sink,
-    sanitized,
-    sanitizer: sanitized ? sanitizersByAlternative[0][0]?.sanitizer : undefined,
-    confidence: flowConfidence(baseConfidence, precision, mitigationEvidence.length),
-    precision,
+    sanitized: selected.sanitized,
+    sanitizer: selected.sanitizers[0]?.sanitizer,
+    confidence: selected.confidence,
+    precision: alternative.precision,
     mitigationEvidence,
-    path: [...alternatives[0].chain, sink.name],
+    path: [...alternative.chain, sink.name],
     file: file.path,
     startLine: location.loc?.start.line ?? 0,
     endLine: location.loc?.end.line ?? 0,
   }
-}
-
-function lowerConfidence(left: IssueConfidence, right: IssueConfidence): IssueConfidence {
-  const order: Record<IssueConfidence, number> = { high: 2, medium: 1, low: 0 }
-  return order[left] <= order[right] ? left : right
 }
 
 function flowConfidence(
@@ -1030,7 +1516,7 @@ function checkAssignmentSink(
   const fullText = `${lhsText} = `
   const sink = matchesSink(fullText, sinks)
   if (!sink) return
-  let alternatives = expressionAlternatives(node.right, state, sources, sanitizers, lines)
+  let alternatives = assignmentAlternatives(node, state, sources, sanitizers, lines)
   if (controlFlowApproximate) alternatives = alternatives.map(markApproximate)
   if (alternatives.length > 0) flows.push(createFlow(alternatives, sink, file, node))
 }

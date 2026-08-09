@@ -676,8 +676,8 @@ describe('trackTaint — path-compatible alternatives', () => {
   const mixed = clean + req.body.raw;
   element.innerHTML = mixed;
 }`).find(candidate => candidate.sink.type === 'xss')
-    expect(flow).toMatchObject({ sanitized: false, confidence: 'medium' })
-    expect(flow!.mitigationEvidence.map(item => item.name)).toEqual(['DOMPurify.sanitize()'])
+    expect(flow).toMatchObject({ sanitized: false, confidence: 'high' })
+    expect(flow!.mitigationEvidence).toEqual([])
   })
 
   it('reports when only one conditional branch is sanitized', () => {
@@ -688,7 +688,7 @@ describe('trackTaint — path-compatible alternatives', () => {
     expect(flow).toMatchObject({
       sanitized: false,
       precision: 'control-flow-approximate',
-      confidence: 'low',
+      confidence: 'medium',
     })
   })
 
@@ -727,7 +727,7 @@ describe('trackTaint — path-compatible alternatives', () => {
     expect(flow).toMatchObject({
       sanitized: false,
       precision: 'control-flow-approximate',
-      confidence: 'low',
+      confidence: 'medium',
     })
   })
 })
@@ -967,5 +967,313 @@ describe('trackTaint — sanitizer aliases and evidence occurrences', () => {
 }`)[0]
     expect(flow).toMatchObject({ sanitized: false, confidence: 'low' })
     expect(flow.mitigationEvidence.map(item => item.name)).toEqual(['zod.parse', 'zod.parse'])
+  })
+})
+
+describe('trackTaint — value-location identity', () => {
+  it('keeps sibling object properties independent', () => {
+    const flows = getFlows(`function handler(req) {
+  const values = { safe: "literal", raw: req.body.code };
+  eval(values.safe);
+  eval(values.raw);
+}`)
+    expect(flows).toHaveLength(1)
+    expect(flows[0].path).toContain('values.raw')
+  })
+
+  it('keeps array slots independent', () => {
+    const flows = getFlows(`function handler(req) {
+  const values = ["literal", req.body.code];
+  eval(values[0]);
+  eval(values[1]);
+}`)
+    expect(flows).toHaveLength(1)
+    expect(flows[0].path).toContain('values.1')
+  })
+
+  it('selects only the matching property during destructuring', () => {
+    const flows = getFlows(`function handler(req) {
+  const values = { safe: "literal", raw: req.body.code };
+  const { safe, raw } = values;
+  eval(safe);
+  eval(raw);
+}`)
+    expect(flows).toHaveLength(1)
+    expect(flows[0].path).toContain('raw')
+  })
+
+  it('preserves nested, shorthand, and spread member identity', () => {
+    const flows = getFlows(`function handler(req) {
+  const raw = req.body.code;
+  const source = { nested: { safe: "literal", raw } };
+  const copy = { ...source };
+  eval(copy.nested.safe);
+  eval(copy.nested.raw);
+}`)
+    expect(flows).toHaveLength(1)
+    expect(flows[0].path).toContain('copy.nested.raw')
+  })
+
+  it('conservatively merges a dynamic computed member read', () => {
+    const flows = getFlows(`function handler(req) {
+  const values = { safe: "literal", raw: req.body.code };
+  eval(values[key]);
+}`)
+    expect(flows).toHaveLength(1)
+  })
+
+  it('conservatively merges a dynamic computed member write', () => {
+    const flows = getFlows(`function handler(req) {
+  const values = { safe: "literal" };
+  values[key] = req.body.code;
+  eval(values.safe);
+}`)
+    expect(flows).toHaveLength(1)
+  })
+
+  it('preserves exact remainder fields through object rest destructuring', () => {
+    const flows = getFlows(`function handler(req) {
+  const values = { safe: "literal", raw: req.body.code };
+  const { safe, ...rest } = values;
+  eval(rest.safe);
+  eval(rest.raw);
+}`)
+    expect(flows).toHaveLength(1)
+    expect(flows[0].path).toContain('rest.raw')
+  })
+
+  it('remaps exact array slots through rest destructuring', () => {
+    const flows = getFlows(`function handler(req) {
+  const values = ["head", "safe", req.body.code];
+  const [head, ...rest] = values;
+  eval(head);
+  eval(rest[0]);
+  eval(rest[1]);
+}`)
+    expect(flows).toHaveLength(1)
+    expect(flows[0].path).toContain('rest.1')
+  })
+
+  it.each([
+    'values = { safe: "literal", raw: req.body.code }; eval(values.safe); eval(values.raw);',
+    'values = ["literal", req.body.code]; eval(values[0]); eval(values[1]);',
+  ])('keeps locations independent when assigning a container: %s', assignment => {
+    const flows = getFlows(`function handler(req) {
+  let values;
+  ${assignment}
+}`)
+    expect(flows).toHaveLength(1)
+  })
+
+  it('preserves field-specific transformations', () => {
+    const flows = getFlows(`function handler(req) {
+  const values = {
+    safe: DOMPurify.sanitize(req.body.safe),
+    raw: req.body.raw,
+  };
+  element.innerHTML = values.safe;
+  element.innerHTML = values.raw;
+}`).filter(flow => flow.sink.type === 'xss')
+    expect(flows).toHaveLength(2)
+    expect(flows.map(flow => flow.sanitized)).toEqual([true, false])
+  })
+})
+
+describe('trackTaint — alternative-specific flow attribution', () => {
+  it('attributes a mixed sanitized and raw browser flow only to the raw alternative', () => {
+    const flow = getFlows(`function render(req) {
+  element.innerHTML = DOMPurify.sanitize(req.body.html) + location.hash;
+}`)[0]
+    expect(flow).toMatchObject({
+      sanitized: false,
+      confidence: 'high',
+      mitigationEvidence: [],
+    })
+    expect(flow.source.name).toBe('location.hash')
+    expect(flow.path).toContain('location.hash')
+  })
+
+  it('does not attribute another alternative schema evidence to the raw path', () => {
+    const flow = getFlows(`function handler(req) {
+  const mixed = schema.parse(schema.parse(req.body.checked)) + req.body.raw;
+  eval(mixed);
+}`)[0]
+    expect(flow).toMatchObject({ sanitized: false, confidence: 'high', mitigationEvidence: [] })
+  })
+
+  it('selects the same raw conditional alternative regardless of branch ordering', () => {
+    const leftRaw = getFlows(`function render(req) {
+  element.innerHTML = flag ? req.body.raw : DOMPurify.sanitize(req.body.safe);
+}`)[0]
+    const rightRaw = getFlows(`function render(req) {
+  element.innerHTML = flag ? DOMPurify.sanitize(req.body.safe) : req.body.raw;
+}`)[0]
+    for (const flow of [leftRaw, rightRaw]) {
+      expect(flow).toMatchObject({
+        sanitized: false,
+        precision: 'control-flow-approximate',
+        confidence: 'medium',
+        mitigationEvidence: [],
+      })
+      expect(flow.source.name).toBe('req.body')
+    }
+  })
+})
+
+describe('trackTaint — assignment and transparent-call propagation', () => {
+  it.each(['+=', '||=', '&&=', '??='])('preserves lhs taint for %s assignment', operator => {
+    const flow = getFlows(`function handler(req) {
+  let value = req.body.raw;
+  value ${operator} DOMPurify.sanitize(location.hash);
+  element.innerHTML = value;
+}`).find(candidate => candidate.sink.type === 'xss')
+    expect(flow).toMatchObject({ sanitized: false, mitigationEvidence: [] })
+    expect(flow!.source.name).toBe('req.body')
+  })
+
+  it('propagates receiver taint through transparent member calls', () => {
+    const flow = getFlows(`function handler(req) {
+  eval(req.body.code.trim().slice(0).toString());
+}`)[0]
+    expect(flow.source).toMatchObject({ name: 'req.body', baseConfidence: 'high' })
+  })
+
+  it('resolves immutable Koa request-prefix alias chains', () => {
+    const flow = getFlows(`function handler(ctx) {
+  const request = ctx.request;
+  const alias = request;
+  eval(alias.body.code);
+}`)[0]
+    expect(flow.source).toMatchObject({
+      name: 'ctx.request.body',
+      origin: 'catalog-user-input',
+      baseConfidence: 'high',
+    })
+  })
+
+  it('retains explicit and synthetic semantics through request aliases', () => {
+    const flows = getFlows(`function handler(req) {
+  const first = req;
+  const second = first;
+  eval(second.body.code);
+  eval(second.other);
+}`)
+    expect(flows.map(flow => [flow.source.name, flow.confidence])).toEqual([
+      ['req.body', 'high'],
+      ['req', 'medium'],
+    ])
+  })
+
+  it('does not taint a Koa request container before selecting a source member', () => {
+    expect(getFlows(`function handler(ctx) {
+  const request = ctx.request;
+  eval(request);
+}`)).toHaveLength(0)
+  })
+})
+
+describe('trackTaint — static SQL query aliases', () => {
+  it.each([
+    'const query = "SELECT * FROM users WHERE id = ?";',
+    'const base = `SELECT * FROM users WHERE id = ?`; const query = base;',
+  ])('recognizes an immutable placeholder query alias: %s', declaration => {
+    const flow = getFlows(`function handler(req) {
+  ${declaration}
+  db.query(query, req.body.id);
+}`).find(candidate => candidate.sink.type === 'sql-injection')
+    expect(flow).toMatchObject({ sanitized: true })
+  })
+
+  it('does not treat a raw concatenated query alias as parameterized', () => {
+    const flow = getFlows(`function handler(req) {
+  const query = "SELECT * FROM users WHERE name = '" + req.body.name + "' AND id = ?";
+  db.query(query, req.body.id);
+}`).find(candidate => candidate.sink.type === 'sql-injection')
+    expect(flow).toMatchObject({ sanitized: false })
+  })
+})
+
+describe('trackTaint — NoSQL receiver evidence', () => {
+  it.each([
+    'const User = [];',
+    'const User = {};',
+    'const User = "plain";',
+    'const UserModel = []; const User = UserModel;',
+    'const collection = {}; const User = collection;',
+  ])('rejects a capitalized local non-model receiver: %s', declaration => {
+    expect(getFlows(`function handler(req) {
+  ${declaration}
+  User.find(req.body.filter);
+}`)).toHaveLength(0)
+  })
+
+  it.each(['UserModel', 'collection'])('rejects a model-like local %s binding without model evidence', receiver => {
+    expect(getFlows(`function handler(req) {
+  const ${receiver} = [];
+  ${receiver}.find(req.body.filter);
+}`)).toHaveLength(0)
+  })
+
+  it('accepts an imported model receiver', () => {
+    const flow = getFlows(`import User from './user-model';
+function handler(req) { User.find(req.body.filter); }`)[0]
+    expect(flow.sink.type).toBe('nosql-injection')
+  })
+
+  it.each([
+    "const User = mongoose.model('User');",
+    "const User = db.collection('users');",
+  ])('accepts a receiver initialized from model evidence: %s', declaration => {
+    const flow = getFlows(`function handler(req) {
+  ${declaration}
+  User.find(req.body.filter);
+}`)[0]
+    expect(flow.sink.type).toBe('nosql-injection')
+  })
+})
+
+describe('trackTaint — exhaustive branch merging', () => {
+  it('suppresses when both explicit branches compatibly sanitize', () => {
+    const flow = getFlows(`function handler(req) {
+  let value = req.body.html;
+  if (flag) value = DOMPurify.sanitize(value);
+  else value = he.encode(value);
+  element.innerHTML = value;
+}`).find(candidate => candidate.sink.type === 'xss')
+    expect(flow).toMatchObject({
+      sanitized: true,
+      precision: 'control-flow-approximate',
+    })
+  })
+
+  it('retains the baseline when an else branch is absent', () => {
+    const flow = getFlows(`function handler(req) {
+  let value = req.body.html;
+  if (flag) value = DOMPurify.sanitize(value);
+  element.innerHTML = value;
+}`).find(candidate => candidate.sink.type === 'xss')
+    expect(flow).toMatchObject({ sanitized: false, precision: 'control-flow-approximate' })
+  })
+})
+
+describe('trackTaint — recursive immutable sanitizer aliases', () => {
+  it('resolves a multi-hop immutable sanitizer alias', () => {
+    const flow = getFlows(`function handler(req) {
+  const clean = DOMPurify.sanitize;
+  const alsoClean = clean;
+  const safe = alsoClean(req.body.html);
+  element.innerHTML = safe;
+}`)[0]
+    expect(flow).toMatchObject({ sanitized: true })
+  })
+
+  it('does not trust a reassigned sanitizer alias', () => {
+    const flow = getFlows(`function handler(req) {
+  let clean = DOMPurify.sanitize;
+  clean = passthrough;
+  const value = clean(req.body.html);
+  element.innerHTML = value;
+}`)[0]
+    expect(flow).toMatchObject({ sanitized: false })
   })
 })

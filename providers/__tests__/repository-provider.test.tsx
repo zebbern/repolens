@@ -29,6 +29,7 @@ vi.mock('@/lib/github/zipball', () => ({
 // Mock the IndexedDB cache module
 vi.mock('@/lib/cache/repo-cache', () => ({
   getCachedRepo: vi.fn().mockResolvedValue(null),
+  withHydratedCachedRepo: vi.fn().mockResolvedValue(false),
   setCachedRepo: vi.fn().mockResolvedValue(undefined),
 }))
 
@@ -39,7 +40,7 @@ vi.mock('@/lib/code/import-parser', () => ({
 
 // Mock sonner toast
 vi.mock('sonner', () => ({
-  toast: { error: vi.fn(), success: vi.fn(), info: vi.fn() },
+  toast: { error: vi.fn(), success: vi.fn(), info: vi.fn(), warning: vi.fn() },
 }))
 
 // Mock the GitHub token provider

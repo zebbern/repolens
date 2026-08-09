@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { installFakeWebLocks } from '@/lib/cache/__tests__/fake-web-lock-manager'
 
 // ---------------------------------------------------------------------------
 // Mocks — must be defined before importing the module under test
@@ -140,6 +141,7 @@ describe('startIndexing — streaming pipeline', () => {
   const signal = new AbortController().signal
 
   beforeEach(() => {
+    installFakeWebLocks()
     vi.clearAllMocks()
     mockMemoryStore.flush.mockResolvedValue(undefined)
     mockIDBStore.flush.mockResolvedValue(undefined)
@@ -265,6 +267,25 @@ describe('startIndexing — streaming pipeline', () => {
       totalFiles: 2,
     }))
     expect(callbacks.setLoadingStage).toHaveBeenLastCalledWith('ready')
+  })
+
+  it('does not write shared content or a manifest without origin-wide coordination', async () => {
+    Object.defineProperty(navigator, 'locks', { configurable: true, value: undefined })
+    const callbacks = createCallbacks()
+    const repoData = createRepoData({ size: 60_000 })
+    const fileTree = createFileTree([{ path: 'src/index.ts', name: 'index.ts' }])
+
+    await startIndexing(repoData, fileTree, 'tree-sha', signal, callbacks)
+
+    expect(mockIDBStore.putBatch).not.toHaveBeenCalled()
+    expect(mockIDBStore.flush).not.toHaveBeenCalled()
+    expect(mockSetCachedRepo).not.toHaveBeenCalled()
+    expect(mockToastWarning).toHaveBeenCalledWith(
+      'Repository is ready, but it was not cached for future visits.',
+    )
+    expect(callbacks.setCodeIndex).toHaveBeenCalledWith(expect.objectContaining({
+      contentStore: expect.objectContaining({ fallback: true }),
+    }))
   })
 
   it('keeps the resident index usable and warns when manifest publication fails', async () => {

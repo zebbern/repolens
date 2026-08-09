@@ -23,6 +23,8 @@ import {
   removeFromIndex,
   type CodeIndex,
 } from '../code-index'
+import { createCacheMutationCoordinator, withCacheMutationLock } from '@/lib/cache/cache-mutation-lock'
+import { FakeWebLockManager } from '@/lib/cache/__tests__/fake-web-lock-manager'
 
 // ---------------------------------------------------------------------------
 // InMemoryContentStore
@@ -306,6 +308,21 @@ describe('IDBContentStore', () => {
   beforeEach(() => {
     globalThis.indexedDB = new IDBFactory()
     globalThis.IDBKeyRange = IDBKeyRange
+  })
+
+  it('stops shared writes when its scoped publication lease expires', async () => {
+    const locks = new FakeWebLockManager()
+    const coordinator = createCacheMutationCoordinator(() => locks)
+    let store!: IDBContentStore
+    await withCacheMutationLock(undefined, async lease => {
+      store = new IDBContentStore('owner/repo', undefined, { kind: 'coordinated', lease })
+      store.put('file.ts', 'published')
+      await store.flush()
+    }, coordinator)
+
+    store.put('file.ts', 'virtual edit')
+    await store.flush()
+    expect(await store.get('file.ts')).toBe('published')
   })
 
   it('put() and get() round-trip', async () => {
@@ -654,8 +671,6 @@ describe('LazyContentStore', () => {
 
     expect(store.hasContent('file.ts')).toBe(true)
 
-    // Wait for IDB write to settle
-    await new Promise((r) => setTimeout(r, 10))
     const result = await store.get('file.ts')
     expect(result).toBe('content-data')
   })
@@ -672,21 +687,18 @@ describe('LazyContentStore', () => {
     expect(store.hasContent('a.ts')).toBe(true)
     expect(store.hasContent('b.ts')).toBe(true)
 
-    await new Promise((r) => setTimeout(r, 10))
     expect(await store.get('a.ts')).toBe('aaa')
     expect(await store.get('b.ts')).toBe('bbb')
   })
 
-  it('get() returns content from IDB for loaded files', async () => {
+  it('get() returns resident content for loaded files', async () => {
     const store = new LazyContentStore('owner/repo', fetchQueue)
     store.registerPaths(['file.ts'])
     store.put('file.ts', 'stored-content')
 
-    await new Promise((r) => setTimeout(r, 10))
-
     const result = await store.get('file.ts')
     expect(result).toBe('stored-content')
-    // Should NOT call fetchFn since content is in IDB
+    // Should NOT call fetchFn since content is resident.
     expect(mockFetchFn).not.toHaveBeenCalled()
   })
 
@@ -700,6 +712,15 @@ describe('LazyContentStore', () => {
     expect(mockFetchFn).toHaveBeenCalledWith('lazy.ts')
     // After fetch, content should be loaded
     expect(store.hasContent('lazy.ts')).toBe(true)
+  })
+
+  it('keeps SHA-less lazy content resident instead of opening shared IndexedDB', async () => {
+    const open = vi.spyOn(globalThis.indexedDB, 'open')
+    const store = new LazyContentStore('owner/repo', fetchQueue)
+    store.registerPaths(['lazy.ts'])
+
+    expect(await store.get('lazy.ts')).toBe('fetched:lazy.ts')
+    expect(open).not.toHaveBeenCalled()
   })
 
   it('get() returns null for completely unknown paths', async () => {
@@ -730,12 +751,10 @@ describe('LazyContentStore', () => {
     expect(store.getSync('file.ts')).toBeNull()
   })
 
-  it('getBatch() reads from IDB only — does not trigger fetches', async () => {
+  it('getBatch() reads resident content only — does not trigger fetches', async () => {
     const store = new LazyContentStore('owner/repo', fetchQueue)
     store.registerPaths(['loaded.ts', 'unloaded.ts'])
     store.put('loaded.ts', 'data')
-
-    await new Promise((r) => setTimeout(r, 10))
 
     const result = await store.getBatch(['loaded.ts', 'unloaded.ts'])
 

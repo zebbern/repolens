@@ -19,6 +19,7 @@ vi.mock('@/lib/github/zipball', () => ({
 
 vi.mock('@/lib/cache/repo-cache', () => ({
   getCachedRepo: vi.fn().mockResolvedValue(null),
+  withHydratedCachedRepo: vi.fn().mockResolvedValue(false),
   setCachedRepo: vi.fn().mockResolvedValue(undefined),
 }))
 

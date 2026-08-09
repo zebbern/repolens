@@ -17,7 +17,7 @@ self.addEventListener('message', async (event: MessageEvent<ScanWorkerRequest>) 
 
     // For IDB-backed repos: load content from IDB
     if (repoKey) {
-      const store = new IDBContentStore(repoKey)
+      const store = new IDBContentStore(repoKey, undefined, { kind: 'disabled' })
       const paths = Array.from(codeIndex.files.keys())
       const contents = await store.getBatch(paths)
       for (const [path, content] of contents) {

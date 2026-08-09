@@ -11,6 +11,7 @@ import {
   clearCachedRepo,
   clearAllCache,
   isReusableCachedRepo,
+  withHydratedCachedRepo,
 } from '../repo-cache'
 import { IDBContentStore } from '@/lib/code/content-store'
 import type { FileNode, RepositoryCoverage } from '@/types/repository'
@@ -337,7 +338,7 @@ describe('repo-cache (IndexedDB)', () => {
     globalThis.indexedDB = original
   })
 
-  it('skips destructive maintenance when only module-local coordination is available', async () => {
+  it('does not publish shared cache state when only module-local coordination is available', async () => {
     const store = new IDBContentStore('owner/repo')
     store.put('old.ts', 'old')
     await store.flush()
@@ -346,20 +347,18 @@ describe('repo-cache (IndexedDB)', () => {
     const fallback = createCacheMutationCoordinator(() => null)
     store.put('new.ts', 'new')
     await store.flush()
-    await setCachedRepo('owner', 'repo', 'sha-new', SAMPLE_FILES, SAMPLE_TREE, SAMPLE_COVERAGE, undefined, {
-      coordinator: fallback,
-      contentPaths: ['new.ts'],
-    })
+    await expect(setCachedRepo('owner', 'repo', 'sha-new', SAMPLE_FILES, SAMPLE_TREE, SAMPLE_COVERAGE, undefined, {
+      coordinator: fallback, contentPaths: ['new.ts'],
+    })).rejects.toBeInstanceOf(CacheCoordinationUnavailableError)
 
     expect(await store.get('old.ts')).toBe('old')
-    expect((await getCachedRepo('owner', 'repo'))?.sha).toBe('sha-new')
+    expect((await getCachedRepo('owner', 'repo'))?.sha).toBe('sha-old')
 
-    for (let index = 1; index <= 6; index++) {
-      await setCachedRepo('fallback', `repo-${index}`, `sha-${index}`, [], SAMPLE_TREE, SAMPLE_COVERAGE, undefined, {
-        coordinator: fallback,
-      })
-    }
-    expect(await getCachedRepo('fallback', 'repo-1')).not.toBeNull()
+    const secondRealm = createCacheMutationCoordinator(() => null)
+    await expect(setCachedRepo('owner', 'repo', 'sha-other', [], SAMPLE_TREE, SAMPLE_COVERAGE, undefined, {
+      coordinator: secondRealm,
+    })).rejects.toBeInstanceOf(CacheCoordinationUnavailableError)
+    expect(await getCachedRepo('owner', 'repo', { coordinator: fallback })).toBeNull()
   })
 
   it('surfaces explicit cleanup failure without cross-context coordination', async () => {
@@ -368,5 +367,31 @@ describe('repo-cache (IndexedDB)', () => {
       .rejects.toBeInstanceOf(CacheCoordinationUnavailableError)
     await expect(clearAllCache({ coordinator: fallback }))
       .rejects.toBeInstanceOf(CacheCoordinationUnavailableError)
+  })
+
+  it('keeps independent fallback realms from publishing competing manifests', async () => {
+    const firstRealm = createCacheMutationCoordinator(() => null)
+    const secondRealm = createCacheMutationCoordinator(() => null)
+    await Promise.all([
+      expect(setCachedRepo('fallback', 'repo', 'sha-a', SAMPLE_FILES, SAMPLE_TREE, SAMPLE_COVERAGE, undefined, {
+        coordinator: firstRealm,
+      })).rejects.toBeInstanceOf(CacheCoordinationUnavailableError),
+      expect(setCachedRepo('fallback', 'repo', 'sha-b', SAMPLE_FILES, SAMPLE_TREE, SAMPLE_COVERAGE, undefined, {
+        coordinator: secondRealm,
+      })).rejects.toBeInstanceOf(CacheCoordinationUnavailableError),
+    ])
+    expect(await getCachedRepo('fallback', 'repo')).toBeNull()
+  })
+
+  it('does not look up or claim a cache hit in fallback mode', async () => {
+    await setCachedRepo('owner', 'repo', 'sha', SAMPLE_FILES, SAMPLE_TREE, SAMPLE_COVERAGE)
+    const consume = vi.fn()
+    const fallback = createCacheMutationCoordinator(() => null)
+
+    await expect(withHydratedCachedRepo('owner', 'repo', 'sha', {
+      useIDB: true,
+      coordinator: fallback,
+    }, consume)).resolves.toBe(false)
+    expect(consume).not.toHaveBeenCalled()
   })
 })

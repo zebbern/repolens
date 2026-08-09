@@ -2,6 +2,7 @@ import React, { type ReactNode } from 'react'
 import { act, renderHook } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { GitHubRepo, CompleteRepoTree, ResolvedRepoTree } from '@/types/repository'
+import { IDBFactory, IDBKeyRange } from 'fake-indexeddb'
 
 vi.mock('@/lib/github/fetcher', () => ({
   buildFileTree: vi.fn((tree: ResolvedRepoTree) => tree.tree.map(entry => ({
@@ -20,6 +21,7 @@ vi.mock('@/lib/github/client', () => ({
 
 vi.mock('@/lib/cache/repo-cache', () => ({
   getCachedRepo: vi.fn(),
+  withHydratedCachedRepo: vi.fn(),
   setCachedRepo: vi.fn().mockResolvedValue(undefined),
 }))
 
@@ -39,7 +41,8 @@ vi.mock('sonner', () => ({
   toast: { warning: vi.fn() },
 }))
 
-import { getCachedRepo } from '@/lib/cache/repo-cache'
+import { getCachedRepo, withHydratedCachedRepo } from '@/lib/cache/repo-cache'
+import { batchIndexFiles, createEmptyIndex, createEmptyIndexWithStore } from '@/lib/code/code-index'
 import { IDBContentStore, InMemoryContentStore } from '@/lib/code/content-store'
 import { fetchFileViaProxy, fetchRepoViaProxy, fetchTreeViaProxy } from '@/lib/github/client'
 import { startIndexing } from '@/lib/github/indexing-pipeline'
@@ -118,6 +121,27 @@ describe('RepositoryProvider connection isolation', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     vi.mocked(getCachedRepo).mockResolvedValue(null)
+    vi.mocked(withHydratedCachedRepo).mockImplementation(async (owner, name, sha, options, consume) => {
+      const cached = await vi.mocked(getCachedRepo)(owner, name, { signal: options.signal })
+      if (!cached || cached.sha !== sha) return false
+      let index
+      let contentHydratedDurably = true
+      let hydrationError: unknown
+      try {
+        const base = options.useIDB
+          ? createEmptyIndexWithStore(new IDBContentStore(cached.key, options.signal))
+          : createEmptyIndex()
+        index = batchIndexFiles(base, cached.files)
+        await index.contentStore.flush()
+      } catch (error) {
+        hydrationError = error
+        contentHydratedDurably = false
+        index = batchIndexFiles(createEmptyIndex(), cached.files)
+      }
+      index.coverage = cached.coverage
+      consume({ cached, index, contentHydratedDurably, hydrationError })
+      return true
+    })
     vi.mocked(startIndexing).mockResolvedValue(undefined)
   })
 
@@ -164,7 +188,7 @@ describe('RepositoryProvider connection isolation', () => {
     expect(signalA?.aborted).toBe(true)
     expect(signalB?.aborted).toBe(false)
     expect(vi.mocked(fetchTreeViaProxy).mock.calls[0][3]?.signal).toBe(signalB)
-    expect(vi.mocked(getCachedRepo).mock.calls[0][2]?.signal).toBe(signalB)
+    expect(vi.mocked(withHydratedCachedRepo).mock.calls[0][3]?.signal).toBe(signalB)
     expect(vi.mocked(startIndexing).mock.calls[0][3]).toBe(signalB)
   })
 
@@ -300,6 +324,38 @@ describe('RepositoryProvider connection isolation', () => {
       'Repository is ready, but it was not cached for future visits.',
     )
     expect(startIndexing).not.toHaveBeenCalled()
+  })
+
+  it('keeps virtual renames resident instead of mutating shared hydrated content', async () => {
+    globalThis.indexedDB = new IDBFactory()
+    globalThis.IDBKeyRange = IDBKeyRange
+    vi.mocked(fetchRepoViaProxy).mockResolvedValue({ ...repo('a'), size: 60_000 })
+    vi.mocked(fetchTreeViaProxy).mockResolvedValue(tree('a'))
+    const cachedCoverage = {
+      treeStatus: 'complete' as const,
+      supportedFiles: { discovered: 1, loaded: 1 },
+      failures: { count: 0, samples: [] },
+      failedSubtrees: { count: 0, samples: [] },
+      mode: 'full' as const,
+    }
+    vi.mocked(getCachedRepo).mockResolvedValue({
+      schemaVersion: 4, complete: true, coverage: cachedCoverage,
+      key: 'acme/a', owner: 'acme', repo: 'a', sha: 'a-sha', timestamp: 1,
+      files: [{ path: 'a.ts', content: 'published' }],
+      tree: [{ name: 'a.ts', path: 'a.ts', type: 'file' }],
+    })
+
+    const { result } = renderHook(() => useRepository(), { wrapper })
+    await act(async () => {
+      await result.current.connectRepository('https://github.com/acme/a')
+      await result.current.renameFiles([{ from: 'a.ts', to: 'renamed.ts' }])
+    })
+
+    expect(result.current.codeIndex.contentStore).toBeInstanceOf(InMemoryContentStore)
+    expect(result.current.codeIndex.files.has('renamed.ts')).toBe(true)
+    const shared = new IDBContentStore('acme/a')
+    expect(await shared.get('a.ts')).toBe('published')
+    expect(await shared.get('renamed.ts')).toBeNull()
   })
 
   it.each(['metadata', 'tree', 'cache'] as const)(

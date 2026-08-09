@@ -3,6 +3,9 @@
 // Phase 4: LazyContentStore for >200MB repos (on-demand content loading).
 
 import type { FetchQueue } from './fetch-queue'
+import type { CacheMutationLease } from '@/lib/cache/cache-mutation-lock'
+import { assertActiveCacheMutationLease } from '@/lib/cache/cache-mutation-lock'
+import { openIndexedDB } from './open-indexed-db'
 
 /**
  * Metadata-only file record — no content field.
@@ -129,27 +132,22 @@ function abortError(signal?: AbortSignal): unknown {
 }
 
 function openContentDB(signal?: AbortSignal): Promise<IDBDatabase> {
-  if (signal?.aborted) return Promise.reject(abortError(signal))
-
-  return new Promise((resolve, reject) => {
-    const request = indexedDB.open(IDB_CONTENT_DB, IDB_CONTENT_VERSION)
-    request.onupgradeneeded = () => {
-      const db = request.result
+  return openIndexedDB({
+    name: IDB_CONTENT_DB,
+    version: IDB_CONTENT_VERSION,
+    signal,
+    upgrade: db => {
       if (!db.objectStoreNames.contains(IDB_CONTENT_STORE)) {
         db.createObjectStore(IDB_CONTENT_STORE)
       }
-    }
-    request.onsuccess = () => {
-      if (signal?.aborted) {
-        request.result.close()
-        reject(abortError(signal))
-      } else {
-        resolve(request.result)
-      }
-    }
-    request.onerror = () => reject(request.error ?? new DOMException('Failed to open content database', 'UnknownError'))
+    },
   })
 }
+
+export type IDBContentWriteAccess =
+  | { kind: 'coordinated'; lease: CacheMutationLease }
+  | { kind: 'disabled' }
+  | { kind: 'uncoordinated' }
 
 function runContentTransaction(
   db: IDBDatabase,
@@ -267,8 +265,23 @@ export class IDBContentStore implements ContentStore {
   private dbPromise: Promise<IDBDatabase> | null = null
   private unflushedWrites = new Set<Promise<void>>()
 
-  constructor(repoKey: string, private readonly signal?: AbortSignal) {
+  constructor(
+    repoKey: string,
+    private readonly signal?: AbortSignal,
+    private readonly writeAccess: IDBContentWriteAccess = { kind: 'uncoordinated' },
+  ) {
     this.repoKey = repoKey
+  }
+
+  private canWrite(): boolean {
+    if (this.writeAccess.kind === 'disabled') return false
+    if (this.writeAccess.kind === 'uncoordinated') return true
+    try {
+      assertActiveCacheMutationLease(this.writeAccess.lease)
+      return this.writeAccess.lease.crossContextSafe
+    } catch {
+      return false
+    }
   }
 
   private openDB(): Promise<IDBDatabase> {
@@ -340,13 +353,13 @@ export class IDBContentStore implements ContentStore {
   }
 
   put(path: string, content: string): void {
-    if (this.signal?.aborted) return
+    if (this.signal?.aborted || !this.canWrite()) return
     this.paths.add(path)
     this.write(store => store.put(content, this.idbKey(path)))
   }
 
   putBatch(entries: Array<{ path: string; content: string }>): void {
-    if (this.signal?.aborted) return
+    if (this.signal?.aborted || !this.canWrite()) return
     for (const { path } of entries) this.paths.add(path)
     this.write(store => {
       for (const { path, content } of entries) store.put(content, this.idbKey(path))
@@ -358,7 +371,7 @@ export class IDBContentStore implements ContentStore {
   }
 
   delete(path: string): void {
-    if (this.signal?.aborted) return
+    if (this.signal?.aborted || !this.canWrite()) return
     this.paths.delete(path)
     this.write(store => store.delete(this.idbKey(path)))
   }
@@ -386,6 +399,7 @@ export class IDBContentStore implements ContentStore {
   /** Clear all content for this repo from IDB. */
   async clear(): Promise<void> {
     if (this.signal?.aborted) throw abortError(this.signal)
+    if (!this.canWrite()) return
     await this.flush()
     if (this.signal?.aborted) throw abortError(this.signal)
     await deleteRepoContent(this.repoKey)
@@ -400,16 +414,16 @@ export class IDBContentStore implements ContentStore {
 
 /**
  * Lazy content store for repos >200MB.
- * Uses composition: wraps a private IDBContentStore for persistence and
- * a FetchQueue for on-demand content loading.
+ * Uses resident memory plus a FetchQueue for on-demand content loading.
+ * SHA-less lazy content is deliberately not written to shared IndexedDB.
  *
- * - `get(path)` triggers a fetch if content is not in IDB and path is known
- * - `getBatch` reads from IDB only (no fetch trigger)
+ * - `get(path)` triggers a fetch if content is not resident and path is known
+ * - `getBatch` reads resident content only (no fetch trigger)
  * - `getSync` always returns null (async-only store)
  */
 export class LazyContentStore implements ContentStore {
   readonly repoKey: string
-  private readonly idbStore: IDBContentStore
+  private readonly contentStore = new InMemoryContentStore()
   private readonly fetchQueue: FetchQueue
   private readonly metadataPaths = new Set<string>()
   private readonly loadedPaths = new Set<string>()
@@ -420,12 +434,11 @@ export class LazyContentStore implements ContentStore {
     private readonly signal?: AbortSignal,
   ) {
     this.repoKey = repoKey
-    this.idbStore = new IDBContentStore(repoKey, signal)
     this.fetchQueue = fetchQueue
   }
 
   async get(path: string): Promise<string | null> {
-    const stored = await this.idbStore.get(path)
+    const stored = await this.contentStore.get(path)
     if (stored !== null) return stored
 
     if (this.metadataPaths.has(path)) {
@@ -445,20 +458,20 @@ export class LazyContentStore implements ContentStore {
     return null
   }
 
-  /** Reads from IDB only — does NOT trigger fetches for missing files. */
+  /** Reads resident content only — does NOT trigger fetches for missing files. */
   getBatch(paths: string[]): Promise<Map<string, string>> {
-    return this.idbStore.getBatch(paths)
+    return this.contentStore.getBatch(paths)
   }
 
   put(path: string, content: string): void {
     if (this.signal?.aborted) return
-    this.idbStore.put(path, content)
+    this.contentStore.put(path, content)
     this.loadedPaths.add(path)
   }
 
   putBatch(entries: Array<{ path: string; content: string }>): void {
     if (this.signal?.aborted) return
-    this.idbStore.putBatch(entries)
+    this.contentStore.putBatch(entries)
     for (const { path } of entries) {
       this.loadedPaths.add(path)
     }
@@ -469,13 +482,13 @@ export class LazyContentStore implements ContentStore {
   }
 
   delete(path: string): void {
-    this.idbStore.delete(path)
+    this.contentStore.delete(path)
     this.loadedPaths.delete(path)
     this.metadataPaths.delete(path)
   }
 
   flush(): Promise<void> {
-    return this.idbStore.flush()
+    return this.contentStore.flush()
   }
 
   get size(): number {
@@ -508,7 +521,7 @@ export class LazyContentStore implements ContentStore {
     this.metadataPaths.clear()
     this.loadedPaths.clear()
     this.fetchQueue.abort()
-    await this.idbStore.clear()
+    await this.contentStore.clear()
   }
 
   /** Access the underlying FetchQueue (e.g., for progress tracking). */

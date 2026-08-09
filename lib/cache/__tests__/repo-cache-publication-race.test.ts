@@ -8,9 +8,11 @@ import {
 } from '../cache-mutation-lock'
 import {
   clearAllCache,
+  clearCachedRepo,
   getCachedRepo,
   publishCachedRepo,
   setCachedRepo,
+  withHydratedCachedRepo,
 } from '../repo-cache'
 import { IDBContentStore } from '@/lib/code/content-store'
 import { FakeWebLockManager, installFakeWebLocks } from './fake-web-lock-manager'
@@ -156,5 +158,86 @@ describe('origin-wide repository cache publication', () => {
     await Promise.all([touch, publish])
     expect(await getCachedRepo('owner', 'repo-1')).not.toBeNull()
     expect(await getCachedRepo('owner', 'repo-2')).toBeNull()
+  })
+
+  it('finishes lookup, hydration, touch, and consumption before a queued clear', async () => {
+    await setCachedRepo('owner', 'repo', 'sha-old', [
+      { path: 'old.ts', content: 'old' },
+    ], TREE, COVERAGE)
+    const consumed = deferred()
+    const release = deferred()
+    let hydratedContent: string | null = null
+    const lookup = withHydratedCachedRepo('owner', 'repo', 'sha-old', {
+      useIDB: true,
+      coordinator: firstClient,
+    }, async result => {
+      hydratedContent = await result.index.contentStore.get('old.ts')
+      consumed.resolve()
+      await release.promise
+    })
+    await consumed.promise
+
+    let clearFinished = false
+    const clear = clearCachedRepo('owner', 'repo', { coordinator: secondClient })
+      .then(() => { clearFinished = true })
+    await Promise.resolve()
+    expect(clearFinished).toBe(false)
+
+    release.resolve()
+    await Promise.all([lookup, clear])
+    expect(hydratedContent).toBe('old')
+    expect(await getCachedRepo('owner', 'repo')).toBeNull()
+  })
+
+  it('orders newer publication after an in-flight old lookup without stale rewrites', async () => {
+    await setCachedRepo('owner', 'repo', 'sha-old', [
+      { path: 'value.ts', content: 'old' },
+    ], TREE, COVERAGE)
+    const consumed = deferred()
+    const release = deferred()
+    const lookup = withHydratedCachedRepo('owner', 'repo', 'sha-old', {
+      useIDB: true,
+      coordinator: firstClient,
+    }, async () => {
+      consumed.resolve()
+      await release.promise
+    })
+    await consumed.promise
+
+    const store = new IDBContentStore('owner/repo')
+    const publish = withCacheMutationLock(undefined, async lease => {
+      store.put('value.ts', 'new')
+      await store.flush()
+      await publishCachedRepo(lease, 'owner', 'repo', 'sha-new', [
+        { path: 'value.ts', content: 'new' },
+      ], TREE, COVERAGE, undefined, { contentPaths: ['value.ts'] })
+    }, secondClient)
+    release.resolve()
+    await Promise.all([lookup, publish])
+
+    expect((await getCachedRepo('owner', 'repo'))?.sha).toBe('sha-new')
+    expect(await store.get('value.ts')).toBe('new')
+  })
+
+  it('makes a lookup queued behind publication observe only the new manifest', async () => {
+    await setCachedRepo('owner', 'repo', 'sha-old', [
+      { path: 'value.ts', content: 'old' },
+    ], TREE, COVERAGE)
+    const entered = deferred()
+    const release = deferred()
+    const publishingClient = delayingCoordinator(firstClient, entered, release)
+    const publish = setCachedRepo('owner', 'repo', 'sha-new', [
+      { path: 'value.ts', content: 'new' },
+    ], TREE, COVERAGE, undefined, { coordinator: publishingClient })
+    await entered.promise
+
+    let consumedSha: string | undefined
+    const lookup = withHydratedCachedRepo('owner', 'repo', 'sha-new', {
+      useIDB: true,
+      coordinator: secondClient,
+    }, result => { consumedSha = result.cached.sha })
+    release.resolve()
+    await Promise.all([publish, lookup])
+    expect(consumedSha).toBe('sha-new')
   })
 })

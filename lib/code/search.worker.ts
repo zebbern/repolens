@@ -30,7 +30,7 @@ self.onmessage = (event: MessageEvent<SearchWorkerRequest>) => {
 
     if (msg.repoKey) {
       // IDB-backed repo: load all content from IDB into the deserialized index
-      const store = new IDBContentStore(msg.repoKey)
+      const store = new IDBContentStore(msg.repoKey, undefined, { kind: 'disabled' })
       const paths = Array.from(currentIndex.files.keys())
       contentReady = store
         .getBatch(paths)

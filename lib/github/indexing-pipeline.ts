@@ -8,7 +8,7 @@ import { IDBContentStore, InMemoryContentStore, LazyContentStore } from '@/lib/c
 import { FetchQueue } from '@/lib/code/fetch-queue'
 import { streamUnzipFiles, isFileIndexable, isProbablyBinaryContent, MAX_FILE_SIZE } from '@/lib/github/zipball'
 import { publishCachedRepo } from '@/lib/cache/repo-cache'
-import { withCacheMutationLock } from '@/lib/cache/cache-mutation-lock'
+import { requireCrossContextCacheCoordination, withCacheMutationLock } from '@/lib/cache/cache-mutation-lock'
 import { fetchWithConcurrency } from './fetch-utils'
 import { LAZY_CONTENT_THRESHOLD_KB, getIdbThresholdKB } from '@/config/constants'
 import { toast } from 'sonner'
@@ -133,6 +133,14 @@ export async function startIndexing(
 
     await lazyStore.flush()
     if (signal.aborted) return
+    try {
+      await withCacheMutationLock(signal, async lease => {
+        requireCrossContextCacheCoordination(lease)
+      })
+    } catch (error) {
+      if (signal.aborted) return
+      warnNotCached(error)
+    }
     setCodeIndex(finalIndex)
     setCoverage?.(coverage)
     setIndexingProgress({ current: indexableFiles.length, total: indexableFiles.length, isComplete: true })
@@ -145,11 +153,7 @@ export async function startIndexing(
   const errors: Array<{ path: string; error: string }> = []
   let zipballUsed = false
 
-  // For IDB tier (50-200 MB): create content store early so we can write during streaming
   const useIDB = repoData.size != null && repoData.size >= getIdbThresholdKB()
-  const contentStore = useIDB
-    ? new IDBContentStore(`${repoData.owner}/${repoData.name}`, signal)
-    : null
 
   // B1: Try streaming zipball for repos under 200 MB
   if (repoData.size != null && repoData.size < LAZY_CONTENT_THRESHOLD_KB) {
@@ -275,8 +279,16 @@ export async function startIndexing(
   let contentDurable = false
   try {
     await withCacheMutationLock(signal, async lease => {
+      requireCrossContextCacheCoordination(lease)
       // The lock starts before the final content transaction and remains held
       // through manifest publication and all destructive maintenance.
+      const contentStore = useIDB
+        ? new IDBContentStore(
+            `${repoData.owner}/${repoData.name}`,
+            signal,
+            { kind: 'coordinated', lease },
+          )
+        : null
       const baseIndex = contentStore
         ? createEmptyIndexWithStore(contentStore)
         : createEmptyIndex()

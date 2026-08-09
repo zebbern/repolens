@@ -8,12 +8,11 @@ import { parseGitHubUrl } from "@/lib/github/parser"
 import { buildFileTree } from "@/lib/github/fetcher"
 import { fetchRepoViaProxy, fetchTreeViaProxy, fetchFileViaProxy } from "@/lib/github/client"
 import type { CodeIndex } from "@/lib/code/code-index"
-import { createEmptyIndex, createEmptyIndexWithStore, batchIndexFiles, invalidateLinesCache } from '@/lib/code/code-index'
+import { createEmptyIndex, invalidateLinesCache } from '@/lib/code/code-index'
 import { buildTreeFromFiles, type FileRename } from '@/lib/code/rename-files'
-import { IDBContentStore, LazyContentStore } from '@/lib/code/content-store'
+import { IDBContentStore, InMemoryContentStore, LazyContentStore } from '@/lib/code/content-store'
 import type { FetchQueue } from '@/lib/code/fetch-queue'
-import { getCachedRepo } from "@/lib/cache/repo-cache"
-import { withCacheMutationLock } from '@/lib/cache/cache-mutation-lock'
+import { withHydratedCachedRepo } from "@/lib/cache/repo-cache"
 import { toast } from 'sonner'
 import { analyzeCodebase, type FullAnalysis } from "@/lib/code/import-parser"
 import { startIndexing as runIndexingPipeline } from "@/lib/github/indexing-pipeline"
@@ -36,6 +35,18 @@ export type { LoadingStage, SearchState, ContentAvailability, ContentLoadingStat
 export interface RepositorySession {
   readonly id: number
   readonly signal: AbortSignal
+}
+
+function makeContentResident(index: CodeIndex): CodeIndex {
+  if (!(index.contentStore instanceof IDBContentStore)) return index
+  const content = new Map<string, string>()
+  for (const [path, file] of index.files) {
+    if (file.content !== undefined) content.set(path, file.content)
+  }
+  return {
+    ...index,
+    contentStore: new InMemoryContentStore(content),
+  }
 }
 
 // Data context — rarely changes after repo load/indexing
@@ -318,43 +329,34 @@ export function RepositoryProvider({ children }: { children: ReactNode }) {
       setIsLoading(false)
 
       // B2: Check IndexedDB cache before indexing
-      const cached = await getCachedRepo(owner, repoName, { signal: controller.signal })
-      if (!isCurrentConnection(epoch, controller)) return false
-      if (tree.status === 'complete' && cached && cached.sha === tree.sha) {
-        // Cache hit — hydrate code index from cached data
+      if (tree.status === 'complete') {
         const useIDB = repoData.size != null && repoData.size >= getIdbThresholdKB()
-        let index: CodeIndex | undefined
-        let contentHydratedDurably = true
-        try {
-          await withCacheMutationLock(controller.signal, async () => {
-            const baseIndex = useIDB
-              ? createEmptyIndexWithStore(new IDBContentStore(`${owner}/${repoName}`, controller.signal))
-              : createEmptyIndex()
-            index = batchIndexFiles(baseIndex, cached.files)
-            await index.contentStore.flush()
-          })
-        } catch (error) {
-          if (!isCurrentConnection(epoch, controller)) return false
-          contentHydratedDurably = false
-          console.warn('Failed to hydrate cached repository content in IndexedDB:', error)
-          index = batchIndexFiles(createEmptyIndex(), cached.files)
-          toast.warning('Repository is ready, but it was not cached for future visits.')
-        }
+        const usedCache = await withHydratedCachedRepo(
+          owner,
+          repoName,
+          tree.sha,
+          { signal: controller.signal, useIDB },
+          ({ cached, index, contentHydratedDurably, hydrationError }) => {
+            if (!isCurrentConnection(epoch, controller)) return
+            if (hydrationError) {
+              console.warn('Failed to hydrate cached repository content in IndexedDB:', hydrationError)
+              toast.warning('Repository is ready, but it was not cached for future visits.')
+            }
+            codeIndexRef.current = index
+            setFiles(cached.tree)
+            setCodeIndex(index)
+            setIndexingProgress({
+              current: cached.files.length,
+              total: cached.files.length,
+              isComplete: true,
+            })
+            setIsCacheHit(contentHydratedDurably)
+            setCoverage(cached.coverage)
+            setLoadingStage(contentHydratedDurably ? 'cached' : 'ready')
+          },
+        )
         if (!isCurrentConnection(epoch, controller)) return false
-        if (!index) return false
-        index.coverage = cached.coverage
-        codeIndexRef.current = index
-        setFiles(cached.tree)
-        setCodeIndex(index)
-        setIndexingProgress({
-          current: cached.files.length,
-          total: cached.files.length,
-          isComplete: true,
-        })
-        setIsCacheHit(contentHydratedDurably)
-        setCoverage(cached.coverage)
-        setLoadingStage(contentHydratedDurably ? 'cached' : 'ready')
-        return true
+        if (usedCache) return true
       }
       
       // Start indexing immediately in background
@@ -388,8 +390,9 @@ export function RepositoryProvider({ children }: { children: ReactNode }) {
   }, [resetRepositoryState])
   
   const updateCodeIndex = useCallback((index: CodeIndex) => {
-    codeIndexRef.current = index
-    setCodeIndex(index)
+    const residentIndex = makeContentResident(index)
+    codeIndexRef.current = residentIndex
+    setCodeIndex(residentIndex)
   }, [])
   
   const loadFileContent = useCallback(async (path: string, session = repositorySessionRef.current): Promise<string | null> => {
@@ -488,6 +491,8 @@ export function RepositoryProvider({ children }: { children: ReactNode }) {
     if (controller === null || !isCurrentConnection(epoch, controller)) return 0
     const renameMap = new Map(renames.map(r => [r.from, r.to]))
     const basename = (p: string) => p.split('/').pop() || p
+    const residentIndex = makeContentResident(codeIndexRef.current)
+    codeIndexRef.current = residentIndex
 
     // 1. Rebuild the file tree (handles cross-directory moves).
     setFiles(prev => {
@@ -500,8 +505,9 @@ export function RepositoryProvider({ children }: { children: ReactNode }) {
 
     // 2. Re-key the code index (files + metadata).
     setCodeIndex(prev => {
-      const newFiles = new Map(prev.files)
-      const newMeta = new Map(prev.meta)
+      const resident = makeContentResident(prev)
+      const newFiles = new Map(resident.files)
+      const newMeta = new Map(resident.meta)
       for (const { from, to } of renames) {
         const f = newFiles.get(from)
         if (f) {
@@ -514,14 +520,18 @@ export function RepositoryProvider({ children }: { children: ReactNode }) {
           newMeta.set(to, m)
         }
       }
-      return { ...prev, files: newFiles, meta: newMeta }
+      const next = { ...resident, files: newFiles, meta: newMeta }
+      codeIndexRef.current = next
+      return next
     })
 
     // 3. Move cached content to the new keys (async for IDB-backed stores).
     //    The content store instance is stable across index updates.
     const store = codeIndexRef.current.contentStore
     await Promise.all(renames.map(async ({ from, to }) => {
-      const content = store.getSync(from) ?? (await store.get(from))
+      const content = codeIndexRef.current.files.get(from)?.content
+        ?? store.getSync(from)
+        ?? (await store.get(from))
       if (!isCurrentConnection(epoch, controller)) return
       if (content != null) store.put(to, content)
       store.delete(from)

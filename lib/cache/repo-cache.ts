@@ -7,15 +7,18 @@ import {
   clearAllRepoContent,
   deleteRepoContent,
   deleteStaleRepoContent,
+  IDBContentStore,
 } from '@/lib/code/content-store'
 import {
-  assertActiveCacheMutationLease,
   requireCrossContextCacheCoordination,
   throwIfCacheMutationAborted,
   withCacheMutationLock,
   type CacheMutationCoordinator,
   type CacheMutationLease,
 } from '@/lib/cache/cache-mutation-lock'
+import type { CodeIndex } from '@/lib/code/code-index'
+import { batchIndexFiles, createEmptyIndex, createEmptyIndexWithStore } from '@/lib/code/code-index'
+import { openIndexedDB } from '@/lib/code/open-indexed-db'
 
 const DB_NAME = 'repolens-cache'
 const STORE_NAME = 'repos'
@@ -81,12 +84,11 @@ export interface CachedRepoMeta {
 // ---------------------------------------------------------------------------
 
 function openDB(signal?: AbortSignal): Promise<IDBDatabase> {
-  if (signal?.aborted) return Promise.reject(signal.reason)
-  return new Promise((resolve, reject) => {
-    const request = indexedDB.open(DB_NAME, DB_VERSION)
-
-    request.onupgradeneeded = () => {
-      const db = request.result
+  return openIndexedDB({
+    name: DB_NAME,
+    version: DB_VERSION,
+    signal,
+    upgrade: db => {
       if (!db.objectStoreNames.contains(STORE_NAME)) {
         db.createObjectStore(STORE_NAME, { keyPath: 'key' })
       }
@@ -94,17 +96,7 @@ function openDB(signal?: AbortSignal): Promise<IDBDatabase> {
         const tourStore = db.createObjectStore(TOURS_STORE_NAME, { keyPath: 'id' })
         tourStore.createIndex('repoKey', 'repoKey', { unique: false })
       }
-    }
-
-    request.onsuccess = () => {
-      if (signal?.aborted) {
-        request.result.close()
-        reject(signal.reason)
-      } else {
-        resolve(request.result)
-      }
-    }
-    request.onerror = () => reject(request.error ?? new DOMException('Failed to open repository cache', 'UnknownError'))
+    },
   })
 }
 
@@ -274,6 +266,7 @@ export async function getCachedRepo(
   try {
     return await withCacheMutationLock(options.signal, async lease => {
       throwIfCacheMutationAborted(lease)
+      if (!lease.crossContextSafe) return null
       const db = await openDB(lease.signal)
       throwIfCacheMutationAborted(lease)
       const entry = await getRepoRecord(db, `${owner}/${repo}`, lease.signal)
@@ -301,6 +294,78 @@ export async function getCachedRepo(
   }
 }
 
+export interface HydratedCachedRepo {
+  cached: ReusableCachedRepo
+  index: CodeIndex
+  contentHydratedDurably: boolean
+  hydrationError?: unknown
+}
+
+/**
+ * Look up, validate, hydrate, touch, and consume a cache hit under one origin lock.
+ * The consumer runs before the lease is released so clear/publication cannot
+ * interleave between manifest validation and the publication decision.
+ */
+export async function withHydratedCachedRepo(
+  owner: string,
+  repo: string,
+  expectedSha: string,
+  options: {
+    signal?: AbortSignal
+    useIDB: boolean
+    coordinator?: CacheMutationCoordinator
+  },
+  consume: (result: HydratedCachedRepo) => void | Promise<void>,
+): Promise<boolean> {
+  try {
+    return await withCacheMutationLock(options.signal, async lease => {
+      throwIfCacheMutationAborted(lease)
+      if (!lease.crossContextSafe) return false
+
+      const db = await openDB(lease.signal)
+      throwIfCacheMutationAborted(lease)
+      const entry = await getRepoRecord(db, `${owner}/${repo}`, lease.signal)
+      throwIfCacheMutationAborted(lease)
+      if (!entry || !isReusableCachedRepo(entry) || entry.sha !== expectedSha) return false
+
+      let index: CodeIndex
+      let contentHydratedDurably = true
+      let hydrationError: unknown
+      try {
+        const baseIndex = options.useIDB
+          ? createEmptyIndexWithStore(new IDBContentStore(
+              entry.key,
+              lease.signal,
+              { kind: 'coordinated', lease },
+            ))
+          : createEmptyIndex()
+        index = batchIndexFiles(baseIndex, entry.files)
+        await index.contentStore.flush()
+        throwIfCacheMutationAborted(lease)
+      } catch (error) {
+        if (lease.signal?.aborted) throw error
+        contentHydratedDurably = false
+        hydrationError = error
+        index = batchIndexFiles(createEmptyIndex(), entry.files)
+      }
+      index.coverage = entry.coverage
+
+      try {
+        await touchRepoTimestamp(db, entry, lease.signal)
+      } catch (error) {
+        if (lease.signal?.aborted) throw error
+        console.warn(`Failed to update repository cache timestamp for ${entry.key}:`, error)
+      }
+      throwIfCacheMutationAborted(lease)
+      await consume({ cached: entry, index, contentHydratedDurably, hydrationError })
+      return true
+    }, options.coordinator)
+  } catch (error) {
+    if (options.signal?.aborted) throw error
+    return false
+  }
+}
+
 export interface CachePublicationOptions {
   contentPaths?: readonly string[]
 }
@@ -318,7 +383,7 @@ export async function publishCachedRepo(
   options: CachePublicationOptions = {},
 ): Promise<void> {
   const key = `${owner}/${repo}`
-  assertActiveCacheMutationLease(lease)
+  requireCrossContextCacheCoordination(lease)
   throwIfCacheMutationAborted(lease)
   const db = await openDB(lease.signal)
   throwIfCacheMutationAborted(lease)

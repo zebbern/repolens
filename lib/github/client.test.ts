@@ -264,6 +264,48 @@ describe('Direct GitHub API calls (PAT mode)', () => {
       expect(cacheMock.setCache).not.toHaveBeenCalled()
     })
 
+    it('reuses complete direct-PAT trees from an auth-scoped memory key', async () => {
+      setGitHubPAT('ghp_complete')
+      mockFetch.mockResolvedValueOnce(jsonResponse({ sha: 'root', tree: [], truncated: false }))
+
+      const first = await fetchTreeViaProxy('X', 'Y', 'main')
+      const [cacheKey, cachedValue] = cacheMock.setCache.mock.calls[0]
+      expect(cacheKey).toMatch(/^tree:pat:\d+:X\/Y:main$/)
+      expect(cacheKey).not.toContain('ghp_complete')
+      cacheMock.getCached.mockImplementation((key: string) => key === cacheKey ? cachedValue : null)
+
+      await expect(fetchTreeViaProxy('X', 'Y', 'main')).resolves.toBe(first)
+      expect(mockFetch).toHaveBeenCalledOnce()
+    })
+
+    it('never caches or reuses partial direct-PAT trees', async () => {
+      setGitHubPAT('ghp_partial')
+      mockFetch.mockRejectedValueOnce(new Error('first failure'))
+      mockFetch.mockRejectedValueOnce(new Error('second failure'))
+
+      await expect(fetchTreeViaProxy('X', 'Y', 'main')).resolves.toMatchObject({ status: 'partial' })
+      await expect(fetchTreeViaProxy('X', 'Y', 'main')).resolves.toMatchObject({ status: 'partial' })
+
+      expect(mockFetch).toHaveBeenCalledTimes(2)
+      expect(cacheMock.setCache).not.toHaveBeenCalled()
+    })
+
+    it('does not reuse a complete tree after the PAT identity changes', async () => {
+      setGitHubPAT('ghp_first')
+      mockFetch.mockResolvedValueOnce(jsonResponse({ sha: 'root-a', tree: [], truncated: false }))
+      const first = await fetchTreeViaProxy('X', 'Y', 'main')
+      const firstKey = cacheMock.setCache.mock.calls[0][0] as string
+      cacheMock.getCached.mockImplementation((key: string) => key === firstKey ? first : null)
+
+      setGitHubPAT('ghp_second')
+      mockFetch.mockResolvedValueOnce(jsonResponse({ sha: 'root-b', tree: [], truncated: false }))
+      await fetchTreeViaProxy('X', 'Y', 'main')
+
+      const secondKey = cacheMock.setCache.mock.calls[1][0] as string
+      expect(secondKey).not.toBe(firstKey)
+      expect(mockFetch).toHaveBeenCalledTimes(2)
+    })
+
     it('sends Authorization Bearer header in direct mode', async () => {
       setGitHubPAT('ghp_mytoken')
       mockFetch.mockResolvedValueOnce(jsonResponse(RAW_TAGS))

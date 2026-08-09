@@ -9,7 +9,7 @@ const STORE_NAME = 'repos'
 const TOURS_STORE_NAME = 'tours'
 const DB_VERSION = 2
 const MAX_REPOS = 5
-export const REPO_CACHE_SCHEMA_VERSION = 3
+export const REPO_CACHE_SCHEMA_VERSION = 4
 
 export interface CachedRepo {
   schemaVersion?: number

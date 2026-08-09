@@ -488,7 +488,9 @@ export function buildFileTree(tree: RepoTree): FileNode[] {
     const aDepth = a.path.split('/').length
     const bDepth = b.path.split('/').length
     if (aDepth !== bDepth) return aDepth - bDepth
-    if (a.type !== b.type) return a.type === 'tree' ? -1 : 1
+    const aDirectory = a.type === 'tree'
+    const bDirectory = b.type === 'tree'
+    if (aDirectory !== bDirectory) return aDirectory ? -1 : 1
     return a.path.localeCompare(b.path)
   })
   
@@ -500,7 +502,7 @@ export function buildFileTree(tree: RepoTree): FileNode[] {
     const node: FileNode = {
       name,
       path: item.path,
-      type: item.type === 'tree' ? 'directory' : 'file',
+      type: item.type === 'tree' ? 'directory' : item.type === 'commit' ? 'submodule' : 'file',
       gitType: item.type,
       size: item.size,
       language: item.type === 'blob' ? detectLanguage(name) : undefined,
@@ -757,7 +759,9 @@ export function buildFileTreeString(files: FileNode[], indent: string = ''): str
   let result = ''
   
   for (const file of files) {
-    result += `${indent}${file.type === 'directory' ? '/' : ''}${file.name}\n`
+    const prefix = file.type === 'directory' ? '/' : ''
+    const suffix = file.type === 'submodule' ? ' [submodule]' : ''
+    result += `${indent}${prefix}${file.name}${suffix}\n`
     if (file.type === 'directory' && file.children) {
       result += buildFileTreeString(file.children, indent + '  ')
     }

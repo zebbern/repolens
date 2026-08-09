@@ -61,6 +61,14 @@ function buildMockIndex() {
   return index
 }
 
+const PARTIAL_COVERAGE = {
+  treeStatus: 'partial' as const,
+  supportedFiles: { discovered: 4, loaded: 2 },
+  failures: { count: 1, samples: [{ path: 'src/missing.ts', error: 'missing' }] },
+  failedSubtrees: { count: 1, samples: ['vendor'] },
+  mode: 'full' as const,
+}
+
 // ---------------------------------------------------------------------------
 // null / empty codeIndex
 // ---------------------------------------------------------------------------
@@ -76,6 +84,17 @@ describe('executeToolLocally — empty index', () => {
     const empty = createEmptyIndex()
     const result = JSON.parse(await executeToolLocally('readFile', { path: 'foo' }, empty))
     expect(result).toHaveProperty('error')
+  })
+
+  it('retains exact coverage on an empty partial repository error', async () => {
+    const empty = createEmptyIndex()
+    empty.coverage = PARTIAL_COVERAGE
+    const result = JSON.parse(await executeToolLocally('readFile', { path: 'foo' }, empty))
+    expect(result).toMatchObject({
+      error: 'No codebase loaded',
+      repositoryCoverage: PARTIAL_COVERAGE,
+      coverageWarning: expect.stringContaining('Do not imply repository-wide completeness'),
+    })
   })
 })
 
@@ -96,6 +115,17 @@ describe('executeToolLocally — readFile', () => {
     const result = JSON.parse(await executeToolLocally('readFile', { path: 'nonexistent.ts' }, index))
     expect(result).toHaveProperty('error')
     expect(result.error).toContain('File not found')
+  })
+
+  it('retains exact partial coverage for a missing file result', async () => {
+    const index = buildMockIndex()
+    index.coverage = PARTIAL_COVERAGE
+    const result = JSON.parse(await executeToolLocally('readFile', { path: 'nonexistent.ts' }, index))
+    expect(result).toMatchObject({
+      error: expect.stringContaining('File not found'),
+      repositoryCoverage: PARTIAL_COVERAGE,
+      coverageWarning: expect.stringContaining('Do not imply repository-wide completeness'),
+    })
   })
 
   it('respects startLine / endLine range', async () => {

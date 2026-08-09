@@ -18,7 +18,7 @@ import { buildFileTreeString } from '@/lib/github/fetcher'
 import { buildStructuralIndex } from '@/lib/ai/structural-index'
 import { getMaxIndexBytesForModel } from '@/lib/ai/providers'
 import { handleToolCall, type AddToolOutputFn } from '@/lib/ai/tool-call-handler'
-import type { CodeIndex } from '@/lib/code/code-index'
+import { flattenFiles, type CodeIndex } from '@/lib/code/code-index'
 import type { ChangelogGenContext, GeneratedChangelog } from '@/lib/changelog'
 import type { APIKeysState, ProviderModel } from '@/types/types'
 
@@ -155,8 +155,8 @@ export function ChangelogProvider({ children }: { children: ReactNode }) {
   // --- Transport ---
   const codeIndexRef = useRef<CodeIndex | null>(codeIndex)
 
-  const allFilePathsRef = useRef<string[]>(files.map(f => f.path))
-  useEffect(() => { allFilePathsRef.current = files.map(f => f.path) }, [files])
+  const allFilePathsRef = useRef<string[]>(flattenFiles(files).map(f => f.path))
+  useEffect(() => { allFilePathsRef.current = flattenFiles(files).map(f => f.path) }, [files])
 
   useEffect(() => { codeIndexRef.current = codeIndex }, [codeIndex])
 

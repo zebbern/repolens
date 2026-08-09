@@ -8,7 +8,7 @@ import { parseGitHubUrl } from "@/lib/github/parser"
 import { buildFileTree } from "@/lib/github/fetcher"
 import { fetchRepoViaProxy, fetchTreeViaProxy, fetchFileViaProxy } from "@/lib/github/client"
 import type { CodeIndex } from "@/lib/code/code-index"
-import { createEmptyIndex, createEmptyIndexWithStore, batchIndexFiles, invalidateLinesCache, flattenFiles } from '@/lib/code/code-index'
+import { createEmptyIndex, createEmptyIndexWithStore, batchIndexFiles, invalidateLinesCache } from '@/lib/code/code-index'
 import { buildTreeFromFiles, type FileRename } from '@/lib/code/rename-files'
 import { IDBContentStore, LazyContentStore } from '@/lib/code/content-store'
 import type { FetchQueue } from '@/lib/code/fetch-queue'
@@ -91,6 +91,26 @@ type RepositoryContextType = RepositoryDataContextType & RepositoryActionsContex
 const RepositoryDataCtx = createContext<RepositoryDataContextType | null>(null)
 const RepositoryActionsCtx = createContext<RepositoryActionsContextType | null>(null)
 const RepositoryProgressCtx = createContext<RepositoryProgressContextType | null>(null)
+
+function findFileNode(nodes: FileNode[], targetPath: string): FileNode | null {
+  for (const node of nodes) {
+    if (node.path === targetPath) return node
+    if (node.children) {
+      const found = findFileNode(node.children, targetPath)
+      if (found) return found
+    }
+  }
+  return null
+}
+
+function flattenTreeLeaves(nodes: FileNode[]): FileNode[] {
+  const leaves: FileNode[] = []
+  for (const node of nodes) {
+    if (node.type === 'directory') leaves.push(...flattenTreeLeaves(node.children ?? []))
+    else leaves.push(node)
+  }
+  return leaves
+}
 
 export function RepositoryProvider({ children }: { children: ReactNode }) {
   const [repo, setRepo] = useState<GitHubRepo | null>(null)
@@ -298,7 +318,7 @@ export function RepositoryProvider({ children }: { children: ReactNode }) {
       // B2: Check IndexedDB cache before indexing
       const cached = await getCachedRepo(owner, repoName, { signal: controller.signal })
       if (!isCurrentConnection(epoch, controller)) return false
-      if (cached && cached.sha === tree.sha) {
+      if (tree.status === 'complete' && cached && cached.sha === tree.sha) {
         // Cache hit — hydrate code index from cached data
         const useIDB = repoData.size != null && repoData.size >= getIdbThresholdKB()
         const baseIndex = useIDB
@@ -307,6 +327,7 @@ export function RepositoryProvider({ children }: { children: ReactNode }) {
         const index = batchIndexFiles(baseIndex, cached.files)
         index.coverage = cached.coverage
         codeIndexRef.current = index
+        setFiles(cached.tree)
         setCodeIndex(index)
         setIndexingProgress({
           current: cached.files.length,
@@ -355,6 +376,7 @@ export function RepositoryProvider({ children }: { children: ReactNode }) {
   }, [])
   
   const loadFileContent = useCallback(async (path: string, session = repositorySessionRef.current): Promise<string | null> => {
+    if (findFileNode(files, path)?.type === 'submodule') return null
     const epoch = connectionEpochRef.current
     const controller = connectionAbortRef.current
     const requestIsCurrent = () => session === repositorySessionRef.current && (
@@ -406,23 +428,14 @@ export function RepositoryProvider({ children }: { children: ReactNode }) {
       console.error('Failed to load file content:', err)
       return null
     }
-  }, [repo, codeIndex, contentAvailability, isCurrentConnection])
+  }, [repo, files, codeIndex, contentAvailability, isCurrentConnection])
 
   const getFileByPath = useCallback((path: string): FileNode | null => {
-    function findNode(nodes: FileNode[], targetPath: string): FileNode | null {
-      for (const node of nodes) {
-        if (node.path === targetPath) return node
-        if (node.children) {
-          const found = findNode(node.children, targetPath)
-          if (found) return found
-        }
-      }
-      return null
-    }
-    return findNode(files, path)
+    return findFileNode(files, path)
   }, [files])
 
   const pinFile = useCallback((path: string, type: 'file' | 'directory' = 'file') => {
+    if (findFileNode(files, path)?.type === 'submodule') return
     setPinnedFiles(prev => {
       if (prev.has(path)) return prev
       if (prev.size >= PINNED_CONTEXT_CONFIG.MAX_PINNED_FILES) {
@@ -433,7 +446,7 @@ export function RepositoryProvider({ children }: { children: ReactNode }) {
       next.set(path, { path, type })
       return next
     })
-  }, [])
+  }, [files])
 
   const unpinFile = useCallback((path: string) => {
     setPinnedFiles(prev => {
@@ -461,8 +474,8 @@ export function RepositoryProvider({ children }: { children: ReactNode }) {
 
     // 1. Rebuild the file tree (handles cross-directory moves).
     setFiles(prev => {
-      const flat = flattenFiles(prev).map(f => {
-        const to = renameMap.get(f.path)
+      const flat = flattenTreeLeaves(prev).map(f => {
+        const to = f.type === 'file' ? renameMap.get(f.path) : undefined
         return to ? { ...f, path: to, name: basename(to) } : f
       })
       return buildTreeFromFiles(flat)

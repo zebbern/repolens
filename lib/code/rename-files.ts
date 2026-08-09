@@ -88,8 +88,8 @@ export function computeFileRenames(
 
 /**
  * Rebuild a nested FileNode tree from a flat list of file nodes, synthesizing
- * the directory nodes implied by each path. Preserves `size`/`language` from
- * the input file nodes. Used to regenerate the tree after a rename moves files
+ * the directory nodes implied by each path. Preserves leaf type and metadata
+ * from the input nodes. Used to regenerate the tree after a rename moves files
  * (possibly across directories).
  */
 export function buildTreeFromFiles(files: FileNode[]): FileNode[] {
@@ -111,16 +111,17 @@ export function buildTreeFromFiles(files: FileNode[]): FileNode[] {
     return node
   }
 
-  for (const file of files) {
-    const parts = file.path.split('/')
+  for (const leaf of files) {
+    const parts = leaf.path.split('/')
     const name = parts[parts.length - 1]
     const parentPath = parts.slice(0, -1).join('/')
     const fileNode: FileNode = {
       name,
-      path: file.path,
-      type: 'file',
-      size: file.size,
-      language: file.language,
+      path: leaf.path,
+      type: leaf.type,
+      gitType: leaf.gitType,
+      size: leaf.size,
+      language: leaf.language,
     }
     const parent = ensureDir(parentPath)
     if (parent) parent.children!.push(fileNode)

@@ -82,6 +82,24 @@ describe('buildStructuralIndex', () => {
     expect(buildStructuralIndex(empty)).toBe('')
   })
 
+  it('preserves exact partial coverage for a zero-file structural index', () => {
+    const empty = createEmptyIndex()
+    empty.coverage = {
+      treeStatus: 'partial',
+      supportedFiles: { discovered: 0, loaded: 0 },
+      failures: { count: 0, samples: [] },
+      failedSubtrees: { count: 1, samples: ['vendor'] },
+      mode: 'full',
+    }
+
+    const parsed = JSON.parse(buildStructuralIndex(empty)) as Array<Record<string, unknown>>
+    expect(parsed).toEqual([expect.objectContaining({
+      path: '[repository-coverage]',
+      repositoryCoverage: empty.coverage,
+      coverageNotice: expect.stringContaining('Do not imply repository-wide completeness'),
+    })])
+  })
+
   it('produces valid JSON with file paths, languages, and structural info', () => {
     const index = buildMockIndex()
     const result = buildStructuralIndex(index)

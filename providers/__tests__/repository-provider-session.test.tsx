@@ -1,13 +1,13 @@
 import React, { type ReactNode } from 'react'
 import { act, renderHook } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { GitHubRepo, CompleteRepoTree } from '@/types/repository'
+import type { GitHubRepo, CompleteRepoTree, ResolvedRepoTree } from '@/types/repository'
 
 vi.mock('@/lib/github/fetcher', () => ({
-  buildFileTree: vi.fn((tree: CompleteRepoTree) => tree.tree.map(entry => ({
+  buildFileTree: vi.fn((tree: ResolvedRepoTree) => tree.tree.map(entry => ({
     name: entry.path,
     path: entry.path,
-    type: entry.type === 'tree' ? 'directory' : 'file',
+    type: entry.type === 'tree' ? 'directory' : entry.type === 'commit' ? 'submodule' : 'file',
   }))),
   detectLanguage: vi.fn(),
 }))
@@ -83,6 +83,19 @@ function tree(name: string): CompleteRepoTree {
     sha: `${name}-sha`,
     truncated: false,
     tree: [{ path: `${name}.ts`, mode: '100644', type: 'blob', sha: `${name}-file`, size: 10 }],
+  }
+}
+
+function partialTree(name: string): ResolvedRepoTree {
+  return {
+    status: 'partial',
+    requestCount: 3,
+    sha: `${name}-sha`,
+    truncated: true,
+    tree: [{ path: `${name}-current.ts`, mode: '100644', type: 'blob', sha: `${name}-file`, size: 10 }],
+    reasons: ['fetch-failed'],
+    failureDetails: [{ path: 'vendor', reason: 'fetch-failed', message: 'unavailable' }],
+    failedSubtrees: ['vendor'],
   }
 }
 
@@ -165,6 +178,84 @@ describe('RepositoryProvider connection isolation', () => {
 
     pendingRepo.resolve(repo('a'))
     await expect(connection).resolves.toBe(false)
+  })
+
+  it('re-indexes a current partial tree instead of relabeling it from a same-SHA complete cache', async () => {
+    vi.mocked(fetchRepoViaProxy).mockResolvedValue(repo('a'))
+    vi.mocked(fetchTreeViaProxy).mockResolvedValue(partialTree('a'))
+    vi.mocked(getCachedRepo).mockResolvedValue({
+      schemaVersion: 4,
+      complete: true,
+      coverage: {
+        treeStatus: 'complete',
+        supportedFiles: { discovered: 1, loaded: 1 },
+        failures: { count: 0, samples: [] },
+        failedSubtrees: { count: 0, samples: [] },
+        mode: 'full',
+      },
+      key: 'acme/a', owner: 'acme', repo: 'a', sha: 'a-sha', timestamp: 1,
+      files: [{ path: 'stale.ts', content: 'stale' }],
+      tree: [{ name: 'stale.ts', path: 'stale.ts', type: 'file' }],
+    })
+
+    const { result } = renderHook(() => useRepository(), { wrapper })
+    await act(async () => {
+      await result.current.connectRepository('https://github.com/acme/a')
+    })
+
+    expect(result.current.isCacheHit).toBe(false)
+    expect(result.current.files.map(file => file.path)).toEqual(['a-current.ts'])
+    expect(result.current.coverage).toMatchObject({ treeStatus: 'partial' })
+    expect(startIndexing).toHaveBeenCalledOnce()
+    expect(vi.mocked(startIndexing).mock.calls[0][5]?.coverage).toMatchObject({ treeStatus: 'partial' })
+  })
+
+  it('does not load or pin a visible submodule as file content', async () => {
+    vi.mocked(fetchRepoViaProxy).mockResolvedValue(repo('a'))
+    vi.mocked(fetchTreeViaProxy).mockResolvedValue({
+      ...tree('a'),
+      tree: [{ path: 'vendor', mode: '160000', type: 'commit', sha: 'submodule' }],
+    })
+
+    const { result } = renderHook(() => useRepository(), { wrapper })
+    await act(async () => {
+      await result.current.connectRepository('https://github.com/acme/a')
+    })
+
+    expect(result.current.files).toContainEqual(expect.objectContaining({ path: 'vendor', type: 'submodule' }))
+    await expect(result.current.loadFileContent('vendor')).resolves.toBeNull()
+    act(() => result.current.pinFile('vendor'))
+    expect(result.current.pinnedFiles.has('vendor')).toBe(false)
+    expect(fetchFileViaProxy).not.toHaveBeenCalled()
+  })
+
+  it('hydrates complete same-SHA cache tree, index, and coverage as one consistent snapshot', async () => {
+    vi.mocked(fetchRepoViaProxy).mockResolvedValue(repo('a'))
+    vi.mocked(fetchTreeViaProxy).mockResolvedValue(tree('a'))
+    const cachedCoverage = {
+      treeStatus: 'complete' as const,
+      supportedFiles: { discovered: 1, loaded: 1 },
+      failures: { count: 0, samples: [] },
+      failedSubtrees: { count: 0, samples: [] },
+      mode: 'full' as const,
+    }
+    vi.mocked(getCachedRepo).mockResolvedValue({
+      schemaVersion: 4, complete: true, coverage: cachedCoverage,
+      key: 'acme/a', owner: 'acme', repo: 'a', sha: 'a-sha', timestamp: 1,
+      files: [{ path: 'cached.ts', content: 'export const cached = true' }],
+      tree: [{ name: 'cached.ts', path: 'cached.ts', type: 'file' }],
+    })
+
+    const { result } = renderHook(() => useRepository(), { wrapper })
+    await act(async () => {
+      await result.current.connectRepository('https://github.com/acme/a')
+    })
+
+    expect(result.current.isCacheHit).toBe(true)
+    expect(result.current.files.map(file => file.path)).toEqual(['cached.ts'])
+    expect([...result.current.codeIndex.files.keys()]).toEqual(['cached.ts'])
+    expect(result.current.coverage).toEqual(cachedCoverage)
+    expect(startIndexing).not.toHaveBeenCalled()
   })
 
   it.each(['metadata', 'tree', 'cache'] as const)(

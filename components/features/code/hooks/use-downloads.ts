@@ -85,6 +85,7 @@ export function useDownloads({
 
   // Download a single file from the explorer
   const downloadExplorerFile = useCallback(async (node: FileNode) => {
+    if (node.type !== 'file') return
     let content = await getFileContent(node.path)
     if (content === null && repo) {
       try {

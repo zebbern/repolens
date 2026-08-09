@@ -89,7 +89,7 @@ export interface RepositoryCoverage {
 export interface FileNode {
   name: string
   path: string
-  type: 'file' | 'directory'
+  type: 'file' | 'directory' | 'submodule'
   gitType?: RepoTreeItem['type']
   children?: FileNode[]
   size?: number

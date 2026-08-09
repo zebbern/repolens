@@ -179,6 +179,16 @@ describe('repo-cache (IndexedDB)', () => {
     })).toBe(false)
   })
 
+  it('invalidates schema 3 trees that represented submodules as normal files', () => {
+    expect(isReusableCachedRepo({
+      schemaVersion: 3,
+      complete: true,
+      coverage: SAMPLE_COVERAGE,
+      key: 'owner/old-tree', owner: 'owner', repo: 'old-tree', sha: 'old', timestamp: 1,
+      files: SAMPLE_FILES, tree: SAMPLE_TREE,
+    })).toBe(false)
+  })
+
   // -----------------------------------------------------------------------
   // Graceful degradation
   // -----------------------------------------------------------------------

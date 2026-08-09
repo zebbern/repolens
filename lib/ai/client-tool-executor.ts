@@ -65,7 +65,9 @@ export async function executeToolLocally(
   options?: ToolExecutorOptions,
 ): Promise<string> {
   if (!codeIndex?.files || (codeIndex.files.size === 0 && (!codeIndex.meta || codeIndex.meta.size === 0))) {
-    return JSON.stringify({ error: 'No codebase loaded' })
+    const output: Record<string, unknown> = { error: 'No codebase loaded' }
+    attachRepositoryCoverage(output, codeIndex?.coverage)
+    return JSON.stringify(output)
   }
 
   // F4: Detect incomplete indexing and prepare warning
@@ -152,12 +154,22 @@ export async function executeToolLocally(
     output.indexWarning = indexWarning
   }
   const repositoryCoverageNotice = coverageNotice(codeIndex.coverage)
-  if (repositoryCoverageNotice && !output.error) {
+  if (repositoryCoverageNotice) {
     output.repositoryCoverage = codeIndex.coverage
     output.coverageWarning = repositoryCoverageNotice
   }
 
   return JSON.stringify(output)
+}
+
+function attachRepositoryCoverage(
+  output: Record<string, unknown>,
+  coverage: CodeIndex['coverage'],
+): void {
+  const notice = coverageNotice(coverage)
+  if (!notice) return
+  output.repositoryCoverage = coverage
+  output.coverageWarning = notice
 }
 
 // ---------------------------------------------------------------------------

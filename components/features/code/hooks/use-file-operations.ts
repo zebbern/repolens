@@ -49,6 +49,7 @@ export function useFileOperations({
 
   // Open a file in a new tab or switch to existing tab
   const openFile = useCallback(async (file: FileNode) => {
+    if (file.type !== 'file') return
     const session = repositorySession
     if (!isRepositorySessionCurrent(session)) return
     let alreadyOpen = false

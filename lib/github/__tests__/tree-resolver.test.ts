@@ -43,8 +43,25 @@ describe('resolveRepoTree', () => {
     expect(result.status).toBe('partial')
     expect(result.requestCount).toBe(5)
     if (result.status === 'partial') {
-      expect(result.reasons).toContain('request-budget-exceeded')
+      expect(result.reasons).toEqual(['request-budget-exceeded'])
+      expect(result.failureDetails.every(detail => detail.reason === 'request-budget-exceeded')).toBe(true)
       expect(result.failedSubtrees.length).toBeGreaterThan(0)
+    }
+  })
+
+  it('does not relabel a pure child fetch failure as truncation', async () => {
+    const fetchTree = vi.fn(async ({ sha, recursive }: { sha: string; recursive: boolean }) => {
+      if (sha === 'root' && recursive) return tree('root-sha', [], true)
+      if (sha === 'root-sha' && !recursive) return tree('root-sha', [dir('src', 'src')])
+      throw new Error('child unavailable')
+    })
+
+    const result = await resolveRepoTree('root', fetchTree)
+    expect(result).toMatchObject({ status: 'partial', reasons: ['fetch-failed'], failedSubtrees: ['src'] })
+    if (result.status === 'partial') {
+      expect(result.failureDetails).toEqual([
+        { path: 'src', reason: 'fetch-failed', message: 'child unavailable' },
+      ])
     }
   })
 
@@ -110,6 +127,59 @@ describe('resolveRepoTree', () => {
       failedSubtrees: ['.'],
       tree: [expect.objectContaining({ path: 'known.ts' })],
     })
+  })
+
+  it('marks the correctly prefixed child failed when its response arrives after the deadline', async () => {
+    let clock = 0
+    const fetchTree = vi.fn(async ({ sha, recursive }: { sha: string; recursive: boolean }) => {
+      if (sha === 'root' && recursive) return tree('root-sha', [], true)
+      if (sha === 'root-sha' && !recursive) return tree('root-sha', [dir('src', 'src')])
+      clock = 26
+      return tree('src', [blob('late.ts')])
+    })
+
+    const result = await resolveRepoTree('root', fetchTree, { timeoutMs: 25, now: () => clock })
+    expect(result).toMatchObject({
+      status: 'partial',
+      reasons: ['time-budget-exceeded'],
+      failedSubtrees: ['src'],
+      tree: expect.arrayContaining([expect.objectContaining({ path: 'src/late.ts' })]),
+    })
+  })
+
+  it('enforces the wall deadline when an upstream fetch ignores AbortSignal', async () => {
+    vi.useFakeTimers()
+    try {
+      const pending = resolveRepoTree('root', () => new Promise<RepoTree>(() => {}), { timeoutMs: 25 })
+      await vi.advanceTimersByTimeAsync(25)
+      await expect(pending).resolves.toMatchObject({
+        status: 'partial',
+        requestCount: 1,
+        reasons: ['time-budget-exceeded'],
+        failedSubtrees: ['.'],
+      })
+      expect(vi.getTimerCount()).toBe(0)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('preserves caller AbortError semantics and clears the deadline timer', async () => {
+    vi.useFakeTimers()
+    try {
+      const controller = new AbortController()
+      const pending = resolveRepoTree(
+        'root',
+        () => new Promise<RepoTree>(() => {}),
+        { signal: controller.signal, timeoutMs: 25_000 },
+      )
+      controller.abort(new DOMException('cancelled by caller', 'AbortError'))
+
+      await expect(pending).rejects.toMatchObject({ name: 'AbortError', message: 'cancelled by caller' })
+      expect(vi.getTimerCount()).toBe(0)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('propagates caller aborts instead of synthesizing a partial result', async () => {

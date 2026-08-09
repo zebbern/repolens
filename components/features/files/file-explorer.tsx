@@ -1,7 +1,7 @@
 "use client"
 
 import { useState } from 'react'
-import { ChevronRight, ChevronDown, File, Folder, FolderOpen } from 'lucide-react'
+import { ChevronRight, ChevronDown, File, Folder, FolderOpen, GitFork } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { FileNode } from '@/types/repository'
 
@@ -40,7 +40,7 @@ function FileTreeNode({ node, depth, onFileSelect }: FileTreeNodeProps) {
         onClick={() => {
           if (isDirectory) {
             setIsExpanded(!isExpanded)
-          } else {
+          } else if (node.type === 'file') {
             onFileSelect?.(node)
           }
         }}
@@ -65,7 +65,9 @@ function FileTreeNode({ node, depth, onFileSelect }: FileTreeNodeProps) {
         ) : (
           <>
             <span className="w-4" />
-            {getFileIcon(node.name)}
+            {node.type === 'submodule'
+              ? <GitFork className="h-4 w-4 text-text-muted" aria-label="Git submodule" />
+              : getFileIcon(node.name)}
           </>
         )}
         <span className="truncate">{node.name}</span>

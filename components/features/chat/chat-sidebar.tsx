@@ -22,7 +22,7 @@ import { getMaxIndexBytesForModel } from "@/lib/ai/providers"
 import { handleToolCall, type AddToolOutputFn } from "@/lib/ai/tool-call-handler"
 import { executeToolLocally, type ToolExecutorOptions } from "@/lib/ai/client-tool-executor"
 import type { ToolCallInfo } from "@/lib/ai/tool-call-handler"
-import type { CodeIndex } from "@/lib/code/code-index"
+import { flattenFiles, type CodeIndex } from "@/lib/code/code-index"
 import type { PinnedContentsResult } from "@/types/types"
 import type { Tour } from "@/types/tours"
 
@@ -88,8 +88,8 @@ export function ChatSidebar({ className, onCollapse }: { className?: string; onC
   const codeIndexRef = useRef<CodeIndex | null>(codeIndex)
   useEffect(() => { codeIndexRef.current = codeIndex }, [codeIndex])
 
-  const allFilePathsRef = useRef<string[]>(files.map(f => f.path))
-  useEffect(() => { allFilePathsRef.current = files.map(f => f.path) }, [files])
+  const allFilePathsRef = useRef<string[]>(flattenFiles(files).map(f => f.path))
+  useEffect(() => { allFilePathsRef.current = flattenFiles(files).map(f => f.path) }, [files])
 
   const saveTourRef = useRef(saveTour)
   useEffect(() => { saveTourRef.current = saveTour }, [saveTour])

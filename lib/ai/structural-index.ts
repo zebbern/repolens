@@ -1,4 +1,5 @@
 import type { CodeIndex, IndexedFile } from '@/lib/code/code-index'
+import type { RepositoryCoverage } from '@/types/repository'
 import { getFileLines, getFileContent, getFileLinesAsync } from '@/lib/code/code-index'
 import { coverageNotice } from '@/lib/repository'
 
@@ -10,6 +11,7 @@ export interface RichFileMetadata {
   imports?: string[]
   signatures?: string[]
   coverageNotice?: string
+  repositoryCoverage?: RepositoryCoverage
 }
 
 // Regex patterns for extracting symbol definitions
@@ -45,7 +47,7 @@ export function buildStructuralIndex(
   codeIndex: CodeIndex | null,
   options?: { maxIndexBytes?: number },
 ): string {
-  if (!codeIndex?.files || codeIndex.files.size === 0) return ''
+  if (!codeIndex?.files) return ''
 
   const maxBytes = options?.maxIndexBytes ?? MAX_INDEX_BYTES
   const metadata: RichFileMetadata[] = []
@@ -89,8 +91,11 @@ export function buildStructuralIndex(
       language: 'metadata',
       lineCount: 0,
       coverageNotice: notice,
+      repositoryCoverage: codeIndex.coverage,
     })
   }
+
+  if (metadata.length === 0) return ''
 
   let result = JSON.stringify(metadata)
   if (result.length <= maxBytes) return result

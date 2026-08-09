@@ -1,6 +1,6 @@
 import { useMemo } from "react"
 import {
-  ChevronRight, ChevronDown, File, Folder, FolderOpen, Download, Pin, Circle,
+  ChevronRight, ChevronDown, File, Folder, FolderOpen, Download, Pin, Circle, GitFork,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { getLanguageColor } from "@/lib/code/language-colors"
@@ -172,11 +172,12 @@ export function FileTreeNode({
                 isActive ? "bg-code-selection" : "hover:bg-foreground/5"
               )}
               style={{ paddingLeft: `${depth * 12 + 4}px` }}
-              onClick={() => node.type === 'directory' ? onToggleFolder(node.path) : onFileSelect(node)}
+              onClick={() => node.type === 'directory' ? onToggleFolder(node.path) : node.type === 'file' ? onFileSelect(node) : undefined}
               onKeyDown={(e) => {
                 if (e.key === 'Enter' || e.key === ' ') {
                   e.preventDefault()
-                  node.type === 'directory' ? onToggleFolder(node.path) : onFileSelect(node)
+                  if (node.type === 'directory') onToggleFolder(node.path)
+                  else if (node.type === 'file') onFileSelect(node)
                 }
               }}
             >
@@ -196,7 +197,9 @@ export function FileTreeNode({
               ) : (
                 <>
                   <span className="w-4" />
-                  <File className="h-4 w-4 shrink-0 text-text-muted" />
+                  {node.type === 'submodule'
+                    ? <GitFork className="h-4 w-4 shrink-0 text-text-muted" aria-label="Git submodule" />
+                    : <File className="h-4 w-4 shrink-0 text-text-muted" />}
                 </>
               )}
 
@@ -221,16 +224,16 @@ export function FileTreeNode({
                       <IssueCountBadge counts={issueCountByFile.get(node.path)!} />
                     )}
                   </>
-                ) : (
+                ) : node.type === 'directory' ? (
                   <FolderBadges
                     node={node}
                     codeIndex={codeIndex}
                     issueCountByFile={issueCountByFile}
                   />
-                )}
+                ) : null}
               </span>
 
-              {onPinToggle && (
+              {onPinToggle && node.type !== 'submodule' && (
                 <button
                   className={cn(
                     "p-0.5 rounded hover:bg-foreground/10 transition-opacity shrink-0",
@@ -255,17 +258,18 @@ export function FileTreeNode({
                 </button>
               )}
 
-              <button
+              {node.type !== 'submodule' && <button
                 className="p-0.5 rounded opacity-0 group-hover/tree-item:opacity-100 text-text-muted hover:text-text-primary hover:bg-foreground/10 transition-opacity shrink-0"
                 title={node.type === 'directory' ? `Download ${node.name} as ZIP` : `Download ${node.name}`}
                 aria-label={node.type === 'directory' ? `Download ${node.name} as ZIP` : `Download ${node.name}`}
                 onClick={(e) => {
                   e.stopPropagation()
-                  node.type === 'directory' ? onDownloadFolder(node) : onDownloadFile(node)
+                  if (node.type === 'directory') onDownloadFolder(node)
+                  else onDownloadFile(node)
                 }}
               >
                 <Download className="h-3.5 w-3.5" />
-              </button>
+              </button>}
             </div>
 
             {node.type === 'directory' && isExpanded && node.children && (

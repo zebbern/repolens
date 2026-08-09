@@ -24,6 +24,7 @@ import {
   fetchBlameViaProxy,
   fetchCommitDetailViaProxy,
 } from '@/lib/github/client'
+import { fetchFileContent } from '@/lib/github/fetcher'
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -42,6 +43,14 @@ function buildMockIndex(): CodeIndex {
 
 function createMockRef(index: CodeIndex | null): MutableRefObject<CodeIndex | null> {
   return { current: index }
+}
+
+const PARTIAL_COVERAGE = {
+  treeStatus: 'partial' as const,
+  supportedFiles: { discovered: 3, loaded: 1 },
+  failures: { count: 1, samples: [{ path: 'missing.ts', error: 'missing' }] },
+  failedSubtrees: { count: 1, samples: ['vendor'] },
+  mode: 'full' as const,
 }
 
 // ---------------------------------------------------------------------------
@@ -118,6 +127,27 @@ describe('handleToolCall', () => {
     await handleToolCall(toolCall, addToolOutput as unknown as AddToolOutputFn, codeIndexRef)
 
     expect(addToolOutput).not.toHaveBeenCalled()
+  })
+
+  it('preserves partial coverage when a missing-file GitHub fallback also fails', async () => {
+    const index = buildMockIndex()
+    index.coverage = PARTIAL_COVERAGE
+    vi.mocked(fetchFileContent).mockRejectedValueOnce(new Error('fallback failed'))
+
+    await handleToolCall(
+      { toolName: 'readFile', input: { path: 'missing.ts' }, toolCallId: 'missing' },
+      addToolOutput as unknown as AddToolOutputFn,
+      createMockRef(index),
+      undefined,
+      { repoInfo: { owner: 'acme', name: 'repo', defaultBranch: 'main' } },
+    )
+
+    const parsed = JSON.parse(addToolOutput.mock.calls[0][0].output as string)
+    expect(parsed).toMatchObject({
+      error: expect.stringContaining('File not found'),
+      repositoryCoverage: PARTIAL_COVERAGE,
+      coverageWarning: expect.stringContaining('Do not imply repository-wide completeness'),
+    })
   })
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -372,6 +402,55 @@ describe('handleToolCall', () => {
       const call = addToolOutput.mock.calls[0][0]
       expect(call.state).toBe('output-error')
       expect(call.errorText).toBe('Failed to fetch git history')
+    })
+
+    it('preserves exact partial coverage on repository-derived tool errors', async () => {
+      vi.mocked(fetchCommitsViaProxy).mockRejectedValue(new Error('API unavailable'))
+      const index = buildMockIndex()
+      index.coverage = PARTIAL_COVERAGE
+
+      await handleToolCall(
+        { toolName: 'getGitHistory', input: { mode: 'commits' }, toolCallId: 'git_partial_err' },
+        addToolOutput as unknown as AddToolOutputFn,
+        createMockRef(index),
+        undefined,
+        repoOptions,
+      )
+
+      const call = addToolOutput.mock.calls[0][0]
+      expect(call.state).toBe('output-error')
+      expect(JSON.parse(call.errorText)).toMatchObject({
+        error: 'API unavailable',
+        repositoryCoverage: PARTIAL_COVERAGE,
+        coverageWarning: expect.stringContaining('Do not imply repository-wide completeness'),
+      })
+    })
+
+    it('keeps the initiating repository coverage when the active index changes mid-request', async () => {
+      let resolveCommits!: (value: []) => void
+      vi.mocked(fetchCommitsViaProxy).mockClear()
+      vi.mocked(fetchCommitsViaProxy).mockReturnValue(new Promise(resolve => {
+        resolveCommits = resolve
+      }))
+      const originalIndex = buildMockIndex()
+      originalIndex.coverage = PARTIAL_COVERAGE
+      const codeIndexRef = createMockRef(originalIndex)
+
+      const pending = handleToolCall(
+        { toolName: 'getGitHistory', input: { mode: 'commits' }, toolCallId: 'git_switched' },
+        addToolOutput as unknown as AddToolOutputFn,
+        codeIndexRef,
+        undefined,
+        repoOptions,
+      )
+      expect(fetchCommitsViaProxy).toHaveBeenCalledOnce()
+      codeIndexRef.current = buildMockIndex()
+      resolveCommits([])
+      await pending
+
+      const parsed = JSON.parse(addToolOutput.mock.calls[0][0].output as string)
+      expect(parsed.repositoryCoverage).toEqual(PARTIAL_COVERAGE)
+      expect(parsed.coverageWarning).toContain('Do not imply repository-wide completeness')
     })
   })
 

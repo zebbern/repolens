@@ -98,4 +98,11 @@ describe('buildTreeFromFiles', () => {
     expect(file.size).toBe(1234)
     expect(file.language).toBe('typescript')
   })
+
+  it('preserves a visible submodule leaf without converting it to a file', () => {
+    const tree = buildTreeFromFiles([{
+      name: 'vendor', path: 'vendor', type: 'submodule', gitType: 'commit',
+    }])
+    expect(tree).toEqual([expect.objectContaining({ path: 'vendor', type: 'submodule', gitType: 'commit' })])
+  })
 })

@@ -27,6 +27,11 @@ interface PendingTree {
   prefix: string
 }
 
+interface TreeRequestResult {
+  tree: RepoTree
+  late: boolean
+}
+
 function abortError(signal: AbortSignal): unknown {
   return signal.reason ?? new DOMException('The operation was aborted', 'AbortError')
 }
@@ -65,7 +70,7 @@ export async function resolveRepoTree(
     }
   }
 
-  const request = async (sha: string, recursive: boolean, path: string): Promise<RepoTree | null> => {
+  const request = async (sha: string, recursive: boolean, path: string): Promise<TreeRequestResult | null> => {
     if (options.signal?.aborted) throw abortError(options.signal)
     if (requestCount >= maxRequests) {
       addFailure(path, 'request-budget-exceeded', `Tree request budget of ${maxRequests} was exhausted`)
@@ -77,57 +82,72 @@ export async function resolveRepoTree(
       return null
     }
     requestCount++
-    const timeoutSignal = AbortSignal.timeout(remaining)
-    const signal = options.signal
-      ? AbortSignal.any([options.signal, timeoutSignal])
-      : timeoutSignal
+    const requestController = new AbortController()
+    const deadlineMarker = Symbol('tree-resolution-deadline')
+    const callerAbortMarker = Symbol('tree-resolution-caller-abort')
+    let timeoutId: ReturnType<typeof setTimeout> | undefined
+    let onCallerAbort: (() => void) | undefined
+    const boundary = new Promise<never>((_, reject) => {
+      timeoutId = setTimeout(() => {
+        requestController.abort(new DOMException('Tree resolution deadline exceeded', 'TimeoutError'))
+        reject(deadlineMarker)
+      }, remaining)
+      if (options.signal) {
+        onCallerAbort = () => {
+          requestController.abort(options.signal?.reason)
+          reject(callerAbortMarker)
+        }
+        options.signal.addEventListener('abort', onCallerAbort, { once: true })
+      }
+    })
     try {
-      const tree = await fetchTree({ sha, recursive, signal })
-      if (now() >= deadline) {
+      const tree = await Promise.race([
+        fetchTree({ sha, recursive, signal: requestController.signal }),
+        boundary,
+      ])
+      const late = now() >= deadline
+      if (late) {
         addFailure(path, 'time-budget-exceeded', `Tree resolution exceeded ${timeoutMs}ms`)
       }
-      return tree
+      return { tree, late }
     } catch (error) {
-      if (options.signal?.aborted) throw abortError(options.signal)
-      if (timeoutSignal.aborted || now() >= deadline) {
+      if (error === callerAbortMarker || options.signal?.aborted) throw abortError(options.signal!)
+      if (error === deadlineMarker || now() >= deadline) {
         addFailure(path, 'time-budget-exceeded', `Tree resolution exceeded ${timeoutMs}ms`)
       } else {
         addFailure(path, 'fetch-failed', error instanceof Error ? error.message : 'Tree request failed')
       }
       return null
+    } finally {
+      if (timeoutId !== undefined) clearTimeout(timeoutId)
+      if (options.signal && onCallerAbort) options.signal.removeEventListener('abort', onCallerAbort)
     }
   }
 
-  const initial = await request(rootSha, true, '.')
-  if (!initial) {
+  const partialResult = (): ResolvedRepoTree => ({
+    status: 'partial',
+    sha: resolvedSha,
+    tree: [...entries.values()].sort((a, b) => a.path.localeCompare(b.path)),
+    truncated: true,
+    reasons: [...reasons],
+    failureDetails,
+    failedSubtrees: [...failedSubtrees].sort(),
+    requestCount,
+  })
+
+  const initialResult = await request(rootSha, true, '.')
+  if (!initialResult) {
     failedSubtrees.add('.')
-    return {
-      status: 'partial',
-      sha: resolvedSha,
-      tree: [],
-      truncated: true,
-      reasons: [...reasons],
-      failureDetails,
-      failedSubtrees: [...failedSubtrees],
-      requestCount,
-    }
+    return partialResult()
   }
+  const initial = initialResult.tree
   resolvedSha = initial.sha
   merge(initial)
+  if (initialResult.late) {
+    failedSubtrees.add('.')
+    return partialResult()
+  }
   if (!initial.truncated) {
-    if (reasons.has('time-budget-exceeded')) {
-      failedSubtrees.add('.')
-      return {
-        status: 'partial',
-        sha: initial.sha,
-        tree: [...entries.values()].sort((a, b) => a.path.localeCompare(b.path)),
-        truncated: true,
-        reasons: [...reasons],
-        failureDetails,
-        failedSubtrees: ['.'],
-        requestCount,
-      }
-    }
     return {
       status: 'complete',
       sha: initial.sha,
@@ -137,36 +157,51 @@ export async function resolveRepoTree(
     }
   }
 
-  const shallowRoot = await request(initial.sha, false, '.')
-  if (!shallowRoot) {
+  const shallowRootResult = await request(initial.sha, false, '.')
+  if (!shallowRootResult) {
     failedSubtrees.add('.')
   } else {
+    const shallowRoot = shallowRootResult.tree
     merge(shallowRoot)
-    if (shallowRoot.truncated) {
+    if (shallowRootResult.late) {
+      failedSubtrees.add('.')
+    } else if (shallowRoot.truncated) {
       addFailure('.', 'truncated', 'The shallow root tree response was truncated')
       failedSubtrees.add('.')
     }
-    const queue: PendingTree[] = shallowRoot.tree
-      .filter((item) => item.type === 'tree')
-      .map((item) => ({ sha: item.sha, prefix: item.path }))
+    const queue: PendingTree[] = shallowRootResult.late
+      ? []
+      : shallowRoot.tree
+        .filter((item) => item.type === 'tree')
+        .map((item) => ({ sha: item.sha, prefix: item.path }))
 
     while (queue.length > 0) {
       const batch = queue.splice(0, TREE_RESOLUTION_CONCURRENCY)
       await Promise.all(batch.map(async (task) => {
-        const recursiveTree = await request(task.sha, true, task.prefix)
-        if (!recursiveTree) {
+        const recursiveResult = await request(task.sha, true, task.prefix)
+        if (!recursiveResult) {
           failedSubtrees.add(task.prefix)
           return
         }
+        const recursiveTree = recursiveResult.tree
         merge(recursiveTree, task.prefix)
+        if (recursiveResult.late) {
+          failedSubtrees.add(task.prefix)
+          return
+        }
         if (!recursiveTree.truncated) return
 
-        const shallowTree = await request(task.sha, false, task.prefix)
-        if (!shallowTree) {
+        const shallowResult = await request(task.sha, false, task.prefix)
+        if (!shallowResult) {
           failedSubtrees.add(task.prefix)
           return
         }
+        const shallowTree = shallowResult.tree
         merge(shallowTree, task.prefix)
+        if (shallowResult.late) {
+          failedSubtrees.add(task.prefix)
+          return
+        }
         if (shallowTree.truncated) {
           addFailure(task.prefix, 'truncated', 'The shallow subtree response was truncated')
           failedSubtrees.add(task.prefix)
@@ -190,17 +225,5 @@ export async function resolveRepoTree(
       requestCount,
     }
   }
-  for (const path of failedSubtrees) {
-    addFailure(path, 'truncated', 'A truncated tree could not be fully resolved')
-  }
-  return {
-    status: 'partial',
-    sha: resolvedSha,
-    tree: sortedTree,
-    truncated: true,
-    reasons: [...reasons],
-    failureDetails,
-    failedSubtrees: [...failedSubtrees].sort(),
-    requestCount,
-  }
+  return partialResult()
 }

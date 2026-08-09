@@ -44,6 +44,29 @@ const defaultProps = {
 // ---------------------------------------------------------------------------
 
 describe('FileTreeNode — Pin button', () => {
+  it('keeps submodules visible but does not select, pin, or download them as files', () => {
+    const onFileSelect = vi.fn()
+    const onPinToggle = vi.fn()
+    const onDownloadFile = vi.fn()
+    render(
+      <FileTreeNode
+        {...defaultProps}
+        nodes={[{ name: 'vendor', path: 'vendor', type: 'submodule', gitType: 'commit' }]}
+        onFileSelect={onFileSelect}
+        onDownloadFile={onDownloadFile}
+        isPinned={() => false}
+        onPinToggle={onPinToggle}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('treeitem', { name: /vendor/i }))
+    expect(onFileSelect).not.toHaveBeenCalled()
+    expect(onPinToggle).not.toHaveBeenCalled()
+    expect(onDownloadFile).not.toHaveBeenCalled()
+    expect(screen.queryByLabelText(/Pin vendor/)).not.toBeInTheDocument()
+    expect(screen.queryByLabelText(/Download vendor/)).not.toBeInTheDocument()
+  })
+
   it('renders pin button when onPinToggle is provided', () => {
     render(
       <FileTreeNode

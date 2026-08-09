@@ -9,6 +9,7 @@ import {
   fetchCommitDetailViaProxy,
 } from '@/lib/github/client'
 import { coverageNotice } from '@/lib/repository'
+import type { RepositoryCoverage } from '@/types/repository'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -40,6 +41,27 @@ interface AddToolOutputError {
 /** Union callback matching the `addToolOutput` signature from `useChat`. */
 export type AddToolOutputFn = (data: AddToolOutputSuccess | AddToolOutputError) => void
 
+function currentCoverage(codeIndexRef: MutableRefObject<CodeIndex | null>): RepositoryCoverage | undefined {
+  try {
+    return codeIndexRef.current?.coverage
+  } catch {
+    return undefined
+  }
+}
+
+function attachCoverage(output: Record<string, unknown>, coverage: RepositoryCoverage | undefined): void {
+  const notice = coverageNotice(coverage)
+  if (!notice) return
+  output.repositoryCoverage = coverage
+  output.coverageWarning = notice
+}
+
+function repositoryErrorText(message: string, coverage: RepositoryCoverage | undefined): string {
+  const output: Record<string, unknown> = { error: message }
+  attachCoverage(output, coverage)
+  return output.coverageWarning ? JSON.stringify(output) : message
+}
+
 // ---------------------------------------------------------------------------
 // Shared handler
 // ---------------------------------------------------------------------------
@@ -60,6 +82,7 @@ export async function handleToolCall(
   options?: ToolExecutorOptions,
 ): Promise<void> {
   if (toolCall.dynamic) return
+  const repositoryCoverage = currentCoverage(codeIndexRef)
 
   // ── getGitHistory: async handler (must run before executeToolLocally) ──
   if (toolCall.toolName === 'getGitHistory') {
@@ -70,13 +93,16 @@ export async function handleToolCall(
         state: 'output-error' as const,
         tool: toolCall.toolName as never,
         toolCallId: toolCall.toolCallId,
-        errorText: 'Repository context is required for git history. Connect a GitHub repository first.',
+        errorText: repositoryErrorText(
+          'Repository context is required for git history. Connect a GitHub repository first.',
+          repositoryCoverage,
+        ),
       })
       return
     }
     const { owner, name, defaultBranch } = repoInfo
     try {
-      let output: unknown
+      let output: Record<string, unknown>
       const mode = input.mode as string
 
       if (mode === 'commits') {
@@ -130,6 +156,7 @@ export async function handleToolCall(
         throw new Error(`Unsupported git history mode: ${String(input.mode)}`)
       }
 
+      attachCoverage(output, repositoryCoverage)
       addToolOutput({
         tool: toolCall.toolName as never,
         toolCallId: toolCall.toolCallId,
@@ -140,7 +167,10 @@ export async function handleToolCall(
         state: 'output-error' as const,
         tool: toolCall.toolName as never,
         toolCallId: toolCall.toolCallId,
-        errorText: err instanceof Error ? err.message : 'Failed to fetch git history',
+        errorText: repositoryErrorText(
+          err instanceof Error ? err.message : 'Failed to fetch git history',
+          repositoryCoverage,
+        ),
       })
     }
     return
@@ -176,7 +206,6 @@ export async function handleToolCall(
           if (truncated !== content) {
             output.warning = `File truncated from ${content.length} to ${MAX_FILE_CONTENT_CHARS} characters. Use startLine/endLine to read specific sections.`
           }
-          const repositoryCoverage = codeIndexRef.current?.coverage
           const notice = coverageNotice(repositoryCoverage)
           if (notice) {
             output.repositoryCoverage = repositoryCoverage
@@ -206,7 +235,10 @@ export async function handleToolCall(
       // AI SDK expects a literal tool name type, but dynamic tool names require this cast
       tool: toolCall.toolName as never,
       toolCallId: toolCall.toolCallId,
-      errorText: err instanceof Error ? err.message : 'Tool execution failed',
+      errorText: repositoryErrorText(
+        err instanceof Error ? err.message : 'Tool execution failed',
+        repositoryCoverage,
+      ),
     })
   }
 }

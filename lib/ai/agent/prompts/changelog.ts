@@ -12,7 +12,7 @@ export interface ChangelogPromptOptions {
   changelogType: ChangelogType
   stepBudget: number
   model: string
-  activeSkills?: string[]
+  selectedSkillCount?: number
 }
 
 const CHANGELOG_BASE_PROMPTS: Record<ChangelogType, string> = {
@@ -129,7 +129,7 @@ Use EXACTLY these section headings (omit empty sections):
  * Extracted from `app/api/changelog/generate/route.ts` — must remain functionally identical.
  */
 export function buildChangelogPrompt(opts: ChangelogPromptOptions): string {
-  const { changelogType, stepBudget, model, activeSkills } = opts
+  const { changelogType, stepBudget, model, selectedSkillCount } = opts
 
   let systemPrompt = CHANGELOG_BASE_PROMPTS[changelogType] || CHANGELOG_BASE_PROMPTS['custom']
 
@@ -160,7 +160,7 @@ You have up to ${stepBudget} tool-call rounds. Plan efficiently:
 Your context window is approximately ${getModelContextWindow(model).toLocaleString()} tokens. The structural index has been sized accordingly.`
 
   systemPrompt += `\n\n${untrustedDataPolicySection()}`
-  systemPrompt += `\n\n${skillDiscoverySection(activeSkills)}`
+  systemPrompt += `\n\n${skillDiscoverySection(selectedSkillCount)}`
 
   return systemPrompt
 }

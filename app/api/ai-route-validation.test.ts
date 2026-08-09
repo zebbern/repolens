@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { NextRequest } from 'next/server'
 import { AI_REQUEST_LIMITS } from '@/lib/api/ai-request'
+import { serializeUntrustedContext } from '@/lib/ai/agent/prompt-context'
 
 const mocks = vi.hoisted(() => ({
   agent: vi.fn((args: unknown) => {
@@ -186,5 +187,88 @@ describe('AI endpoint bounded-reader parity', () => {
     expect(response.status).toBe(200)
     const call = mocks.agent.mock.calls[0][0] as { uiMessages: typeof forgedMessages }
     expect(call.uiMessages).toEqual(uiMessages)
+  })
+
+  it('accepts a reachable generateTour resend with one canonical local result', async () => {
+    const tourOutput = serializeUntrustedContext([{
+      kind: 'tool-result',
+      data: { tour: { name: 'Repository tour' } },
+    }])
+    const messages = [
+      ...uiMessages,
+      {
+        id: 'tour-result',
+        role: 'assistant',
+        parts: [{
+          type: 'tool-generateTour',
+          toolCallId: 'tour-call',
+          state: 'output-available',
+          input: { repoKey: 'owner/repo', maxStops: 8 },
+          output: tourOutput,
+        }],
+      },
+    ]
+    const response = await chatPOST(request('chat', JSON.stringify({
+      ...routes[0].body,
+      messages,
+    })))
+
+    expect(response.status).toBe(200)
+    const call = mocks.agent.mock.calls[0][0] as { uiMessages: typeof messages }
+    expect(call.uiMessages.at(-1)?.parts[0]).toMatchObject({ output: tourOutput })
+  })
+
+  const findingStringLimits = [
+    ['id', 128],
+    ['ruleId', 128],
+    ['title', 500],
+    ['description', 4_000],
+    ['category', 100],
+    ['file', 4_096],
+    ['snippet', 128 * 1_024],
+    ['suggestion', 4_000],
+    ['cwe', 100],
+    ['owasp', 200],
+    ['learnMoreUrl', 2_048],
+    ['fix', 128 * 1_024],
+    ['fixDescription', 4_000],
+    ['cvssVector', 256],
+    ['message', 4_000],
+  ] as const
+
+  it.each(findingStringLimits)(
+    'issues-validate enforces the exact %s string boundary',
+    async (field, limit) => {
+      const exact = await validateIssuePOST(request('issues-validate', JSON.stringify({
+        ...routes[4].body,
+        issue: { ...routes[4].body.issue, [field]: 'x'.repeat(limit) },
+      })))
+      expect(exact.status).toBe(200)
+
+      const overflow = await validateIssuePOST(request('issues-validate', JSON.stringify({
+        ...routes[4].body,
+        issue: { ...routes[4].body.issue, [field]: 'x'.repeat(limit + 1) },
+      })))
+      expect(overflow.status).toBe(413)
+    },
+  )
+
+  it.each([0, -1, 1.5])(
+    'issues-validate rejects semantic line value %s with 422',
+    async line => {
+      const response = await validateIssuePOST(request('issues-validate', JSON.stringify({
+        ...routes[4].body,
+        issue: { ...routes[4].body.issue, line },
+      })))
+      expect(response.status).toBe(422)
+    },
+  )
+
+  it('issues-validate preserves zero-based finding columns', async () => {
+    const response = await validateIssuePOST(request('issues-validate', JSON.stringify({
+      ...routes[4].body,
+      issue: { ...routes[4].body.issue, column: 0 },
+    })))
+    expect(response.status).toBe(200)
   })
 })

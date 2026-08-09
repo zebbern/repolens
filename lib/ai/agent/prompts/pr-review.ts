@@ -6,7 +6,7 @@ import {
 
 export interface PRReviewPromptOptions {
   stepBudget: number
-  activeSkills?: string[]
+  selectedSkillCount?: number
 }
 
 /**
@@ -15,7 +15,7 @@ export interface PRReviewPromptOptions {
 export function buildPRReviewPrompt(opts: PRReviewPromptOptions): string {
   const {
     stepBudget,
-    activeSkills,
+    selectedSkillCount,
   } = opts
 
   let systemPrompt = `You are CodeDoc, a senior code reviewer performing a thorough pull request review. You analyze diffs for bugs, security vulnerabilities, performance issues, code style problems, and suggest improvements.
@@ -60,7 +60,7 @@ State whether the PR is ready to merge, needs changes, or has blocking issues.
 You have ${stepBudget} tool-call steps. Use them wisely — prioritize reviewing files with the most changes first.`
 
   systemPrompt += '\n\n' + untrustedDataPolicySection()
-  systemPrompt += '\n\n' + skillDiscoverySection(activeSkills)
+  systemPrompt += '\n\n' + skillDiscoverySection(selectedSkillCount)
 
   return systemPrompt
 }

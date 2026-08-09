@@ -17,20 +17,34 @@ import { applyRateLimit } from '@/lib/api/rate-limit'
 export const maxDuration = 60
 
 const issueSchema = z.object({
-  id: z.string(),
-  ruleId: z.string(),
-  title: z.string(),
-  description: z.string(),
+  id: z.string().min(1).max(128),
+  ruleId: z.string().min(1).max(128),
+  title: z.string().min(1).max(500),
+  description: z.string().max(4_000),
   severity: z.enum(['critical', 'warning', 'info']),
-  category: z.string(),
-  file: z.string().max(4_096),
-  line: z.number(),
-  snippet: z.string(),
-  suggestion: z.string().optional(),
-  cwe: z.string().optional(),
-  owasp: z.string().optional(),
+  category: z.string().min(1).max(100),
+  file: z.string().min(1).max(4_096),
+  line: z.number().int().positive(),
+  column: z.number().int().nonnegative().optional(),
+  snippet: z.string().max(128 * 1_024),
+  suggestion: z.string().max(4_000).optional(),
+  cwe: z.string().max(100).optional(),
+  owasp: z.string().max(200).optional(),
+  learnMoreUrl: z.string().max(2_048).optional(),
   confidence: z.enum(['high', 'medium', 'low']).optional(),
-})
+  fix: z.string().max(128 * 1_024).optional(),
+  fixDescription: z.string().max(4_000).optional(),
+  riskScore: z.number().min(0).max(10).optional(),
+  cvssVector: z.string().max(256).optional(),
+  message: z.string().max(4_000).optional(),
+  taintFlow: z.object({
+    source: z.string().max(4_000),
+    sink: z.string().max(4_000),
+    path: z.array(z.string().max(4_096)).max(100),
+    startLine: z.number().int().positive(),
+    endLine: z.number().int().positive(),
+  }).optional(),
+}).strict()
 
 const validateRequestSchema = z.object({
   issue: issueSchema,

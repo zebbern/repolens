@@ -14,7 +14,7 @@ export interface DocsPromptOptions {
   hasTargetFile: boolean
   stepBudget: number
   model: string
-  activeSkills?: string[]
+  selectedSkillCount?: number
 }
 
 const DOC_BASE_PROMPTS: Record<DocType, string> = {
@@ -302,7 +302,7 @@ The structural index (provided in your context) contains per-file: path, languag
  * Extracted from `app/api/docs/generate/route.ts` — must remain functionally identical.
  */
 export function buildDocsPrompt(opts: DocsPromptOptions): string {
-  const { docType, hasTargetFile, stepBudget, model, activeSkills } = opts
+  const { docType, hasTargetFile, stepBudget, model, selectedSkillCount } = opts
 
   let systemPrompt = DOC_BASE_PROMPTS[docType] || DOC_BASE_PROMPTS['custom']
 
@@ -338,7 +338,7 @@ You have up to ${stepBudget} tool-call rounds. Plan efficiently:
 Your context window is approximately ${getModelContextWindow(model).toLocaleString()} tokens. The structural index has been sized accordingly.`
 
   systemPrompt += `\n\n${untrustedDataPolicySection()}`
-  systemPrompt += `\n\n${skillDiscoverySection(activeSkills)}`
+  systemPrompt += `\n\n${skillDiscoverySection(selectedSkillCount)}`
 
   return systemPrompt
 }

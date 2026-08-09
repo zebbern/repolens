@@ -1,4 +1,4 @@
-import { safeValidateUIMessages, type ToolSet, type UIMessage } from 'ai'
+import { isToolUIPart, safeValidateUIMessages, type ToolSet, type UIMessage } from 'ai'
 import type { ZodError } from 'zod'
 import { apiError } from '@/lib/api/error'
 import { parseUntrustedContext } from '@/lib/ai/agent/prompt-context'
@@ -156,16 +156,43 @@ function isCanonicalToolResultEnvelope(value: unknown): boolean {
 function validateToolOutputProvenance(messages: UIMessage[]): AIRequestResult<undefined> {
   for (const message of messages) {
     for (const part of message.parts) {
-      if (!part.type.startsWith('tool-')) continue
+      if (!isToolUIPart(part)) continue
       const toolName = part.type.slice(5)
-      if (TRUSTED_SERVER_TOOL_NAMES.has(toolName)) continue
-      const toolPart = part as { state?: string; output?: unknown; errorText?: unknown }
 
-      if (toolPart.state === 'output-available' && !isCanonicalToolResultEnvelope(toolPart.output)) {
-        return malformedRequest(`Tool output for ${toolName} is missing its untrusted-context envelope`)
-      }
-      if (toolPart.state === 'output-error' && !isCanonicalToolResultEnvelope(toolPart.errorText)) {
-        return malformedRequest(`Tool error for ${toolName} is missing its untrusted-context envelope`)
+      switch (part.state) {
+        case 'input-streaming':
+        case 'input-available':
+          break
+        case 'approval-requested':
+        case 'approval-responded':
+        case 'output-denied':
+          return malformedRequest(`Tool approval state for ${toolName} is not supported`)
+        case 'output-available':
+          if (part.approval != null) {
+            return malformedRequest(`Tool approval state for ${toolName} is not supported`)
+          }
+          if (
+            !TRUSTED_SERVER_TOOL_NAMES.has(toolName)
+            && !isCanonicalToolResultEnvelope(part.output)
+          ) {
+            return malformedRequest(`Tool output for ${toolName} is missing its untrusted-context envelope`)
+          }
+          break
+        case 'output-error':
+          if (part.approval != null) {
+            return malformedRequest(`Tool approval state for ${toolName} is not supported`)
+          }
+          if (
+            !TRUSTED_SERVER_TOOL_NAMES.has(toolName)
+            && !isCanonicalToolResultEnvelope(part.errorText)
+          ) {
+            return malformedRequest(`Tool error for ${toolName} is missing its untrusted-context envelope`)
+          }
+          break
+        default: {
+          const exhaustive: never = part
+          return exhaustive
+        }
       }
     }
   }

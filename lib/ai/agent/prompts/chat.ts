@@ -13,7 +13,7 @@ export interface ChatPromptOptions {
   contextWindow: number
   toolCount: number
   model: string
-  activeSkills?: string[]
+  selectedSkillCount?: number
 }
 
 /**
@@ -21,7 +21,7 @@ export interface ChatPromptOptions {
  * Extracted from `app/api/chat/route.ts` — must remain functionally identical.
  */
 export function buildChatPrompt(opts: ChatPromptOptions): string {
-  const { hasRepositoryContext, hasPinnedContext, stepBudget, model, toolCount, activeSkills } = opts
+  const { hasRepositoryContext, hasPinnedContext, stepBudget, model, toolCount, selectedSkillCount } = opts
 
   let systemPrompt = `You are CodeDoc, a senior software engineer with full access to the codebase. You help developers understand code, answer architecture questions, write documentation, and create diagrams.
 
@@ -96,7 +96,7 @@ ${hasPinnedContext ? `Pinned files are included in the untrusted-context user me
 No repository is currently connected. You can still answer general programming questions, but won't be able to reference specific codebase files.`
   }
 
-  systemPrompt += `\n\n${skillDiscoverySection(activeSkills)}`
+  systemPrompt += `\n\n${skillDiscoverySection(selectedSkillCount)}`
 
   return systemPrompt
 }

@@ -41,11 +41,14 @@ function escapeEnvelopeData(value: string): string {
     .replace(/>/g, '\\u003e')
 }
 
+export function serializeUntrustedJson(value: unknown): string {
+  return escapeEnvelopeData(JSON.stringify(value))
+}
+
 export function serializeUntrustedContext(
   blocks: readonly UntrustedContextBlock[],
 ): string {
-  const serialized = JSON.stringify(blocks)
-  return `${CONTEXT_OPEN}${escapeEnvelopeData(serialized)}${CONTEXT_CLOSE}`
+  return `${CONTEXT_OPEN}${serializeUntrustedJson(blocks)}${CONTEXT_CLOSE}`
 }
 
 /** Parse only a canonical RepoLens envelope, preserving the exactly-once boundary. */
@@ -95,4 +98,11 @@ export function parseToolResultData(result: unknown): unknown {
   } catch {
     return result
   }
+}
+
+export function serializeToolResult(result: unknown): string {
+  return serializeUntrustedContext([{
+    kind: 'tool-result',
+    data: parseToolResultData(result),
+  }])
 }

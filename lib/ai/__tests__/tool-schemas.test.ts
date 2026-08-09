@@ -283,8 +283,16 @@ describe('getGitHistorySchema', () => {
   // ── mode: commit-detail ──
 
   it('accepts valid commit-detail mode with sha', () => {
-    const result = getGitHistorySchema.safeParse({ mode: 'commit-detail', sha: 'abc123' })
+    const result = getGitHistorySchema.safeParse({ mode: 'commit-detail', sha: 'abc1234' })
     expect(result.success).toBe(true)
+  })
+
+  it('requires a strict 7-64 character hexadecimal commit-detail SHA', () => {
+    expect(getGitHistorySchema.safeParse({ mode: 'commit-detail', sha: 'abc1234' }).success).toBe(true)
+    expect(getGitHistorySchema.safeParse({ mode: 'commit-detail', sha: 'A'.repeat(64) }).success).toBe(true)
+    expect(getGitHistorySchema.safeParse({ mode: 'commit-detail', sha: 'abc123' }).success).toBe(false)
+    expect(getGitHistorySchema.safeParse({ mode: 'commit-detail', sha: 'g'.repeat(7) }).success).toBe(false)
+    expect(getGitHistorySchema.safeParse({ mode: 'commit-detail', sha: 'a'.repeat(65) }).success).toBe(false)
   })
 
   it('rejects commit-detail mode without required sha', () => {

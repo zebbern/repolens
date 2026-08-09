@@ -1,5 +1,6 @@
 import * as z from 'zod'
 import { SKILL_ID_SCHEMA } from '@/lib/ai/skills/types'
+import { commitShaSchema } from '@/lib/ai/tool-schemas'
 
 const providerSchema = z.enum(['openai', 'google', 'anthropic', 'openrouter'])
 
@@ -57,8 +58,8 @@ const prReviewOptionsSchema = z.object({
   prNumber: z.number().int().min(1),
   prTitle: z.string().max(500),
   prBody: z.string().max(100_000).nullish(),
-  baseSha: z.string().regex(/^[0-9a-f]{7,64}$/i),
-  headSha: z.string().regex(/^[0-9a-f]{7,64}$/i),
+  baseSha: commitShaSchema,
+  headSha: commitShaSchema,
   diffSummary: z.string().max(500_000),
   maxSteps: z.number().int().min(10).max(100).optional(),
   activeSkills: z.array(SKILL_ID_SCHEMA).max(10).optional(),

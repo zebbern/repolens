@@ -5,36 +5,30 @@ import { skillDiscoverySection } from '../prompts/shared'
 // Tests
 // ---------------------------------------------------------------------------
 
-describe('skillDiscoverySection — activeSkills integration', () => {
-  it('without activeSkills, output contains generic discovery text', () => {
+describe('skillDiscoverySection — selected skill guidance', () => {
+  it('without a selection count, output contains generic discovery text', () => {
     const section = skillDiscoverySection()
     expect(section).toContain('discoverSkills')
     expect(section).toContain('## Skill System')
-    expect(section).not.toContain('The user has activated these skills')
+    expect(section).not.toContain('The user selected')
   })
 
-  it('with undefined activeSkills, output matches the no-skills variant', () => {
+  it('with an undefined selection count, output matches the no-skills variant', () => {
     const withUndefined = skillDiscoverySection(undefined)
     const withoutArg = skillDiscoverySection()
     expect(withUndefined).toBe(withoutArg)
   })
 
-  it('with empty array, output matches the no-skills variant', () => {
-    const withEmpty = skillDiscoverySection([])
+  it('with zero selected skills, output matches the no-skills variant', () => {
+    const withEmpty = skillDiscoverySection(0)
     const withoutArg = skillDiscoverySection()
     expect(withEmpty).toBe(withoutArg)
   })
 
-  it('with activeSkills: ["security-audit"], output contains skill name and loadSkill instruction', () => {
-    const section = skillDiscoverySection(['security-audit'])
-    expect(section).toContain('security-audit')
+  it('with selected skills, includes only a numeric count and live-tool guidance', () => {
+    const section = skillDiscoverySection(2)
+    expect(section).toContain('2 skills')
+    expect(section).toContain('discoverSkills')
     expect(section).toContain('loadSkill')
-    expect(section).toContain('The user has activated these skills')
-  })
-
-  it('with multiple activeSkills, lists all skill IDs', () => {
-    const section = skillDiscoverySection(['security-audit', 'architecture-review'])
-    expect(section).toContain('security-audit')
-    expect(section).toContain('architecture-review')
   })
 })

@@ -2,6 +2,7 @@ import { z } from 'zod'
 
 const pathSchema = z.string().max(4_096)
 const refSchema = z.string().max(256)
+export const commitShaSchema = z.string().regex(/^[0-9a-f]{7,64}$/i)
 
 // ── Core tool schemas (shared between chat + docs routes) ──
 
@@ -70,7 +71,7 @@ export const getGitHistorySchema = z.discriminatedUnion('mode', [
   }),
   z.object({
     mode: z.literal('commit-detail').describe('Get full details of a single commit including file changes and stats'),
-    sha: refSchema.describe('The commit SHA to get details for'),
+    sha: commitShaSchema.describe('The commit SHA to get details for'),
   }),
 ])
 

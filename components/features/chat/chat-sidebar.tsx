@@ -19,6 +19,7 @@ import { buildFileTreeString } from "@/lib/github/fetcher"
 import { downloadFile } from "@/lib/export"
 import { buildStructuralIndexAsync } from "@/lib/ai/structural-index"
 import { getMaxIndexBytesForModel } from "@/lib/ai/providers"
+import { serializeToolResult } from "@/lib/ai/agent/prompt-context"
 import { handleToolCall, type AddToolOutputFn } from "@/lib/ai/tool-call-handler"
 import { executeToolLocally, type ToolExecutorOptions } from "@/lib/ai/client-tool-executor"
 import type { ToolCallInfo } from "@/lib/ai/tool-call-handler"
@@ -172,14 +173,16 @@ export function ChatSidebar({ className, onCollapse }: { className?: string; onC
           addOutputIfCurrent({
             tool: toolCall.toolName as never,
             toolCallId: toolCall.toolCallId,
-            output: resultStr,
+            output: serializeToolResult(resultStr),
           })
         } catch (err) {
           addOutputIfCurrent({
             state: 'output-error' as const,
             tool: toolCall.toolName as never,
             toolCallId: toolCall.toolCallId,
-            errorText: err instanceof Error ? err.message : 'Tour generation failed',
+            errorText: serializeToolResult(
+              err instanceof Error ? err.message : 'Tour generation failed',
+            ),
           })
         }
         return

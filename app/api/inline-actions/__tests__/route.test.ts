@@ -16,7 +16,7 @@ const inlineActionSchema = z.object({
   symbolCode: z.string().min(1).max(50_000),
   symbolName: z.string().min(1).max(200),
   symbolKind: z.enum(VALID_SYMBOL_KINDS),
-  filePath: z.string().min(1).max(500),
+  filePath: z.string().min(1).max(4_096),
   language: z.string().min(1).max(50),
   provider: z.enum(['openai', 'google', 'anthropic', 'openrouter']),
   model: z.string().min(1).max(100),
@@ -284,7 +284,9 @@ describe('Inline Actions API — POST handler', () => {
   })
 
   it('returns 500 when streamText throws', async () => {
-    mockStreamText.mockImplementation(() => { throw new Error('AI unavailable') })
+    const secretMessage = 'provider internals: sk-secret-upstream'
+    const errorLog = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    mockStreamText.mockImplementation(() => { throw new Error(secretMessage) })
 
     const req = new NextRequest('http://localhost/api/inline-actions', {
       method: 'POST',
@@ -295,6 +297,9 @@ describe('Inline Actions API — POST handler', () => {
     const res = await POST(req)
     expect(res.status).toBe(500)
     const body = await res.json()
-    expect(body.error.message).toBe('AI unavailable')
+    expect(body.error.message).toBe('Inline action generation failed')
+    expect(JSON.stringify(body)).not.toContain(secretMessage)
+    expect(errorLog).toHaveBeenCalledWith('Inline action API error:', secretMessage)
+    errorLog.mockRestore()
   })
 })

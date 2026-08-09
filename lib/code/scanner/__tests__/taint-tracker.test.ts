@@ -1277,3 +1277,235 @@ describe('trackTaint — recursive immutable sanitizer aliases', () => {
     expect(flow).toMatchObject({ sanitized: false })
   })
 })
+
+describe('trackTaint — branch-local statement analysis', () => {
+  it('uses each explicit branch state for sinks inside that branch', () => {
+    const flows = getFlows(`function render(req) {
+  let value = req.body.html;
+  if (flag) {
+    value = DOMPurify.sanitize(value);
+    element.innerHTML = value;
+  } else {
+    value = he.encode(value);
+    element.innerHTML = value;
+  }
+}`).filter(flow => flow.sink.type === 'xss')
+    expect(flows).toHaveLength(2)
+    expect(flows.every(flow => flow.sanitized)).toBe(true)
+  })
+
+  it('does not leak a raw baseline into a sink after a definite safe assignment', () => {
+    const flows = getFlows(`function handler(req) {
+  let value = req.body.code;
+  if (flag) {
+    value = "literal";
+    eval(value);
+  } else {
+    eval(value);
+  }
+}`)
+    expect(flows).toHaveLength(1)
+    expect(flows[0].precision).toBe('control-flow-approximate')
+  })
+
+  it.each([
+    `if (outer) {
+      if (inner) value = DOMPurify.sanitize(value);
+      else value = he.encode(value);
+    } else value = req.body.raw;`,
+    `if (outer) value = req.body.raw;
+    else if (inner) value = DOMPurify.sanitize(value);
+    else value = he.encode(value);`,
+  ])('retains the downstream raw nested path regardless of textual branch order', branches => {
+    const flow = getFlows(`function render(req) {
+  let value = req.body.html;
+  ${branches}
+  element.innerHTML = value;
+}`).find(candidate => candidate.sink.type === 'xss')
+    expect(flow).toMatchObject({ sanitized: false, precision: 'control-flow-approximate' })
+  })
+
+  it('joins recursively sanitized nested branches without the entry baseline', () => {
+    const flow = getFlows(`function render(req) {
+  let value = req.body.html;
+  if (outer) {
+    if (inner) value = DOMPurify.sanitize(value);
+    else value = he.encode(value);
+  } else {
+    value = xss(value);
+  }
+  element.innerHTML = value;
+}`).find(candidate => candidate.sink.type === 'xss')
+    expect(flow).toMatchObject({ sanitized: true, precision: 'control-flow-approximate' })
+  })
+})
+
+describe('trackTaint — ordered array spread locations', () => {
+  it('offsets a known spread after a head element', () => {
+    const flows = getFlows(`function handler(req) {
+  const source = ["safe", req.body.code];
+  const copy = ["head", ...source];
+  eval(copy[0]);
+  eval(copy[1]);
+  eval(copy[2]);
+}`)
+    expect(flows).toHaveLength(1)
+    expect(flows[0].path).toContain('copy.2')
+  })
+
+  it('advances offsets across multiple known spreads', () => {
+    const flows = getFlows(`function handler(req) {
+  const first = ["a", req.body.first];
+  const second = ["b", req.body.second];
+  const copy = ["head", ...first, "middle", ...second];
+  eval(copy[1]);
+  eval(copy[2]);
+  eval(copy[3]);
+  eval(copy[4]);
+  eval(copy[5]);
+}`)
+    expect(flows).toHaveLength(2)
+    expect(flows.map(flow => flow.path.find(item => /^copy\./.test(item)))).toEqual(['copy.2', 'copy.5'])
+  })
+
+  it('remaps a known nested array spread', () => {
+    const flows = getFlows(`function handler(req) {
+  const nested = [["safe", req.body.code]];
+  const copy = ["head", ...nested[0]];
+  eval(copy[1]);
+  eval(copy[2]);
+}`)
+    expect(flows).toHaveLength(1)
+    expect(flows[0].path).toContain('copy.2')
+  })
+
+  it('uses a wildcard after an unknown-length spread instead of a wrong exact slot', () => {
+    const flows = getFlows(`function handler(req, unknown) {
+  const copy = ["head", ...unknown, req.body.code];
+  eval(copy[2]);
+  eval(copy[index]);
+}`)
+    expect(flows).toHaveLength(2)
+    expect(flows.every(flow => flow.path.includes('copy.*'))).toBe(true)
+    expect(flows.every(flow => !flow.path.includes('copy.2'))).toBe(true)
+  })
+})
+
+describe('trackTaint — dynamic construction and catalog members', () => {
+  it('stores a computed object property as a wildcard location', () => {
+    const flow = getFlows(`function handler(req) {
+  const values = { [key]: req.body.code };
+  eval(values[otherKey]);
+}`)[0]
+    expect(flow.source.name).toBe('req.body')
+  })
+
+  it('lets a later exact property override a construction wildcard', () => {
+    expect(getFlows(`function handler(req) {
+  const values = { [key]: req.body.code, safe: "literal" };
+  eval(values.safe);
+}`)).toHaveLength(0)
+  })
+
+  it('materializes explicit Koa catalog alternatives for a dynamic member', () => {
+    const flow = getFlows(`function handler(ctx) {
+  eval(ctx.request[key].nested.code);
+}`)[0]
+    expect(flow.source).toMatchObject({
+      origin: 'catalog-user-input',
+      baseConfidence: 'high',
+    })
+    expect([
+      'ctx.request.body',
+      'ctx.request.query',
+      'ctx.request.params',
+      'ctx.request.headers',
+    ]).toContain(flow.source.name)
+    expect(flow.path).toContain('ctx.request[key].nested.code')
+    expect(flow.path.at(-1)).toBe('eval()')
+  })
+
+  it('does not taint the Koa request parent while materializing dynamic children', () => {
+    expect(getFlows(`function handler(ctx) { eval(ctx.request); }`)).toHaveLength(0)
+  })
+})
+
+describe('trackTaint — Koa object-rest prefixes', () => {
+  it('excludes explicitly bound Koa keys and remaps each remainder source', () => {
+    const flows = getFlows(`function handler(ctx) {
+  const { body, ...rest } = ctx.request;
+  eval(rest.query.code);
+  eval(rest.params.code);
+  eval(rest.headers.code);
+}`)
+    expect(flows.map(flow => flow.source.name)).toEqual([
+      'ctx.request.query',
+      'ctx.request.params',
+      'ctx.request.headers',
+    ])
+  })
+
+  it('keeps nested body rest/default values on the body prefix', () => {
+    const flows = getFlows(`function handler(ctx) {
+  const { body: { known = "literal", ...rest } } = ctx.request;
+  eval(known);
+  eval(rest.other);
+}`)
+    expect(flows).toHaveLength(2)
+    expect(flows.every(flow => flow.source.name === 'ctx.request.body')).toBe(true)
+  })
+})
+
+describe('trackTaint — recursive NoSQL receiver bindings', () => {
+  it('accepts an immutable alias of an imported model', () => {
+    const flow = getFlows(`import Imported from './user-model';
+const User = Imported;
+function handler(req) { User.find(req.body.filter); }`)[0]
+    expect(flow.sink.type).toBe('nosql-injection')
+  })
+
+  it.each([
+    `const Imported = require('./user-model'); const User = Imported;`,
+    `const Imported = require('./user-model'); const Alias = Imported; const User = Alias;`,
+    `const Base = mongoose.model('User'); const User = Base;`,
+    `const Base = db.collection('users'); const User = Base;`,
+  ])('accepts immutable CommonJS/model receiver aliases: %s', declaration => {
+    const flow = getFlows(`function handler(req) {
+  ${declaration}
+  User.find(req.body.filter);
+}`)[0]
+    expect(flow.sink.type).toBe('nosql-injection')
+  })
+
+  it.each([
+    `class User extends mongoose.Model {}`,
+    `const Base = mongoose.Model; class User extends Base {}`,
+  ])('accepts classes extending a Mongoose model base: %s', declaration => {
+    const flow = getFlows(`function handler(req) {
+  ${declaration}
+  User.find(req.body.filter);
+}`)[0]
+    expect(flow.sink.type).toBe('nosql-injection')
+  })
+
+  it.each([
+    `const Plain = []; const User = Plain;`,
+    `const Plain = {}; const Alias = Plain; const User = Alias;`,
+    `const Plain = "value"; const User = Plain;`,
+    `let User = mongoose.model('User'); User = [];`,
+    `const Imported = require('./user-model'); let User = Imported;`,
+  ])('rejects local values or mutable model aliases: %s', declaration => {
+    expect(getFlows(`function handler(req) {
+  ${declaration}
+  User.find(req.body.filter);
+}`)).toHaveLength(0)
+  })
+
+  it('terminates a cyclic immutable alias graph without trusting it', () => {
+    expect(getFlows(`function handler(req) {
+  const First = Second;
+  const Second = First;
+  First.find(req.body.filter);
+}`)).toHaveLength(0)
+  })
+})

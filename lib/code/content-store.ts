@@ -204,42 +204,52 @@ function runContentTransaction(
 async function deleteRepoContentByCursor(
   repoKey: string,
   retainedPaths?: ReadonlySet<string>,
+  signal?: AbortSignal,
 ): Promise<void> {
-  const db = await openContentDB()
+  if (signal?.aborted) throw abortError(signal)
+  const db = await openContentDB(signal)
+  if (signal?.aborted) throw abortError(signal)
   const prefix = `${repoKey}:`
-  const range = IDBKeyRange.bound(prefix, `${prefix}\uffff`)
+  const range = IDBKeyRange.lowerBound(prefix)
   await runContentTransaction(db, store => {
     const request = store.openCursor(range)
     request.onsuccess = () => {
+      if (signal?.aborted) return
       const cursor = request.result
       if (!cursor) return
       const key = String(cursor.key)
+      if (!key.startsWith(prefix)) return
       const path = key.slice(prefix.length)
       if (!retainedPaths?.has(path)) cursor.delete()
       cursor.continue()
     }
-  })
+  }, signal)
+  if (signal?.aborted) throw abortError(signal)
 }
 
 /** Delete every content record belonging to one repository. */
-export function deleteRepoContent(repoKey: string): Promise<void> {
-  return deleteRepoContentByCursor(repoKey)
+export function deleteRepoContent(repoKey: string, signal?: AbortSignal): Promise<void> {
+  return deleteRepoContentByCursor(repoKey, undefined, signal)
 }
 
 /** Delete obsolete records while preserving a replacement's current paths. */
 export function deleteStaleRepoContent(
   repoKey: string,
   retainedPaths: ReadonlySet<string>,
+  signal?: AbortSignal,
 ): Promise<void> {
-  return deleteRepoContentByCursor(repoKey, retainedPaths)
+  return deleteRepoContentByCursor(repoKey, retainedPaths, signal)
 }
 
 /** Delete content records for every repository. */
-export async function clearAllRepoContent(): Promise<void> {
-  const db = await openContentDB()
+export async function clearAllRepoContent(signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted) throw abortError(signal)
+  const db = await openContentDB(signal)
+  if (signal?.aborted) throw abortError(signal)
   await runContentTransaction(db, store => {
     store.clear()
-  })
+  }, signal)
+  if (signal?.aborted) throw abortError(signal)
 }
 
 /**

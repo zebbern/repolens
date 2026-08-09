@@ -35,9 +35,15 @@ vi.mock('@/providers/github-token-provider', () => ({
   useGitHubToken: vi.fn(() => ({ token: null })),
 }))
 
+vi.mock('sonner', () => ({
+  toast: { warning: vi.fn() },
+}))
+
 import { getCachedRepo } from '@/lib/cache/repo-cache'
+import { IDBContentStore, InMemoryContentStore } from '@/lib/code/content-store'
 import { fetchFileViaProxy, fetchRepoViaProxy, fetchTreeViaProxy } from '@/lib/github/client'
 import { startIndexing } from '@/lib/github/indexing-pipeline'
+import { toast } from 'sonner'
 import { RepositoryProvider, useRepository } from '../repository-provider'
 
 interface Deferred<T> {
@@ -255,6 +261,44 @@ describe('RepositoryProvider connection isolation', () => {
     expect(result.current.files.map(file => file.path)).toEqual(['cached.ts'])
     expect([...result.current.codeIndex.files.keys()]).toEqual(['cached.ts'])
     expect(result.current.coverage).toEqual(cachedCoverage)
+    expect(startIndexing).not.toHaveBeenCalled()
+  })
+
+  it('falls back to usable memory without a cached claim when cache-hit IDB hydration fails', async () => {
+    vi.mocked(fetchRepoViaProxy).mockResolvedValue({ ...repo('a'), size: 60_000 })
+    vi.mocked(fetchTreeViaProxy).mockResolvedValue(tree('a'))
+    const cachedCoverage = {
+      treeStatus: 'complete' as const,
+      supportedFiles: { discovered: 1, loaded: 1 },
+      failures: { count: 0, samples: [] },
+      failedSubtrees: { count: 0, samples: [] },
+      mode: 'full' as const,
+    }
+    vi.mocked(getCachedRepo).mockResolvedValue({
+      schemaVersion: 4, complete: true, coverage: cachedCoverage,
+      key: 'acme/a', owner: 'acme', repo: 'a', sha: 'a-sha', timestamp: 1,
+      files: [{ path: 'cached.ts', content: 'export const cached = true' }],
+      tree: [{ name: 'cached.ts', path: 'cached.ts', type: 'file' }],
+    })
+    vi.spyOn(IDBContentStore.prototype, 'flush').mockRejectedValueOnce(
+      new DOMException('quota', 'QuotaExceededError'),
+    )
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+    const { result } = renderHook(() => useRepository(), { wrapper })
+    await act(async () => {
+      await result.current.connectRepository('https://github.com/acme/a')
+    })
+
+    expect(result.current.isCacheHit).toBe(false)
+    expect(result.current.loadingStage).toBe('ready')
+    expect(result.current.codeIndex.contentStore).toBeInstanceOf(InMemoryContentStore)
+    await expect(result.current.codeIndex.contentStore.get('cached.ts')).resolves.toBe(
+      'export const cached = true',
+    )
+    expect(toast.warning).toHaveBeenCalledWith(
+      'Repository is ready, but it was not cached for future visits.',
+    )
     expect(startIndexing).not.toHaveBeenCalled()
   })
 

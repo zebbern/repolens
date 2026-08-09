@@ -326,10 +326,12 @@ export function RepositoryProvider({ children }: { children: ReactNode }) {
           ? createEmptyIndexWithStore(new IDBContentStore(`${owner}/${repoName}`, controller.signal))
           : createEmptyIndex()
         const index = batchIndexFiles(baseIndex, cached.files)
+        let contentHydratedDurably = true
         try {
           await index.contentStore.flush()
         } catch (error) {
           if (!isCurrentConnection(epoch, controller)) return false
+          contentHydratedDurably = false
           console.warn('Failed to hydrate cached repository content in IndexedDB:', error)
           index.contentStore = new InMemoryContentStore(
             new Map(cached.files.map(file => [file.path, file.content])),
@@ -346,9 +348,9 @@ export function RepositoryProvider({ children }: { children: ReactNode }) {
           total: cached.files.length,
           isComplete: true,
         })
-        setIsCacheHit(true)
+        setIsCacheHit(contentHydratedDurably)
         setCoverage(cached.coverage)
-        setLoadingStage('cached')
+        setLoadingStage(contentHydratedDurably ? 'cached' : 'ready')
         return true
       }
       

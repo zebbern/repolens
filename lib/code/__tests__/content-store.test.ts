@@ -5,9 +5,11 @@ import {
   LazyContentStore,
   clearAllRepoContent,
   deleteRepoContent,
+  deleteStaleRepoContent,
 } from '../content-store'
 import { FetchQueue, type FetchQueueOptions } from '../fetch-queue'
 import {
+  IDBCursor as FakeIDBCursor,
   IDBDatabase as FakeIDBDatabase,
   IDBFactory,
   IDBKeyRange,
@@ -509,6 +511,67 @@ describe('repository content cleanup', () => {
 
     expect(await target.getBatch(['src/a.ts', 'src/b.ts'])).toEqual(new Map())
     expect(await sibling.get('src/a.ts')).toBe('sibling')
+  })
+
+  it('explicit prefix deletion includes paths whose suffix starts with U+FFFF', async () => {
+    const target = new IDBContentStore('owner/repo')
+    const sibling = new IDBContentStore('owner/repository')
+    target.put('\uffff-tail.ts', 'target')
+    sibling.put('\uffff-tail.ts', 'sibling')
+    await Promise.all([target.flush(), sibling.flush()])
+
+    await deleteRepoContent('owner/repo')
+
+    expect(await target.get('\uffff-tail.ts')).toBeNull()
+    expect(await sibling.get('\uffff-tail.ts')).toBe('sibling')
+  })
+
+  it('stale cleanup includes U+FFFF-tail paths while retaining current content', async () => {
+    const store = new IDBContentStore('owner/repo')
+    store.putBatch([
+      { path: '\uffff-old.ts', content: 'old' },
+      { path: 'keep.ts', content: 'keep' },
+    ])
+    await store.flush()
+
+    await deleteStaleRepoContent('owner/repo', new Set(['keep.ts']))
+
+    expect(await store.get('\uffff-old.ts')).toBeNull()
+    expect(await store.get('keep.ts')).toBe('keep')
+  })
+
+  it('an aborted prefix deletion leaves repository content intact', async () => {
+    const store = new IDBContentStore('owner/repo')
+    store.put('keep.ts', 'keep')
+    await store.flush()
+    const controller = new AbortController()
+    controller.abort()
+
+    await expect(deleteRepoContent('owner/repo', controller.signal)).rejects.toMatchObject({ name: 'AbortError' })
+    expect(await store.get('keep.ts')).toBe('keep')
+  })
+
+  it('rolls back cursor deletions when cleanup aborts mid-transaction', async () => {
+    const store = new IDBContentStore('owner/repo')
+    store.putBatch([
+      { path: 'a.ts', content: 'a' },
+      { path: 'b.ts', content: 'b' },
+    ])
+    await store.flush()
+    const controller = new AbortController()
+    const originalDelete = FakeIDBCursor.prototype.delete
+    vi.spyOn(FakeIDBCursor.prototype, 'delete').mockImplementationOnce(function (
+      this: InstanceType<typeof FakeIDBCursor>,
+    ) {
+      const request = originalDelete.call(this)
+      queueMicrotask(() => controller.abort())
+      return request
+    })
+
+    await expect(deleteRepoContent('owner/repo', controller.signal)).rejects.toMatchObject({ name: 'AbortError' })
+
+    expect(await store.get('a.ts')).toBe('a')
+    expect(await store.get('b.ts')).toBe('b')
   })
 
   it('clearAllRepoContent() removes every repository content record', async () => {

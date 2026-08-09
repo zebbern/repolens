@@ -248,6 +248,26 @@ describe('scanOnDemand', () => {
 // ===========================================================================
 
 describe('mergeScanResults', () => {
+  it('keeps the newest repository coverage when merging on-demand scans', () => {
+    let index = createEmptyIndex()
+    index = indexFile(index, 'src/a.ts', 'eval(x)', 'typescript')
+    index.coverage = {
+      treeStatus: 'complete',
+      supportedFiles: { discovered: 2, loaded: 1 },
+      failures: { count: 0, samples: [] },
+      failedSubtrees: { count: 0, samples: [] },
+      mode: 'on-demand',
+    }
+    const base = scanOnDemand(index, null, 'src/a.ts')
+    index.coverage = {
+      ...index.coverage,
+      supportedFiles: { discovered: 2, loaded: 2 },
+    }
+    const addition = scanOnDemand(index, null, 'src/a.ts')
+
+    expect(mergeScanResults(base, addition).repositoryCoverage?.supportedFiles.loaded).toBe(2)
+  })
+
   it('combines issues from two results without duplicates', () => {
     let index = createEmptyIndex()
     index = indexFile(index, 'src/a.ts', 'eval(x)', 'typescript')

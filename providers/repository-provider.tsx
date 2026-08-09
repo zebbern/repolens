@@ -1,7 +1,7 @@
 "use client"
 
 import { createContext, useContext, useState, useCallback, useRef, useEffect, useMemo, type ReactNode, type Dispatch, type SetStateAction } from "react"
-import type { GitHubRepo, FileNode, ParsedFile } from "@/types/repository"
+import type { GitHubRepo, FileNode, ParsedFile, RepositoryCoverage } from "@/types/repository"
 import type { PinnedFile, PinnedContentsResult } from "@/types/types"
 import { PINNED_CONTEXT_CONFIG, getIdbThresholdKB } from "@/config/constants"
 import { parseGitHubUrl } from "@/lib/github/parser"
@@ -20,6 +20,7 @@ import {
   DEFAULT_SEARCH_STATE,
   DEFAULT_INDEXING_PROGRESS,
   DEFAULT_CONTENT_LOADING_STATS,
+  createRepositoryCoverage,
   type IndexingProgress,
   type SearchState,
   type LoadingStage,
@@ -45,6 +46,7 @@ export interface RepositoryDataContextType {
   failedFiles: Array<{ path: string; error: string }>
   isCacheHit: boolean
   repositorySession: RepositorySession | null
+  coverage: RepositoryCoverage | null
 }
 
 // Actions context — stable callbacks (never change identity)
@@ -110,6 +112,7 @@ export function RepositoryProvider({ children }: { children: ReactNode }) {
   const [modifiedContents, setModifiedContents] = useState<Map<string, string>>(new Map())
   const [codebaseAnalysis, setCodebaseAnalysis] = useState<FullAnalysis | null>(null)
   const [failedFiles, setFailedFiles] = useState<Array<{ path: string; error: string }>>([])
+  const [coverage, setCoverage] = useState<RepositoryCoverage | null>(null)
   const [isCacheHit, setIsCacheHit] = useState(false)
   const [loadingStage, setLoadingStage] = useState<LoadingStage>('idle')
   const [pinnedFiles, setPinnedFiles] = useState<Map<string, PinnedFile>>(new Map())
@@ -146,6 +149,7 @@ export function RepositoryProvider({ children }: { children: ReactNode }) {
     setModifiedContents(new Map())
     setCodebaseAnalysis(null)
     setFailedFiles([])
+    setCoverage(null)
     setIsCacheHit(false)
     setLoadingStage(next.loadingStage)
     setPinnedFiles(new Map())
@@ -193,13 +197,37 @@ export function RepositoryProvider({ children }: { children: ReactNode }) {
   // Update content loading stats when indexing progress changes for lazy repos
   useEffect(() => {
     if (contentAvailability !== 'full' && codeIndex.contentStore instanceof LazyContentStore) {
-      const status = codeIndex.contentStore.getContentStatus()
-      setContentLoadingStats({
-        completed: status.loaded,
-        pending: status.pending,
-        total: status.total,
-        failed: fetchQueueRef.current?.stats.failed ?? 0,
+      const lazyStore = codeIndex.contentStore
+      let cancelled = false
+      queueMicrotask(() => {
+        if (cancelled) return
+        const fetchQueue = lazyStore.getFetchQueue()
+        const status = lazyStore.getContentStatus()
+        setContentLoadingStats({
+          completed: status.loaded,
+          pending: status.pending,
+          total: status.total,
+          failed: fetchQueue.stats.failed,
+        })
+        setCoverage(current => {
+          if (!current || current.mode !== 'on-demand') return current
+          const failedPaths = fetchQueue.getFailedPaths()
+          const next: RepositoryCoverage = {
+            ...current,
+            supportedFiles: {
+              ...current.supportedFiles,
+              loaded: Math.min(current.supportedFiles.discovered, status.loaded),
+            },
+            failures: {
+              count: failedPaths.length,
+              samples: failedPaths.slice(0, 100).map(path => ({ path, error: 'Failed to load on demand' })),
+            },
+          }
+          codeIndexRef.current.coverage = next
+          return next
+        })
       })
+      return () => { cancelled = true }
     }
   }, [indexingProgress, contentAvailability, codeIndex])
 
@@ -210,6 +238,7 @@ export function RepositoryProvider({ children }: { children: ReactNode }) {
     treeSha: string,
     epoch: number,
     controller: AbortController,
+    coverage: RepositoryCoverage,
     options: { token?: string } = {},
   ) => {
     const commitIfCurrent = (commit: () => void) => {
@@ -224,7 +253,8 @@ export function RepositoryProvider({ children }: { children: ReactNode }) {
         setCodeIndex(value)
       }),
       setFailedFiles: value => commitIfCurrent(() => setFailedFiles(value)),
-    }, options)
+      setCoverage: value => commitIfCurrent(() => setCoverage(value)),
+    }, { ...options, coverage })
   }, [isCurrentConnection])
 
   const connectRepository = useCallback(async (url: string): Promise<boolean> => {
@@ -257,6 +287,8 @@ export function RepositoryProvider({ children }: { children: ReactNode }) {
       setLoadingStage('tree')
       const tree = await fetchTreeViaProxy(owner, repoName, repoData.defaultBranch, { signal: controller.signal })
       if (!isCurrentConnection(epoch, controller)) return false
+      const initialCoverage = createRepositoryCoverage(tree, repoData.size)
+      setCoverage(initialCoverage)
       const fileTree = buildFileTree(tree)
       setFiles(fileTree)
       setLoadingStage('tree-ready')
@@ -273,6 +305,7 @@ export function RepositoryProvider({ children }: { children: ReactNode }) {
           ? createEmptyIndexWithStore(new IDBContentStore(`${owner}/${repoName}`, controller.signal))
           : createEmptyIndex()
         const index = batchIndexFiles(baseIndex, cached.files)
+        index.coverage = cached.coverage
         codeIndexRef.current = index
         setCodeIndex(index)
         setIndexingProgress({
@@ -281,12 +314,13 @@ export function RepositoryProvider({ children }: { children: ReactNode }) {
           isComplete: true,
         })
         setIsCacheHit(true)
+        setCoverage(cached.coverage)
         setLoadingStage('cached')
         return true
       }
       
       // Start indexing immediately in background
-      void startIndexing(repoData, fileTree, tree.sha, epoch, controller, { token: githubToken ?? undefined })
+      void startIndexing(repoData, fileTree, tree.sha, epoch, controller, initialCoverage, { token: githubToken ?? undefined })
         .catch(err => {
           if (!isCurrentConnection(epoch, controller)) return
           const message = err instanceof Error ? err.message : 'Failed to index repository'
@@ -622,8 +656,8 @@ export function RepositoryProvider({ children }: { children: ReactNode }) {
   }, [codeIndex, indexingProgress.isComplete, isCurrentConnection])
 
   const dataValue = useMemo<RepositoryDataContextType>(() => ({
-    repo, files, parsedFiles, codeIndex, codebaseAnalysis, failedFiles, isCacheHit, repositorySession,
-  }), [repo, files, parsedFiles, codeIndex, codebaseAnalysis, failedFiles, isCacheHit, repositorySession])
+    repo, files, parsedFiles, codeIndex, codebaseAnalysis, failedFiles, isCacheHit, repositorySession, coverage,
+  }), [repo, files, parsedFiles, codeIndex, codebaseAnalysis, failedFiles, isCacheHit, repositorySession, coverage])
 
   const actionsValue = useMemo<RepositoryActionsContextType>(() => ({
     connectRepository, disconnectRepository, loadFileContent, getFileByPath,

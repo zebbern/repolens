@@ -34,6 +34,7 @@ export const GET = withGitHubCachePolicy(async function GET(request: NextRequest
   try {
     const tree = await fetchRepoTree(owner, name, sha, {
       token,
+      signal: request.signal,
     })
 
     return NextResponse.json(tree)

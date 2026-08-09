@@ -13,7 +13,7 @@ export const INDEXABLE_EXTENSIONS = new Set([
 ])
 
 /** Maximum file size (in bytes) that we'll index. */
-const MAX_FILE_SIZE = 500_000
+export const MAX_FILE_SIZE = 500_000
 
 /** Maximum cumulative extracted size (in bytes) before aborting. */
 const MAX_TOTAL_EXTRACTED_SIZE = 200_000_000
@@ -31,10 +31,22 @@ export function isFileIndexable(name: string, size: number): boolean {
   return ext ? INDEXABLE_EXTENSIONS.has(ext) : false
 }
 
+export function isProbablyBinaryContent(content: string): boolean {
+  if (content.includes('\0')) return true
+  if (content.length === 0) return false
+  const sample = content.slice(0, 8_192)
+  let replacementCharacters = 0
+  for (const character of sample) {
+    if (character === '\uFFFD') replacementCharacters++
+  }
+  return replacementCharacters / sample.length > 0.01
+}
+
 interface StreamUnzipOptions {
   signal?: AbortSignal
   maxTotalSize?: number
   maxFileSize?: number
+  onSkipped?: (path: string, reason: 'binary' | 'oversized') => void
 }
 
 /**
@@ -53,6 +65,7 @@ export async function streamUnzipFiles(
     signal,
     maxTotalSize = MAX_TOTAL_EXTRACTED_SIZE,
     maxFileSize = MAX_FILE_SIZE,
+    onSkipped,
   } = options
 
   if (!response.body) {
@@ -94,6 +107,7 @@ export async function streamUnzipFiles(
       fileSize += data.length
       if (fileSize > maxFileSize) {
         skipped = true
+        onSkipped?.(relativePath, 'oversized')
         return
       }
 
@@ -109,6 +123,10 @@ export async function streamUnzipFiles(
         }
 
         const content = strFromU8(result)
+        if (isProbablyBinaryContent(content)) {
+          onSkipped?.(relativePath, 'binary')
+          return
+        }
         totalSize += content.length
         if (totalSize > maxTotalSize) {
           aborted = true

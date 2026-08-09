@@ -24,6 +24,8 @@ const mockFlattenFiles = vi.fn((tree) => tree)
 const mockSetCachedRepo = vi.fn().mockResolvedValue(undefined)
 
 vi.mock('@/lib/github/zipball', () => ({
+  MAX_FILE_SIZE: 500_000,
+  isProbablyBinaryContent: (content: string) => content.includes('\0'),
   streamUnzipFiles: (...args: unknown[]) => mockStreamUnzipFiles(args[0], args[1], args[2]),
   isFileIndexable: (name: string) => {
     const ext = name.split('.').pop()?.toLowerCase()
@@ -86,6 +88,7 @@ function createCallbacks() {
     setLoadingStage: vi.fn(),
     setCodeIndex: vi.fn(),
     setFailedFiles: vi.fn(),
+    setCoverage: vi.fn(),
   }
 }
 
@@ -206,5 +209,30 @@ describe('startIndexing — streaming pipeline', () => {
 
     const stages = callbacks.setLoadingStage.mock.calls.map((c: unknown[]) => c[0])
     expect(stages[stages.length - 1]).toBe('ready')
+  })
+
+  it('preserves discovered supported count and records ZIP omissions as failures', async () => {
+    mockStreamUnzipFiles.mockImplementationOnce(
+      async (_response: Response, onFile: (path: string, content: string) => void) => {
+        onFile('src/index.ts', 'export const x = 1;')
+        return { count: 1, totalSize: 20 }
+      },
+    )
+    const callbacks = createCallbacks()
+    const repoData = createRepoData()
+    const fileTree = createFileTree([
+      { path: 'src/index.ts', name: 'index.ts' },
+      { path: 'README.md', name: 'README.md' },
+    ])
+
+    await startIndexing(repoData, fileTree, 'tree-sha', signal, callbacks)
+
+    expect(callbacks.setCoverage).toHaveBeenLastCalledWith(expect.objectContaining({
+      supportedFiles: { discovered: 2, loaded: 1 },
+      failures: {
+        count: 1,
+        samples: [{ path: 'README.md', error: 'Supported file was not present in the ZIP extraction' }],
+      },
+    }))
   })
 })

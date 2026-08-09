@@ -8,6 +8,7 @@ import {
   fetchBlameViaProxy,
   fetchCommitDetailViaProxy,
 } from '@/lib/github/client'
+import { coverageNotice } from '@/lib/repository'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -174,6 +175,12 @@ export async function handleToolCall(
           }
           if (truncated !== content) {
             output.warning = `File truncated from ${content.length} to ${MAX_FILE_CONTENT_CHARS} characters. Use startLine/endLine to read specific sections.`
+          }
+          const repositoryCoverage = codeIndexRef.current?.coverage
+          const notice = coverageNotice(repositoryCoverage)
+          if (notice) {
+            output.repositoryCoverage = repositoryCoverage
+            output.coverageWarning = notice
           }
           addToolOutput({
             tool: toolCall.toolName as never,

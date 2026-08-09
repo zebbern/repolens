@@ -92,8 +92,9 @@ export function buildContentsApiUrl(owner: string, repo: string, path: string = 
 /**
  * Build a GitHub API URL for the repository tree
  */
-export function buildTreeApiUrl(owner: string, repo: string, sha: string = 'HEAD'): string {
-  return `https://api.github.com/repos/${owner}/${repo}/git/trees/${sha}?recursive=1`
+export function buildTreeApiUrl(owner: string, repo: string, sha: string = 'HEAD', recursive = true): string {
+  const base = `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/git/trees/${encodeURIComponent(sha)}`
+  return recursive ? `${base}?recursive=1` : base
 }
 
 /**

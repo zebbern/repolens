@@ -248,6 +248,22 @@ describe('Direct GitHub API calls (PAT mode)', () => {
       expect((mockFetch.mock.calls[0][0] as string)).toMatch(/^\/api\/github\/repo/)
     })
 
+    it('does not reuse or publish partial resolved trees in memory cache', async () => {
+      setGitHubPAT(null)
+      const partial = {
+        status: 'partial', sha: 'root', tree: [], truncated: true, requestCount: 32,
+        reasons: ['request-budget-exceeded'],
+        failureDetails: [{ path: 'vendor', reason: 'request-budget-exceeded', message: 'budget exhausted' }],
+        failedSubtrees: ['vendor'],
+      }
+      cacheMock.getCached.mockReturnValue(partial)
+      mockFetch.mockResolvedValueOnce(jsonResponse(partial))
+
+      await expect(fetchTreeViaProxy('X', 'Y', 'main')).resolves.toMatchObject({ status: 'partial' })
+      expect(mockFetch).toHaveBeenCalledOnce()
+      expect(cacheMock.setCache).not.toHaveBeenCalled()
+    })
+
     it('sends Authorization Bearer header in direct mode', async () => {
       setGitHubPAT('ghp_mytoken')
       mockFetch.mockResolvedValueOnce(jsonResponse(RAW_TAGS))

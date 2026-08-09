@@ -650,6 +650,7 @@ export function scanIssues(
   if (!changedFiles && !metadataOnly && lastScanRef && lastScanResult) {
     const cachedRef = lastScanRef.deref()
     if (cachedRef === codeIndex && lastScanAnalysis === analysis) {
+      lastScanResult.repositoryCoverage = codeIndex.coverage
       return lastScanResult
     }
   }
@@ -815,6 +816,7 @@ export function scanIssues(
   const grades = computeHealthGrades(issues, sloc)
 
   const result: ScanResults = {
+    repositoryCoverage: codeIndex.coverage,
     issues,
     summary: computeScanSummary(issues),
     healthGrade: grades.healthGrade,
@@ -880,6 +882,7 @@ export async function scanIssuesAsync(
   if (!changedFiles && !metadataOnly && lastScanRef && lastScanResult) {
     const cachedRef = lastScanRef.deref()
     if (cachedRef === codeIndex && lastScanAnalysis === analysis) {
+      lastScanResult.repositoryCoverage = codeIndex.coverage
       return lastScanResult
     }
   }
@@ -1103,6 +1106,7 @@ async function scanIssuesAsyncImpl(
   const grades = computeHealthGrades(issues, sloc)
 
   const result: ScanResults = {
+    repositoryCoverage: codeIndex.coverage,
     issues,
     summary: computeScanSummary(issues),
     healthGrade: grades.healthGrade,
@@ -1222,6 +1226,7 @@ export function mergeScanResults(
   const riskDistribution = getRiskDistribution(mergedIssues)
 
   return {
+    repositoryCoverage: addition.repositoryCoverage ?? base.repositoryCoverage,
     issues: mergedIssues,
     summary,
     healthGrade: grades.healthGrade,

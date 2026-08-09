@@ -1,5 +1,7 @@
 // Scanner types — type definitions for the issue scanner module
 
+import type { RepositoryCoverage } from '@/types/repository'
+
 export type IssueSeverity = 'critical' | 'warning' | 'info'
 export type IssueCategory = 'security' | 'bad-practice' | 'reliability'
 
@@ -75,6 +77,8 @@ export interface ScanRule {
 export type HealthGrade = 'A' | 'B' | 'C' | 'D' | 'F'
 
 export interface ScanResults {
+  /** Repository discovery/loading scope; absent only for callers without repository context. */
+  repositoryCoverage?: RepositoryCoverage
   issues: CodeIssue[]
   summary: {
     total: number

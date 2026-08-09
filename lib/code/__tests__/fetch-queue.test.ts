@@ -1,5 +1,5 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { FetchQueue, type FetchPriority, type FetchQueueStats } from '../fetch-queue'
+import { describe, it, expect, vi } from 'vitest'
+import { FetchQueue, type FetchQueueStats } from '../fetch-queue'
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -420,5 +420,19 @@ describe('FetchQueue — stats', () => {
 
     expect(queue.stats.failed).toBe(1)
     expect(queue.stats.total).toBe(1)
+  })
+
+  it('reports failed paths and clears a path after a successful retry', async () => {
+    const fetchFn = vi.fn()
+      .mockRejectedValueOnce(new Error('temporary failure'))
+      .mockResolvedValueOnce('recovered')
+    const queue = new FetchQueue({ fetchFn })
+
+    await expect(queue.enqueue('src/retry.ts', 'normal')).rejects.toThrow('temporary failure')
+    expect(queue.getFailedPaths()).toEqual(['src/retry.ts'])
+
+    await expect(queue.enqueue('src/retry.ts', 'critical')).resolves.toBe('recovered')
+    expect(queue.getFailedPaths()).toEqual([])
+    expect(queue.stats).toEqual({ completed: 1, pending: 0, failed: 0, total: 1 })
   })
 })

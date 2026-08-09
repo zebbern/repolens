@@ -1,15 +1,17 @@
 // GitHub API Fetcher
 
-import type { GitHubRepo, RepoTree, FileNode, GitHubTag, GitHubBranch, GitHubCommit, GitHubComparison } from '@/types/repository'
+import type { GitHubRepo, RepoTree, ResolvedRepoTree, FileNode, GitHubTag, GitHubBranch, GitHubCommit, GitHubComparison } from '@/types/repository'
 import type { BlameData, CommitDetail, CommitFile } from '@/types/git-history'
 import type { PRMetadata, PRFile, PRComment, PRFileStatus } from '@/types/pr-review'
 import { buildRepoApiUrl, buildTreeApiUrl, buildRawContentUrl } from './parser'
 import { githubGraphQL } from './graphql'
+import { resolveRepoTree } from './tree-resolver'
 
 const GITHUB_API_BASE = 'https://api.github.com'
 
 interface FetchOptions {
   token?: string
+  signal?: AbortSignal
 }
 
 /**
@@ -71,7 +73,7 @@ export async function fetchRepoTree(
   repo: string,
   sha: string = 'HEAD',
   options: FetchOptions = {}
-): Promise<RepoTree> {
+): Promise<ResolvedRepoTree> {
   const headers: HeadersInit = {
     'Accept': 'application/vnd.github.v3+json',
   }
@@ -80,13 +82,13 @@ export async function fetchRepoTree(
     headers['Authorization'] = `Bearer ${options.token}`
   }
   
-  const response = await fetch(buildTreeApiUrl(owner, repo, sha), { headers })
-  
-  if (!response.ok) {
-    throw new Error(`Failed to fetch repository tree: ${response.statusText}`)
-  }
-  
-  return response.json()
+  return resolveRepoTree(sha, async ({ sha: treeSha, recursive, signal }) => {
+    const response = await fetch(buildTreeApiUrl(owner, repo, treeSha, recursive), { headers, signal })
+    if (!response.ok) {
+      throw new Error(`Failed to fetch repository tree: ${response.statusText}`)
+    }
+    return response.json() as Promise<RepoTree>
+  }, { signal: options.signal })
 }
 
 /**
@@ -499,6 +501,7 @@ export function buildFileTree(tree: RepoTree): FileNode[] {
       name,
       path: item.path,
       type: item.type === 'tree' ? 'directory' : 'file',
+      gitType: item.type,
       size: item.size,
       language: item.type === 'blob' ? detectLanguage(name) : undefined,
     }

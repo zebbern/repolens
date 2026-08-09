@@ -1,5 +1,6 @@
 import type { CodeIndex, IndexedFile } from '@/lib/code/code-index'
 import { getFileLines, getFileContent, getFileLinesAsync } from '@/lib/code/code-index'
+import { coverageNotice } from '@/lib/repository'
 
 export interface RichFileMetadata {
   path: string
@@ -8,6 +9,7 @@ export interface RichFileMetadata {
   exports?: string[]
   imports?: string[]
   signatures?: string[]
+  coverageNotice?: string
 }
 
 // Regex patterns for extracting symbol definitions
@@ -78,6 +80,16 @@ export function buildStructuralIndex(
 
     // All files appear in the index; zero-export files have just path/language/lineCount
     metadata.push(entry)
+  }
+
+  const notice = coverageNotice(codeIndex.coverage)
+  if (notice) {
+    metadata.unshift({
+      path: '[repository-coverage]',
+      language: 'metadata',
+      lineCount: 0,
+      coverageNotice: notice,
+    })
   }
 
   let result = JSON.stringify(metadata)

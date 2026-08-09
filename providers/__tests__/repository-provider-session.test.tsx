@@ -1,10 +1,10 @@
 import React, { type ReactNode } from 'react'
 import { act, renderHook } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { GitHubRepo, RepoTree } from '@/types/repository'
+import type { GitHubRepo, CompleteRepoTree } from '@/types/repository'
 
 vi.mock('@/lib/github/fetcher', () => ({
-  buildFileTree: vi.fn((tree: RepoTree) => tree.tree.map(entry => ({
+  buildFileTree: vi.fn((tree: CompleteRepoTree) => tree.tree.map(entry => ({
     name: entry.path,
     path: entry.path,
     type: entry.type === 'tree' ? 'directory' : 'file',
@@ -76,8 +76,10 @@ function repo(name: string): GitHubRepo {
   }
 }
 
-function tree(name: string): RepoTree {
+function tree(name: string): CompleteRepoTree {
   return {
+    status: 'complete',
+    requestCount: 1,
     sha: `${name}-sha`,
     truncated: false,
     tree: [{ path: `${name}.ts`, mode: '100644', type: 'blob', sha: `${name}-file`, size: 10 }],
@@ -103,7 +105,7 @@ describe('RepositoryProvider connection isolation', () => {
   it('commits only connection B when B resolves before A', async () => {
     const repoA = deferred<GitHubRepo>()
     const repoB = deferred<GitHubRepo>()
-    const treeB = deferred<RepoTree>()
+    const treeB = deferred<CompleteRepoTree>()
     vi.mocked(fetchRepoViaProxy).mockImplementation((_owner, name) => (
       name === 'a' ? repoA.promise : repoB.promise
     ))
@@ -169,7 +171,7 @@ describe('RepositoryProvider connection isolation', () => {
     'disconnect during pending %s work prevents late state repopulation',
     async (pendingStage) => {
       const pendingRepo = deferred<GitHubRepo>()
-      const pendingTree = deferred<RepoTree>()
+      const pendingTree = deferred<CompleteRepoTree>()
       const pendingCache = deferred<null>()
 
       vi.mocked(fetchRepoViaProxy).mockImplementation(() => (

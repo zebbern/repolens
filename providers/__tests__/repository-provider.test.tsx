@@ -211,6 +211,7 @@ describe('B5 lazy-tier analysis gate', () => {
   it('does not invoke analyzeCodebase when codeIndex.contentStore is a LazyContentStore', async () => {
     const mockFetchRepo = vi.mocked(fetchRepoViaProxy)
     const mockFetchTree = vi.mocked(fetchTreeViaProxy)
+    const mockFetchFile = vi.mocked(fetchFileViaProxy)
     const mockBuildFileTree = vi.mocked(buildFileTree)
     const mockAnalyze = vi.mocked(analyzeCodebase)
 
@@ -243,7 +244,7 @@ describe('B5 lazy-tier analysis gate', () => {
       pushedAt: '2024-01-01T00:00:00Z',
       license: null,
     })
-    mockFetchTree.mockResolvedValue({ sha: 'sha-lazy-1', tree: [], truncated: false })
+    mockFetchTree.mockResolvedValue({ status: 'complete', requestCount: 1, sha: 'sha-lazy-1', tree: [], truncated: false })
     mockBuildFileTree.mockReturnValue([
       { name: 'a.ts', path: 'a.ts', type: 'file', size: 10 },
     ])
@@ -260,6 +261,18 @@ describe('B5 lazy-tier analysis gate', () => {
     expect(result.current.codeIndex.contentStore).toBeInstanceOf(LazyContentStore)
     expect(result.current.indexingProgress.isComplete).toBe(true)
     expect(result.current.codeIndex.totalFiles).toBeGreaterThan(0)
+    expect(result.current.coverage).toMatchObject({
+      mode: 'on-demand',
+      supportedFiles: { discovered: 1, loaded: 0 },
+    })
+
+    mockFetchFile.mockResolvedValueOnce('export const a = 1')
+    await act(async () => {
+      await result.current.loadFileContent('a.ts')
+    })
+    await vi.waitFor(() => {
+      expect(result.current.coverage?.supportedFiles).toEqual({ discovered: 1, loaded: 1 })
+    })
 
     // Let the B5 effect's setTimeout(50) elapse
     await act(async () => {

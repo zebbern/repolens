@@ -1,9 +1,10 @@
 // Serialization helpers for transferring scanner data across the Web Worker boundary.
 // Maps and Sets are converted to entry arrays; Date to ISO string.
 
+import type { RepositoryCoverage } from '@/types/repository'
 import type { CodeIndex, IndexedFile } from '../code-index'
 import { InMemoryContentStore } from '../content-store'
-import type { FullAnalysis, FileAnalysis, DependencyGraph, TopologyAnalysis } from '../parser/types'
+import type { FullAnalysis, FileAnalysis } from '../parser/types'
 import type { ScanResults } from './types'
 
 // ---------------------------------------------------------------------------
@@ -15,6 +16,7 @@ export interface SerializedCodeIndex {
   totalFiles: number
   totalLines: number
   isIndexing: boolean
+  coverage?: RepositoryCoverage
 }
 
 export interface SerializedDependencyGraph {
@@ -75,6 +77,7 @@ export function serializeCodeIndex(index: CodeIndex): SerializedCodeIndex {
     totalFiles: index.totalFiles,
     totalLines: index.totalLines,
     isIndexing: index.isIndexing,
+    coverage: index.coverage,
   }
 }
 
@@ -88,6 +91,7 @@ export function serializeCodeIndexMeta(index: CodeIndex): SerializedCodeIndex {
     totalFiles: index.totalFiles,
     totalLines: index.totalLines,
     isIndexing: index.isIndexing,
+    coverage: index.coverage,
   }
 }
 
@@ -99,6 +103,7 @@ export function deserializeCodeIndex(data: SerializedCodeIndex): CodeIndex {
     isIndexing: data.isIndexing,
     meta: new Map(),
     contentStore: new InMemoryContentStore(),
+    coverage: data.coverage,
   }
 }
 

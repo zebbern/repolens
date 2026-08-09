@@ -1,4 +1,4 @@
-import type { GitHubRepo, FileNode, RepoTreeItem } from "@/types/repository"
+import type { GitHubRepo, FileNode, RepoTreeItem, RepositoryCoverage } from "@/types/repository"
 
 export interface RepoMetrics {
   totalFiles: number
@@ -30,6 +30,7 @@ export interface ComparisonRepo {
   error?: string
   dependencies?: RepoDependencies
   treeItems?: RepoTreeItem[]
+  coverage?: RepositoryCoverage
 }
 
 export const MAX_COMPARISON_REPOS = 5

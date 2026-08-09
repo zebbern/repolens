@@ -19,6 +19,7 @@ import { fetchRepoViaProxy, fetchTreeViaProxy, fetchFileViaProxy } from "@/lib/g
 import { buildFileTree } from "@/lib/github/fetcher"
 import { flattenFiles } from "@/lib/code/code-index"
 import { toast } from "sonner"
+import { createRepositoryCoverage } from '@/lib/repository'
 
 interface ComparisonContextType {
   repos: Map<string, ComparisonRepo>
@@ -178,6 +179,7 @@ export function ComparisonProvider({ children }: { children: ReactNode }) {
           repoData.defaultBranch
         )
         const fileTree = buildFileTree(tree)
+        const coverage = createRepositoryCoverage(tree, repoData.size)
 
         // Compute metrics from tree metadata
         const metrics = computeMetrics(repoData, fileTree)
@@ -207,6 +209,7 @@ export function ComparisonProvider({ children }: { children: ReactNode }) {
             status: "ready",
             dependencies,
             treeItems: tree.tree,
+            coverage,
           })
           return next
         })

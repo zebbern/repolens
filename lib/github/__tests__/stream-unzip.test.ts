@@ -125,6 +125,19 @@ describe('streamUnzipFiles', () => {
     expect(received).toEqual(['src/app.ts'])
   })
 
+  it('excludes binary content even when the file extension is supported', async () => {
+    const response = createZipResponse({ 'src/generated.ts': new Uint8Array([0, 1, 2, 3]) })
+    const received: string[] = []
+    const skipped: string[] = []
+
+    await streamUnzipFiles(response, path => received.push(path), {
+      onSkipped: path => skipped.push(path),
+    })
+
+    expect(received).toEqual([])
+    expect(skipped).toEqual(['src/generated.ts'])
+  })
+
   // -- MAX_FILE_SIZE enforcement --------------------------------------------
 
   it('skips files exceeding MAX_FILE_SIZE (500KB)', async () => {

@@ -150,6 +150,10 @@ export class FetchQueue {
     return { completed, pending, failed, total: completed + pending + failed }
   }
 
+  getFailedPaths(): string[] {
+    return [...this.failedPaths].sort()
+  }
+
   private processQueue(): void {
     while (
       this.activeCount < this.concurrency &&
@@ -177,6 +181,7 @@ export class FetchQueue {
       }
 
       this.completed.set(entry.path, content)
+      this.failedPaths.delete(entry.path)
       this.inflight.delete(entry.path)
       entry.resolve(content)
     } catch (err) {

@@ -15,6 +15,7 @@ import {
 } from '@/lib/ai/tool-schemas'
 import { generateTourSchema } from '@/lib/ai/tour-schemas'
 import type { Tour, TourStop } from '@/types/tours'
+import { coverageNotice } from '@/lib/repository'
 
 // ---------------------------------------------------------------------------
 // Types & Constants
@@ -149,6 +150,11 @@ export async function executeToolLocally(
   // F4: Attach indexing warning to successful results
   if (indexWarning && !output.error) {
     output.indexWarning = indexWarning
+  }
+  const repositoryCoverageNotice = coverageNotice(codeIndex.coverage)
+  if (repositoryCoverageNotice && !output.error) {
+    output.repositoryCoverage = codeIndex.coverage
+    output.coverageWarning = repositoryCoverageNotice
   }
 
   return JSON.stringify(output)

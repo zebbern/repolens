@@ -314,7 +314,9 @@ export function computePairwiseSimilarity(
     signals,
     relationship: detectRelationship(repoA, repoB),
     identicalFiles,
-    isLowConfidence: totalComparedFiles < 10,
+    isLowConfidence: totalComparedFiles < 10
+      || repoA.coverage?.treeStatus === 'partial'
+      || repoB.coverage?.treeStatus === 'partial',
     totalComparedFiles,
   }
 }

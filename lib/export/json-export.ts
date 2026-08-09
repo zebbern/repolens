@@ -5,7 +5,7 @@
 import type { FullAnalysis } from '@/lib/code/import-parser'
 import type { ScanResults } from '@/lib/code/issue-scanner'
 import type { CodeIndex } from '@/lib/code/code-index'
-import type { GitHubRepo } from '@/types/repository'
+import type { GitHubRepo, RepositoryCoverage } from '@/types/repository'
 
 export interface ExportableAnalysis {
   meta: {
@@ -14,6 +14,7 @@ export interface ExportableAnalysis {
     repoUrl: string
     totalFiles: number
     totalLines: number
+    coverage?: RepositoryCoverage
   }
   analysis: SerializedFullAnalysis | null
   issues: SerializedScanResults | null
@@ -68,6 +69,7 @@ export function buildExportableAnalysis(
       repoUrl: repo.url,
       totalFiles: codeIndex.totalFiles,
       totalLines: codeIndex.totalLines,
+      coverage: codeIndex.coverage,
     },
     analysis: analysis ? serializeAnalysis(analysis) : null,
     issues: scanResults ? serializeScanResults(scanResults) : null,

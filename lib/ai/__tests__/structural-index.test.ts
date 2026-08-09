@@ -113,6 +113,20 @@ describe('buildStructuralIndex', () => {
     // Should still be valid JSON
     expect(() => JSON.parse(truncated)).not.toThrow()
   })
+
+  it('includes repository coverage truth for partial AI context', () => {
+    const index = buildMockIndex()
+    index.coverage = {
+      treeStatus: 'partial',
+      supportedFiles: { discovered: 10, loaded: 8 },
+      failures: { count: 2, samples: [] },
+      failedSubtrees: { count: 1, samples: ['vendor'] },
+      mode: 'full',
+    }
+    const parsed = JSON.parse(buildStructuralIndex(index)) as Array<Record<string, unknown>>
+    expect(parsed[0]).toMatchObject({ path: '[repository-coverage]' })
+    expect(parsed[0].coverageNotice).toContain('Do not imply repository-wide completeness')
+  })
 })
 
 // ---------------------------------------------------------------------------

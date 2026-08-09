@@ -1,15 +1,20 @@
 // IndexedDB cache for repository data — avoids re-fetching file contents
 // when the HEAD commit hasn't changed.
 
-import type { FileNode } from '@/types/repository'
+import type { FileNode, RepositoryCoverage } from '@/types/repository'
+import { isCoverageComplete } from '@/lib/repository'
 
 const DB_NAME = 'repolens-cache'
 const STORE_NAME = 'repos'
 const TOURS_STORE_NAME = 'tours'
 const DB_VERSION = 2
 const MAX_REPOS = 5
+export const REPO_CACHE_SCHEMA_VERSION = 3
 
 export interface CachedRepo {
+  schemaVersion?: number
+  coverage?: RepositoryCoverage
+  complete?: boolean
   /** Primary key: `${owner}/${repo}` */
   key: string
   owner: string
@@ -26,6 +31,23 @@ export interface CachedRepo {
   description?: string | null
   stars?: number
   language?: string | null
+}
+
+export function isReusableCachedRepo(entry: CachedRepo): entry is CachedRepo & {
+  schemaVersion: number
+  coverage: RepositoryCoverage
+  complete: true
+} {
+  return entry.schemaVersion === REPO_CACHE_SCHEMA_VERSION
+    && entry.complete === true
+    && entry.coverage !== undefined
+    && isCoverageComplete(entry.coverage)
+}
+
+export type ReusableCachedRepo = CachedRepo & {
+  schemaVersion: number
+  coverage: RepositoryCoverage
+  complete: true
 }
 
 /** Lightweight metadata for listing cached repos without loading file contents. */
@@ -104,7 +126,7 @@ export async function getCachedRepo(
   owner: string,
   repo: string,
   options: { signal?: AbortSignal } = {},
-): Promise<CachedRepo | null> {
+): Promise<ReusableCachedRepo | null> {
   const throwIfAborted = () => {
     if (options.signal?.aborted) {
       throw options.signal.reason ?? new DOMException('The operation was aborted', 'AbortError')
@@ -124,6 +146,8 @@ export async function getCachedRepo(
       request.onerror = () => resolve(null)
     })
     throwIfAborted()
+
+    if (entry && !isReusableCachedRepo(entry)) return null
 
     // Touch timestamp so LRU eviction keeps frequently-accessed repos
     if (entry) {
@@ -146,6 +170,7 @@ export async function setCachedRepo(
   sha: string,
   files: Array<{ path: string; content: string; language?: string }>,
   tree: FileNode[],
+  coverage: RepositoryCoverage,
   meta?: { description?: string | null; stars?: number; language?: string | null },
   options: { signal?: AbortSignal } = {},
 ): Promise<void> {
@@ -158,6 +183,9 @@ export async function setCachedRepo(
     throwIfAborted()
     const key = `${owner}/${repo}`
     const record: CachedRepo = {
+      schemaVersion: REPO_CACHE_SCHEMA_VERSION,
+      coverage,
+      complete: isCoverageComplete(coverage),
       key,
       owner,
       repo,
@@ -224,6 +252,7 @@ export async function listCachedRepos(): Promise<CachedRepoMeta[]> {
     })
 
     return records
+      .filter(isReusableCachedRepo)
       .map((r) => ({
         key: r.key,
         owner: r.owner,

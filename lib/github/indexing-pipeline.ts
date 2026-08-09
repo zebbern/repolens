@@ -1,16 +1,17 @@
 import type { Dispatch, SetStateAction } from 'react'
-import type { GitHubRepo, FileNode } from '@/types/repository'
+import type { GitHubRepo, FileNode, RepositoryCoverage } from '@/types/repository'
 import { detectLanguage } from '@/lib/github/fetcher'
 import { fetchFileViaProxy } from '@/lib/github/client'
 import type { CodeIndex } from '@/lib/code/code-index'
 import { createEmptyIndex, createEmptyIndexWithStore, batchIndexFiles, batchIndexMetadataOnly, flattenFiles } from '@/lib/code/code-index'
 import { IDBContentStore, LazyContentStore } from '@/lib/code/content-store'
 import { FetchQueue } from '@/lib/code/fetch-queue'
-import { streamUnzipFiles, isFileIndexable } from '@/lib/github/zipball'
+import { streamUnzipFiles, isFileIndexable, isProbablyBinaryContent, MAX_FILE_SIZE } from '@/lib/github/zipball'
 import { setCachedRepo } from '@/lib/cache/repo-cache'
 import { fetchWithConcurrency } from './fetch-utils'
 import { LAZY_CONTENT_THRESHOLD_KB, getIdbThresholdKB } from '@/config/constants'
 import { toast } from 'sonner'
+import { updateRepositoryCoverage } from '@/lib/repository'
 
 const CONCURRENCY_LIMIT = 10
 
@@ -28,6 +29,7 @@ interface IndexingCallbacks {
   setLoadingStage: (stage: IndexingStage) => void
   setCodeIndex: (index: CodeIndex) => void
   setFailedFiles: (files: Array<{ path: string; error: string }>) => void
+  setCoverage?: (coverage: RepositoryCoverage) => void
 }
 
 /**
@@ -42,20 +44,40 @@ export async function startIndexing(
   treeSha: string,
   signal: AbortSignal,
   callbacks: IndexingCallbacks,
-  options: { token?: string } = {},
+  options: { token?: string; coverage?: RepositoryCoverage } = {},
 ): Promise<void> {
-  const { setIndexingProgress, setLoadingStage, setCodeIndex, setFailedFiles } = callbacks
+  const { setIndexingProgress, setLoadingStage, setCodeIndex, setFailedFiles, setCoverage } = callbacks
 
   // Get all indexable files from tree metadata
   const indexableFiles = flattenFiles(fileTree).filter(f =>
-    isFileIndexable(f.name, f.size || 0),
+    f.gitType !== 'commit' && isFileIndexable(f.name, f.size || 0),
   )
+  const discoveredPaths = new Set(indexableFiles.map(file => file.path))
+  const treeDiscoveredPaths = new Set(discoveredPaths)
+  const initialCoverage: RepositoryCoverage = options.coverage ?? {
+    treeStatus: 'complete',
+    supportedFiles: { discovered: discoveredPaths.size, loaded: 0 },
+    failures: { count: 0, samples: [] },
+    failedSubtrees: { count: 0, samples: [] },
+    mode: repoData.size != null && repoData.size >= LAZY_CONTENT_THRESHOLD_KB ? 'on-demand' : 'full',
+  }
 
   setIndexingProgress({ current: 0, total: indexableFiles.length, isComplete: false })
 
   if (indexableFiles.length === 0) {
+    const coverage = updateRepositoryCoverage(initialCoverage, 0, 0, [])
+    const emptyIndex = createEmptyIndex()
+    emptyIndex.coverage = coverage
+    setCodeIndex(emptyIndex)
+    setFailedFiles([])
+    setCoverage?.(coverage)
     setIndexingProgress({ current: 0, total: 0, isComplete: true })
     setLoadingStage('ready')
+    void setCachedRepo(repoData.owner, repoData.name, treeSha, [], fileTree, coverage, {
+      description: repoData.description,
+      stars: repoData.stars,
+      language: repoData.language,
+    }, { signal }).catch(() => { /* aborted/stale cache publication is a no-op */ })
     return
   }
 
@@ -89,8 +111,11 @@ export async function startIndexing(
 
     const baseIndex = createEmptyIndexWithStore(lazyStore)
     const finalIndex = batchIndexMetadataOnly(baseIndex, metadataEntries)
+    const coverage = updateRepositoryCoverage(initialCoverage, discoveredPaths.size, 0, [])
+    finalIndex.coverage = coverage
 
     setCodeIndex(finalIndex)
+    setCoverage?.(coverage)
     setIndexingProgress({ current: indexableFiles.length, total: indexableFiles.length, isComplete: true })
     setLoadingStage('ready')
     // FetchQueue accessible via codeIndex.contentStore (LazyContentStore.getFetchQueue())
@@ -138,6 +163,7 @@ export async function startIndexing(
         (path, content) => {
           if (signal.aborted) return
           const filename = path.split('/').pop() || path
+          discoveredPaths.add(path)
           accumulated.push({ path, content, language: detectLanguage(filename) })
 
           // Write to IDB as files arrive (fire-and-forget)
@@ -152,10 +178,17 @@ export async function startIndexing(
             total: Math.max(prev.total, accumulated.length),
           }))
         },
-        { signal },
+        {
+          signal,
+          onSkipped: path => discoveredPaths.delete(path),
+        },
       )
 
       zipballUsed = true
+      const loadedPaths = new Set(accumulated.map(file => file.path))
+      for (const path of discoveredPaths) {
+        if (!loadedPaths.has(path)) errors.push({ path, error: 'Supported file was not present in the ZIP extraction' })
+      }
       setIndexingProgress({
         current: accumulated.length,
         total: accumulated.length,
@@ -166,6 +199,8 @@ export async function startIndexing(
       if (signal.aborted) return
       console.warn('Zipball download failed, falling back to per-file fetch:', err)
       accumulated.length = 0 // Clear any partial results
+      discoveredPaths.clear()
+      for (const path of treeDiscoveredPaths) discoveredPaths.add(path)
       if (contentStore) {
         contentStore.clear().catch(() => {})
       }
@@ -193,6 +228,11 @@ export async function startIndexing(
 
           if (signal.aborted) return
 
+          if (content.length > MAX_FILE_SIZE || isProbablyBinaryContent(content)) {
+            discoveredPaths.delete(file.path)
+            return
+          }
+
           accumulated.push({ path: file.path, content, language: file.language })
         } catch (err) {
           if (signal.aborted) return
@@ -218,9 +258,18 @@ export async function startIndexing(
     ? createEmptyIndexWithStore(contentStore)
     : createEmptyIndex()
   const finalIndex = batchIndexFiles(baseIndex, accumulated)
+  const loadedPaths = new Set(accumulated.map(file => file.path))
+  const coverage = updateRepositoryCoverage(
+    initialCoverage,
+    discoveredPaths.size,
+    [...loadedPaths].filter(path => discoveredPaths.has(path)).length,
+    errors,
+  )
+  finalIndex.coverage = coverage
 
   setCodeIndex(finalIndex)
   setFailedFiles(errors)
+  setCoverage?.(coverage)
   setIndexingProgress({
     current: accumulated.length,
     total: zipballUsed ? accumulated.length : indexableFiles.length,
@@ -229,7 +278,7 @@ export async function startIndexing(
   setLoadingStage('ready')
 
   // B2: Persist to IndexedDB cache
-  setCachedRepo(repoData.owner, repoData.name, treeSha, accumulated, fileTree, {
+  setCachedRepo(repoData.owner, repoData.name, treeSha, accumulated, fileTree, coverage, {
     description: repoData.description,
     stars: repoData.stars,
     language: repoData.language,

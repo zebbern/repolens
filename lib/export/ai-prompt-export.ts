@@ -10,6 +10,7 @@ import type { GitHubRepo } from '@/types/repository'
 // Import the redactor directly from its source module (types-only deps) to avoid
 // pulling the heavy scanner barrel into the broadly-used export bundle.
 import { scrubSecrets } from '@/lib/code/scanner/ai-validator'
+import { coverageNotice } from '@/lib/repository'
 
 const DEFAULT_MAX_ISSUES = 25
 const MAX_SNIPPET_CHARS = 600
@@ -221,6 +222,9 @@ export function buildRemediationBundle(
     '',
     '## Code findings',
   )
+
+  const notice = coverageNotice(scanResults?.repositoryCoverage)
+  if (notice) out.push('', `> Coverage notice: ${notice}`)
 
   const allIssues = scanResults?.issues ?? []
   if (allIssues.length === 0) {

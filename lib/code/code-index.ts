@@ -1,6 +1,6 @@
 // Code Index - Manages file content indexing for search and AI context
 
-import type { FileNode } from '@/types/repository'
+import type { FileNode, RepositoryCoverage } from '@/types/repository'
 import { InMemoryContentStore, type ContentStore, type CodeIndexMeta } from './content-store'
 
 /** Clone the content store for immutable CodeIndex updates (Wave 1: InMemoryContentStore only). */
@@ -94,6 +94,8 @@ export interface CodeIndex {
   meta: Map<string, CodeIndexMeta>
   /** Phase 3: content storage abstraction. InMemoryContentStore in Wave 1. */
   contentStore: ContentStore
+  /** Repository-level discovery/loading truth for scanners, exports, and AI tools. */
+  coverage?: RepositoryCoverage
 }
 
 /**

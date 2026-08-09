@@ -1,4 +1,4 @@
-import type { GitHubRepo, RepoTree, GitHubTag, GitHubBranch, GitHubCommit, GitHubComparison } from "@/types/repository"
+import type { GitHubRepo, RepoTree, ResolvedRepoTree, GitHubTag, GitHubBranch, GitHubCommit, GitHubComparison } from "@/types/repository"
 import type { BlameData, CommitDetail, CommitFile } from "@/types/git-history"
 import type { PRMetadata, PRFile, PRComment } from "@/types/pr-review"
 import {
@@ -8,6 +8,7 @@ import {
   clearCache as clearMemoryCache,
   invalidatePattern,
 } from "@/lib/cache/memory-cache"
+import { resolveRepoTree } from '@/lib/github/tree-resolver'
 
 // ---------------------------------------------------------------------------
 // TTL constants (milliseconds)
@@ -638,10 +639,39 @@ export async function fetchTreeViaProxy(
   name: string,
   sha: string = "HEAD",
   options: { signal?: AbortSignal } = {},
-): Promise<RepoTree> {
+): Promise<ResolvedRepoTree> {
+  const pat = getGitHubPAT()
+  if (pat) {
+    return resolveRepoTree(sha, async ({ sha: treeSha, recursive, signal }) => {
+      const e = encodeURIComponent
+      const base = `${GITHUB_API_BASE}/repos/${e(owner)}/${e(name)}/git/trees/${e(treeSha)}`
+      const raw = await directFetch(recursive ? `${base}?recursive=1` : base, pat, { signal })
+      return raw as RepoTree
+    }, { signal: options.signal })
+  }
   const key = `tree:${owner}/${name}:${sha}`
   const url = `/api/github/tree?owner=${encodeURIComponent(owner)}&name=${encodeURIComponent(name)}&sha=${encodeURIComponent(sha)}`
-  return cachedProxyFetch<RepoTree>(key, url, CACHE_TTL_TREE, options)
+  const cached = getCached<ResolvedRepoTree>(key)
+  if (cached?.status === 'complete') return cached
+  const tree = await proxyFetch<ResolvedRepoTree | RepoTree>(url, options)
+  let resolved: ResolvedRepoTree
+  if ('status' in tree) {
+    resolved = tree
+  } else if (!tree.truncated) {
+    resolved = { ...tree, status: 'complete', truncated: false, requestCount: 1 }
+  } else {
+    resolved = {
+      ...tree,
+      status: 'partial',
+      truncated: true,
+      reasons: ['truncated'],
+      failureDetails: [{ path: '.', reason: 'truncated', message: 'Legacy tree response was truncated' }],
+      failedSubtrees: ['.'],
+      requestCount: 1,
+    }
+  }
+  if (resolved.status === 'complete' && !options.signal?.aborted) setCache(key, resolved, CACHE_TTL_TREE)
+  return resolved
 }
 
 /**

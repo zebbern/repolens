@@ -3,3 +3,11 @@ export { DEFAULT_SEARCH_STATE, DEFAULT_CONTENT_LOADING_STATS } from './repo-stat
 
 export type { IndexingProgress } from './indexing-state'
 export { DEFAULT_INDEXING_PROGRESS } from './indexing-state'
+
+export {
+  COVERAGE_SAMPLE_LIMIT,
+  createRepositoryCoverage,
+  updateRepositoryCoverage,
+  isCoverageComplete,
+  coverageNotice,
+} from './coverage'

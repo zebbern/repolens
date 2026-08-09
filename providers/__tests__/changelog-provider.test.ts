@@ -44,6 +44,9 @@ vi.mock('@/providers', () => ({
     files: [{ path: 'index.ts' }],
     codeIndex: null,
   }),
+  useRepositoryActions: () => ({
+    isRepositorySessionCurrent: () => true,
+  }),
 }))
 
 vi.mock('@/lib/github/fetcher', () => ({

@@ -37,19 +37,60 @@ export interface RepoTree {
   truncated: boolean
 }
 
+export interface CompleteRepoTree extends RepoTree {
+  status: 'complete'
+  truncated: false
+  requestCount: number
+}
+
+export type TreeResolutionReason =
+  | 'truncated'
+  | 'request-budget-exceeded'
+  | 'time-budget-exceeded'
+  | 'fetch-failed'
+
+export interface PartialRepoTree extends RepoTree {
+  status: 'partial'
+  truncated: true
+  reasons: TreeResolutionReason[]
+  failureDetails: Array<{ path: string; reason: TreeResolutionReason; message: string }>
+  failedSubtrees: string[]
+  requestCount: number
+}
+
+export type ResolvedRepoTree = CompleteRepoTree | PartialRepoTree
+
 export interface RepoTreeItem {
   path: string
   mode: string
-  type: 'blob' | 'tree'
+  type: 'blob' | 'tree' | 'commit'
   sha: string
   size?: number
   url?: string
+}
+
+export interface RepositoryCoverage {
+  treeStatus: ResolvedRepoTree['status']
+  supportedFiles: {
+    discovered: number
+    loaded: number
+  }
+  failures: {
+    count: number
+    samples: Array<{ path: string; error: string }>
+  }
+  failedSubtrees: {
+    count: number
+    samples: string[]
+  }
+  mode: 'full' | 'on-demand'
 }
 
 export interface FileNode {
   name: string
   path: string
   type: 'file' | 'directory'
+  gitType?: RepoTreeItem['type']
   children?: FileNode[]
   size?: number
   language?: string

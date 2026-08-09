@@ -1509,3 +1509,257 @@ function handler(req) { User.find(req.body.filter); }`)[0]
 }`)).toHaveLength(0)
   })
 })
+
+describe('trackTaint — binding-qualified local state', () => {
+  it('keeps an outer tainted binding after a safe block shadow', () => {
+    const flows = getFlows(`function handler(req) {
+  let value = req.body.code;
+  { let value = "literal"; eval(value); }
+  eval(value);
+}`)
+    expect(flows).toHaveLength(1)
+  })
+
+  it('does not leak a tainted branch shadow into the safe outer binding', () => {
+    const flows = getFlows(`function handler(req) {
+  let value = "literal";
+  if (flag) {
+    let value = req.body.code;
+    eval(value);
+  }
+  eval(value);
+}`)
+    expect(flows).toHaveLength(1)
+  })
+
+  it('does not catalog-taint a catch parameter shadowing req', () => {
+    const flows = getFlows(`function handler(req) {
+  try { throw new Error("x"); }
+  catch (req) { eval(req.body.code); }
+  eval(req.body.code);
+}`)
+    expect(flows).toHaveLength(1)
+    expect(flows[0].source.name).toBe('req.body')
+  })
+
+  it('keeps same-name bindings isolated across nested functions', () => {
+    const flows = getFlows(`function outer(req) {
+  const value = req.body.outer;
+  function inner(req) {
+    const value = "literal";
+    eval(value);
+  }
+  eval(value);
+}`)
+    expect(flows).toHaveLength(1)
+  })
+})
+
+describe('trackTaint — centralized exact and wildcard writes', () => {
+  it('invalidates stale descendants on an exact safe parent write', () => {
+    expect(getFlows(`function handler(req) {
+  let value = { nested: { raw: req.body.code } };
+  value.nested = "literal";
+  eval(value.nested.raw);
+}`)).toHaveLength(0)
+  })
+
+  it('uses a newly tainted parent for descendant reads after stale child removal', () => {
+    const flow = getFlows(`function handler(req) {
+  let value = { child: "literal" };
+  value = req.body;
+  eval(value.child);
+}`)[0]
+    expect(flow.source.name).toBe('req.body')
+  })
+
+  it('clears tainted descendants when a container parent is replaced safely', () => {
+    expect(getFlows(`function handler(req) {
+  let value = { child: req.body.code };
+  value = {};
+  eval(value.child);
+}`)).toHaveLength(0)
+  })
+
+  it('keeps an exact safe override isolated from a wildcard fallback', () => {
+    const flows = getFlows(`function handler(req) {
+  const value = { [key]: req.body.code };
+  value.safe = "literal";
+  eval(value.safe);
+  eval(value.other);
+}`)
+    expect(flows).toHaveLength(1)
+  })
+
+  it.each([
+    `value[key] = req.body.raw; value[other] = DOMPurify.sanitize(req.body.safe);`,
+    `value[key] = DOMPurify.sanitize(req.body.safe); value[other] = req.body.raw;`,
+  ])('unions multiple dynamic writes regardless of order: %s', writes => {
+    const flow = getFlows(`function render(req) {
+  const value = {};
+  ${writes}
+  element.innerHTML = value[lookup];
+}`)[0]
+    expect(flow).toMatchObject({ sanitized: false })
+  })
+
+  it('does not let a safe unknown write clear prior wildcard taint', () => {
+    const flow = getFlows(`function handler(req) {
+  const value = {};
+  value[key] = req.body.code;
+  value[other] = "literal";
+  eval(value[lookup]);
+}`)[0]
+    expect(flow.source.name).toBe('req.body')
+  })
+
+  it('does not remove an exact safe override on a later safe unknown write', () => {
+    expect(getFlows(`function handler(req) {
+  const value = { [key]: req.body.code };
+  value.safe = "literal";
+  value[other] = "literal";
+  eval(value.safe);
+}`)).toHaveLength(0)
+  })
+
+  it('does not let an unknown spread clear feasible wildcard taint', () => {
+    const flow = getFlows(`function handler(req, unknown) {
+  const value = { [key]: req.body.code, ...unknown };
+  eval(value[lookup]);
+}`)[0]
+    expect(flow.source.name).toBe('req.body')
+  })
+
+  it('uses the longest exact tainted ancestor for a descendant read', () => {
+    const flow = getFlows(`function handler(req) {
+  const value = { nested: req.body };
+  eval(value.nested.deep.code);
+}`)[0]
+    expect(flow.source.name).toBe('req.body')
+  })
+})
+
+describe('trackTaint — computed destructuring locations', () => {
+  it('selects exact static computed object properties independently', () => {
+    const flows = getFlows(`function handler(req) {
+  const value = { safe: "literal", raw: req.body.code };
+  const { ["safe"]: safe, ["raw"]: raw } = value;
+  eval(safe);
+  eval(raw);
+}`)
+    expect(flows).toHaveLength(1)
+  })
+
+  it('conservatively merges descendants for a dynamic object pattern', () => {
+    const flow = getFlows(`function handler(req) {
+  const value = { safe: "literal", raw: req.body.code };
+  const { [key]: selected } = value;
+  eval(selected);
+}`)[0]
+    expect(flow.source.name).toBe('req.body')
+  })
+
+  it('materializes dynamic Koa children through a computed object pattern', () => {
+    const flow = getFlows(`function handler(ctx) {
+  const { [key]: selected } = ctx.request;
+  eval(selected.nested);
+}`)[0]
+    expect(flow.source).toMatchObject({ origin: 'catalog-user-input', baseConfidence: 'high' })
+  })
+
+  it('writes an array destructuring element to a dynamic member wildcard', () => {
+    const flow = getFlows(`function handler(req) {
+  const source = [req.body.code];
+  const target = {};
+  [target[key]] = source;
+  eval(target[lookup]);
+}`)[0]
+    expect(flow.source.name).toBe('req.body')
+  })
+})
+
+describe('trackTaint — canonical source-prefix rest aliases', () => {
+  it('maps Koa rest children through an immutable alias chain', () => {
+    const flows = getFlows(`function handler(ctx) {
+  const request = ctx.request;
+  const alias = request;
+  const { body, ...rest } = alias;
+  eval(rest.query.code);
+  eval(rest.params.code);
+  eval(rest.headers.code);
+}`)
+    expect(flows.map(flow => flow.source.name)).toEqual([
+      'ctx.request.query',
+      'ctx.request.params',
+      'ctx.request.headers',
+    ])
+  })
+
+  it('does not trust a mutable Koa source-prefix alias for rest mapping', () => {
+    expect(getFlows(`function handler(ctx) {
+  let request = ctx.request;
+  request = safeObject;
+  const { body, ...rest } = request;
+  eval(rest.query.code);
+}`)).toHaveLength(0)
+  })
+})
+
+describe('trackTaint — terminating statement reachability', () => {
+  it('does not process a sink after return', () => {
+    expect(getFlows(`function handler(req) {
+  return;
+  eval(req.body.code);
+}`)).toHaveLength(0)
+  })
+
+  it('keeps a sink before return and skips a later duplicate', () => {
+    const flows = getFlows(`function handler(req) {
+  eval(req.body.first);
+  return;
+  eval(req.body.second);
+}`)
+    expect(flows).toHaveLength(1)
+  })
+
+  it('does not merge a terminating raw branch into downstream state', () => {
+    expect(getFlows(`function handler(req) {
+  let value = "literal";
+  if (flag) {
+    value = req.body.code;
+    return;
+  } else {
+    value = "literal";
+  }
+  eval(value);
+}`)).toHaveLength(0)
+  })
+
+  it('does not process downstream statements when both branches terminate', () => {
+    expect(getFlows(`function handler(req) {
+  if (flag) return;
+  else throw new Error("stop");
+  eval(req.body.code);
+}`)).toHaveLength(0)
+  })
+
+  it('stops loop-body processing after break but retains earlier sinks', () => {
+    const flows = getFlows(`function handler(req) {
+  while (flag) {
+    eval(req.body.before);
+    break;
+    eval(req.body.after);
+  }
+}`)
+    expect(flows).toHaveLength(1)
+  })
+
+  it('stops loop-body processing after continue', () => {
+    expect(getFlows(`function handler(req) {
+  while (flag) {
+    continue;
+    eval(req.body.after);
+  }
+}`)).toHaveLength(0)
+  })
+})

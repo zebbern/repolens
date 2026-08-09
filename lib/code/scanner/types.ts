@@ -4,6 +4,7 @@ import type { RepositoryCoverage } from '@/types/repository'
 
 export type IssueSeverity = 'critical' | 'warning' | 'info'
 export type IssueCategory = 'security' | 'bad-practice' | 'reliability'
+export type IssueConfidence = 'high' | 'medium' | 'low'
 
 export interface CodeIssue {
   id: string
@@ -24,7 +25,7 @@ export interface CodeIssue {
   /** Link to further reading */
   learnMoreUrl?: string
   /** Confidence level of this detection */
-  confidence?: 'high' | 'medium' | 'low'
+  confidence?: IssueConfidence
   /** Auto-fix code suggestion */
   fix?: string
   /** Description of the fix approach */
@@ -65,7 +66,7 @@ export interface ScanRule {
   // Structural rules use a custom scan function
   structural?: boolean
   /** Confidence level of this rule */
-  confidence?: 'high' | 'medium' | 'low'
+  confidence?: IssueConfidence
   /** Auto-fix code suggestion */
   fix?: string
   /** Description of the fix approach */
@@ -141,7 +142,7 @@ export interface CompositeRule {
   /** Skip if ANY of these patterns are present (mitigations) */
   mitigations?: RegExp[]
   /** Confidence level of this rule */
-  confidence?: 'high' | 'medium' | 'low'
+  confidence?: IssueConfidence
   /** Auto-fix code suggestion */
   fix?: string
   /** Description of the fix approach */

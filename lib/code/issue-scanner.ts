@@ -7,6 +7,7 @@
 export type {
   IssueSeverity,
   IssueCategory,
+  IssueConfidence,
   CodeIssue,
   ScanRule,
   HealthGrade,

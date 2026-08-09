@@ -289,7 +289,7 @@ function handler(req, res) {
     expect(unsanitized).toHaveLength(0)
   })
 
-  it('zod .parse() sanitizes tainted data', () => {
+  it('zod .parse() records validation evidence without suppressing taint', () => {
     const code = `
 function handler(req, res) {
   const input = req.body;
@@ -298,8 +298,9 @@ function handler(req, res) {
 }
 `
     const flows = trackCode(code)
-    const unsanitized = flows.filter(f => !f.sanitized)
-    expect(unsanitized).toHaveLength(0)
+    const sqlFlow = flows.find(f => f.sink.type === 'sql-injection')
+    expect(sqlFlow).toMatchObject({ sanitized: false, confidence: 'medium' })
+    expect(sqlFlow!.mitigationEvidence.map(evidence => evidence.name)).toEqual(['zod.parse'])
   })
 
   it('joi .validate() sanitizes tainted data', () => {
@@ -337,11 +338,13 @@ function handler(req, res) {
     expect(sanitizer!.pattern.test('xssFilters.inHTMLData(input)')).toBe(true)
   })
 
-  it('tagged template literals recognized as sanitizer', () => {
-    const sanitizer = DEFAULT_SANITIZERS.find(s => s.name === 'tagged-template')
+  it('SQL tagged template literals are SQL-only sanitizers', () => {
+    const sanitizer = DEFAULT_SANITIZERS.find(s => s.name === 'sql-tagged-template')
     expect(sanitizer).toBeDefined()
     expect(sanitizer!.pattern.test('sql`SELECT * FROM users`')).toBe(true)
-    expect(sanitizer!.pattern.test('html`<div>${x}</div>`')).toBe(true)
+    expect(sanitizer!.pattern.test('html`<div>${x}</div>`')).toBe(false)
+    expect(sanitizer!.effect).toBe('sanitizes')
+    expect(sanitizer!.appliesTo).toEqual(['sql-injection'])
   })
 
   it('helmet middleware recognized as sanitizer', () => {

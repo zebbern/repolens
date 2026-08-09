@@ -3,6 +3,7 @@
 export type {
   IssueSeverity,
   IssueCategory,
+  IssueConfidence,
   CodeIssue,
   ScanRule,
   HealthGrade,
@@ -57,7 +58,15 @@ export { lookupCves, lookupCvesForPackage, parseDependencies, clearCveCache, que
 export type { CveResult, CveLookupResult, PackageDependency } from './cve-lookup'
 
 export { trackTaint, taintFlowsToIssues, DEFAULT_SOURCES, DEFAULT_SINKS, DEFAULT_SANITIZERS } from './taint-tracker'
-export type { TaintSource, TaintSink, TaintSanitizer, TaintFlow } from './taint-tracker'
+export type {
+  TaintSinkType,
+  TaintSourceOrigin,
+  TaintPathPrecision,
+  TaintSource,
+  TaintSink,
+  TaintSanitizer,
+  TaintFlow,
+} from './taint-tracker'
 
 export { validateFinding, validateBatch, buildValidationPrompt, parseValidationResponse, getCodeContext, clearValidationCache, getCachedResult, scrubSecrets } from './ai-validator'
 export type { ValidationResult, ValidationOptions, BatchValidationResult, ValidationVerdict, ValidationConfidence } from './ai-validator'

@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import type { CodeIndex } from '@/lib/code/code-index'
+import { InMemoryContentStore } from '@/lib/code/content-store'
 
 interface MockIssue {
   id: string
@@ -203,6 +204,46 @@ describe('IssuesPanel', () => {
     resolve({ issueId: 'issue-1', verdict: 'true-positive', confidence: 'high', reasoning: 'stale' })
 
     await waitFor(() => expect(issuesHarness.latestProps?.validationResults.size).toBe(0))
+  })
+
+  it('publishes a visible validation failure without an AI call when source is absent', async () => {
+    const index: CodeIndex = {
+      ...mockCodeIndex,
+      files: new Map([['src/utils.ts', {
+        path: 'src/utils.ts', name: 'utils.ts', lineCount: 1,
+      }]]),
+      totalLines: 0,
+      isIndexing: false,
+      meta: new Map(),
+      contentStore: new InMemoryContentStore(),
+    }
+    render(<IssuesPanel codeIndex={index} />)
+    await userEvent.click(await screen.findByText('validate-first'))
+
+    await waitFor(() => expect(issuesHarness.latestProps?.validationResults.size).toBe(1))
+    expect(issuesHarness.validateFinding).not.toHaveBeenCalled()
+    expect(issuesHarness.latestProps?.validationResults.get('issue-1')).toMatchObject({
+      verdict: 'uncertain',
+      reasoning: 'File content unavailable for src/utils.ts',
+    })
+  })
+
+  it('allows validation of a genuine empty file', async () => {
+    const index: CodeIndex = {
+      ...mockCodeIndex,
+      files: new Map([['src/utils.ts', {
+        path: 'src/utils.ts', name: 'utils.ts', content: '', lineCount: 1,
+      }]]),
+      totalLines: 1,
+      isIndexing: false,
+      meta: new Map(),
+      contentStore: new InMemoryContentStore(new Map([['src/utils.ts', '']])),
+    }
+    render(<IssuesPanel codeIndex={index} />)
+    await userEvent.click(await screen.findByText('validate-first'))
+
+    await waitFor(() => expect(issuesHarness.validateFinding).toHaveBeenCalled())
+    expect(issuesHarness.validateFinding.mock.calls[0][1]).toBe('')
   })
 
   it('does not publish a single fix whose content read completes after a session switch', async () => {

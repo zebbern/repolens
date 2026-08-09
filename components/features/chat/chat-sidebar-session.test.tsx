@@ -250,6 +250,34 @@ describe('ChatSidebar repository session isolation', () => {
     expect(screen.getByText('attachments:1')).toBeInTheDocument()
   })
 
+  it('sends after hydration completes through the StrictMode setup-cleanup-setup cycle', async () => {
+    harness.status.current = 'ready'
+    const hydration = deferredValue<string>()
+    vi.mocked(buildStructuralIndexAsync).mockReturnValue(hydration.promise)
+    render(<React.StrictMode><ChatSidebar /></React.StrictMode>)
+
+    fireEvent.change(screen.getByLabelText('chat-draft'), { target: { value: 'StrictMode question' } })
+    fireEvent.click(screen.getByRole('button', { name: 'send' }))
+    await act(async () => { hydration.resolve('{"files":[]}'); await hydration.promise })
+
+    await waitFor(() => expect(harness.chat.sendMessage).toHaveBeenCalledOnce())
+    expect(harness.chat.sendMessage.mock.calls[0][0]).toMatchObject({ text: 'StrictMode question' })
+  })
+
+  it('suppresses a delayed StrictMode hydration after final unmount cleanup', async () => {
+    harness.status.current = 'ready'
+    const hydration = deferredValue<string>()
+    vi.mocked(buildStructuralIndexAsync).mockReturnValue(hydration.promise)
+    const { unmount } = render(<React.StrictMode><ChatSidebar /></React.StrictMode>)
+    fireEvent.change(screen.getByLabelText('chat-draft'), { target: { value: 'Unmounted question' } })
+    fireEvent.click(screen.getByRole('button', { name: 'send' }))
+
+    unmount()
+    await act(async () => { hydration.resolve('{"files":[]}'); await hydration.promise })
+
+    expect(harness.chat.sendMessage).not.toHaveBeenCalled()
+  })
+
   it('does not surface a stale hydration failure after switching repositories', async () => {
     harness.status.current = 'ready'
     const hydration = deferredValue<string>()

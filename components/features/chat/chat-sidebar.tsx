@@ -238,10 +238,13 @@ export function ChatSidebar({ className, onCollapse }: { className?: string; onC
     previousRepositorySessionRef.current = repositorySession
   }, [repositorySession])
 
-  useEffect(() => () => {
-    mountedRef.current = false
-    submissionGenerationRef.current += 1
-    submissionHydratingRef.current = false
+  useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+      submissionGenerationRef.current += 1
+      submissionHydratingRef.current = false
+    }
   }, [])
 
   // Extract cumulative token usage from the last assistant message metadata

@@ -45,7 +45,7 @@ export function useDownloads({
 
   // Download a single modified file
   const downloadFile = useCallback((tab: OpenTab) => {
-    if (!tab.content) return
+    if (typeof tab.content !== 'string') return
     const blob = new Blob([tab.content], { type: 'text/plain' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
@@ -65,7 +65,7 @@ export function useDownloads({
     const archive: Record<string, Uint8Array> = {}
 
     for (const tab of modifiedTabs) {
-      if (tab.content) {
+      if (typeof tab.content === 'string') {
         archive[tab.path] = strToU8(tab.content)
       }
     }

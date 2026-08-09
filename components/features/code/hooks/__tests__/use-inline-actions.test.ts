@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { renderHook, act, waitFor } from '@testing-library/react'
+import { StrictMode } from 'react'
 import type { CodeIndex, SearchResult } from '@/lib/code/code-index'
 import { InMemoryContentStore } from '@/lib/code/content-store'
 import type { ExtractedSymbol } from '../use-symbol-extraction'
@@ -207,6 +208,36 @@ describe('useInlineActions', () => {
     expect(result.current.result).toBeNull()
     expect(result.current.activeSymbol).toBeNull()
     expect(result.current.activeAction).toBeNull()
+  })
+
+  it('commits a delayed find-usages result after the StrictMode setup-cleanup-setup cycle', async () => {
+    let resolveSearch!: (results: SearchResult[]) => void
+    mockSearchIndex.mockReturnValue(new Promise(resolve => { resolveSearch = resolve }))
+    const { result } = renderHook(() => useInlineActions(codeIndex), { wrapper: StrictMode })
+
+    act(() => { trigger(result.current, 'find-usages') })
+    await act(async () => {
+      resolveSearch([])
+      await Promise.resolve()
+    })
+
+    expect(result.current.result?.content).toContain('No usages')
+    expect(result.current.isStreaming).toBe(false)
+  })
+
+  it('suppresses a delayed StrictMode result after the final unmount cleanup', async () => {
+    let resolveSearch!: (results: SearchResult[]) => void
+    mockSearchIndex.mockReturnValue(new Promise(resolve => { resolveSearch = resolve }))
+    const { result, unmount } = renderHook(() => useInlineActions(codeIndex), { wrapper: StrictMode })
+
+    act(() => { trigger(result.current, 'find-usages') })
+    unmount()
+    await act(async () => {
+      resolveSearch([])
+      await Promise.resolve()
+    })
+
+    expect(result.current.result).toBeNull()
   })
 
   it('does not commit a delayed find-usages result after dismissal', async () => {

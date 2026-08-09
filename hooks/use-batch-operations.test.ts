@@ -264,6 +264,18 @@ describe('useBatchOperations', () => {
 
       expect(generateFix).toHaveBeenCalledWith(issue, 'const x = eval("test")')
     })
+
+    it('allows fix generation for a genuinely empty file', async () => {
+      const issue = createIssue({ id: 'empty-fix', file: 'src/empty.ts' })
+      codeIndex = createCodeIndex(new Map([['src/empty.ts', { content: '' }]]))
+      generateFix.mockReturnValue(null)
+
+      const { result } = renderBatchHook()
+      await act(async () => result.current.batchGenerateFixes([issue]))
+
+      expect(generateFix).toHaveBeenCalledWith(issue, '')
+      expect(result.current.fixProgress.failed).toBe(0)
+    })
   })
 
   describe('batchValidate', () => {
@@ -337,6 +349,58 @@ describe('useBatchOperations', () => {
       })
 
       expect(result.current.validationProgress.inProgress).toBe(false)
+    })
+
+    it('publishes a visible failure and makes no AI call when source is absent', async () => {
+      const issue = createIssue({ id: 'missing-source', file: 'src/missing.ts' })
+      codeIndex = createCodeIndex()
+      codeIndex.files.set(issue.file, {
+        path: issue.file,
+        name: 'missing.ts',
+        lineCount: 1,
+      })
+
+      const { result } = renderBatchHook()
+      await act(async () => result.current.batchValidate([issue]))
+
+      expect(validateFinding).not.toHaveBeenCalled()
+      expect(result.current.validationProgress).toMatchObject({ completed: 1, failed: 1, inProgress: false })
+      const update = setValidationResults.mock.calls[0][0]
+      const published = typeof update === 'function' ? update(new Map()) : update
+      expect(published.get(issue.id)?.reasoning).toBe('File content unavailable for src/missing.ts')
+    })
+
+    it('allows AI validation for a genuinely empty file', async () => {
+      const issue = createIssue({ id: 'empty-source', file: 'src/empty.ts' })
+      codeIndex = createCodeIndex(new Map([['src/empty.ts', { content: '' }]]))
+      validateFinding.mockResolvedValue(createValidationResult(issue.id))
+
+      const { result } = renderBatchHook()
+      await act(async () => result.current.batchValidate([issue]))
+
+      expect(validateFinding).toHaveBeenCalledWith(issue, '', expect.objectContaining({ apiKey: 'sk-test' }))
+      expect(result.current.validationProgress.failed).toBe(0)
+    })
+
+    it('publishes a visible failure and makes no AI call when source loading fails', async () => {
+      const issue = createIssue({ id: 'failed-source', file: 'src/failed.ts' })
+      codeIndex = createCodeIndex()
+      codeIndex.files.set(issue.file, {
+        path: issue.file,
+        name: 'failed.ts',
+        lineCount: 1,
+      })
+      codeIndex.contentStore.getBatch = vi.fn().mockRejectedValue(new Error('IndexedDB unavailable'))
+
+      const { result } = renderBatchHook()
+      await act(async () => result.current.batchValidate([issue]))
+
+      expect(validateFinding).not.toHaveBeenCalled()
+      const update = setValidationResults.mock.calls[0][0]
+      const published = typeof update === 'function' ? update(new Map()) : update
+      expect(published.get(issue.id)?.reasoning).toContain(
+        'File content loading failed for src/failed.ts: IndexedDB unavailable',
+      )
     })
   })
 

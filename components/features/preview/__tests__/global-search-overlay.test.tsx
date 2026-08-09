@@ -1,15 +1,27 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { act } from 'react'
-import type { CodeIndex, SearchResult } from '@/lib/code/code-index'
+import {
+  batchIndexMetadataOnly,
+  createEmptyIndexWithStore,
+  searchIndexAsync,
+  type CodeIndex,
+  type SearchResult,
+} from '@/lib/code/code-index'
 import { InMemoryContentStore } from '@/lib/code/content-store'
+import { LazyContentStore } from '@/lib/code/content-store'
+import { FetchQueue } from '@/lib/code/fetch-queue'
 import type { ExtractedSymbol } from '@/components/features/code/hooks/use-symbol-extraction'
 
 /* ── Hoisted mocks (available to vi.mock factories) ───────────────── */
 
 const { mockSearchIndex, mockBuildSearchRegex, mockExtractSymbols, mockSearchInWorker, mockCancelPendingSearches } = vi.hoisted(() => {
-  const mockSearchIndex = vi.fn((): SearchResult[] => [])
+  const mockSearchIndex = vi.fn((
+    _index: CodeIndex,
+    _query: string,
+    _options?: { caseSensitive?: boolean; regex?: boolean; wholeWord?: boolean },
+  ): SearchResult[] => [])
   return {
     mockSearchIndex,
     mockBuildSearchRegex: vi.fn((): RegExp | null => null),
@@ -53,7 +65,8 @@ vi.mock('lucide-react', () => {
 
 /* ── Mock code-index ──────────────────────────────────────────────── */
 
-vi.mock('@/lib/code/code-index', () => ({
+vi.mock('@/lib/code/code-index', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@/lib/code/code-index')>(),
   buildSearchRegex: mockBuildSearchRegex,
 }))
 
@@ -118,6 +131,17 @@ function createCodeIndex(
   return { files: map, totalFiles: map.size, totalLines: 0, isIndexing: false, meta, contentStore }
 }
 
+function createLazyIndex() {
+  const fetchFile = vi.fn(async (path: string) => `export const fetched = '${path}'`)
+  const store = new LazyContentStore('owner/repo', new FetchQueue({ fetchFn: fetchFile }))
+  store.registerPaths(['src/a.ts', 'src/b.ts'])
+  const codeIndex = batchIndexMetadataOnly(createEmptyIndexWithStore(store), [
+    { path: 'src/a.ts', language: 'typescript', lineCount: 1 },
+    { path: 'src/b.ts', language: 'typescript', lineCount: 1 },
+  ])
+  return { codeIndex, fetchFile }
+}
+
 const defaultFiles = [
   { path: 'src/utils.ts', name: 'utils.ts', lineCount: 42 },
   { path: 'src/index.ts', name: 'index.ts', lineCount: 10 },
@@ -142,6 +166,9 @@ function renderOverlay(
 describe('GlobalSearchOverlay', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mockSearchInWorker.mockImplementation((...args: Parameters<typeof mockSearchIndex>) => (
+      Promise.resolve(mockSearchIndex(...args))
+    ))
     vi.useFakeTimers({ shouldAdvanceTime: true })
     // jsdom doesn't implement scrollIntoView
     Element.prototype.scrollIntoView = vi.fn()
@@ -238,6 +265,49 @@ describe('GlobalSearchOverlay', () => {
 
       await user.click(screen.getByText('Symbols'))
       expect(screen.getByTitle('Hide functions')).toBeInTheDocument()
+    })
+  })
+
+  describe('source availability', () => {
+    it('shows an unavailable-source error for lazy code search without eager file fetches', async () => {
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+      const { codeIndex, fetchFile } = createLazyIndex()
+      mockSearchInWorker.mockImplementation((index, query, options) => (
+        searchIndexAsync(index, query, options)
+      ))
+      renderOverlay({ codeIndex })
+
+      await user.click(screen.getByText('Code Search'))
+      await user.type(screen.getByPlaceholderText('Search in file contents...'), 'fetched')
+      await act(async () => { await vi.advanceTimersByTimeAsync(350) })
+
+      await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(
+        'Source unavailable for this repository search',
+      ))
+      expect(fetchFile).not.toHaveBeenCalled()
+    })
+
+    it('shows missing symbol-source coverage for a lazy repository without eager fetches', async () => {
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+      const { codeIndex, fetchFile } = createLazyIndex()
+      renderOverlay({ codeIndex })
+
+      await user.click(screen.getByText('Symbols'))
+
+      await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(
+        'Source unavailable for 2 of 2 files',
+      ))
+      expect(fetchFile).not.toHaveBeenCalled()
+    })
+
+    it('treats a genuine empty file as available symbol source', async () => {
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+      renderOverlay({ codeIndex: createCodeIndex([{ path: 'src/empty.ts', content: '' }]) })
+
+      await user.click(screen.getByText('Symbols'))
+
+      await waitFor(() => expect(mockExtractSymbols).toHaveBeenCalledWith('', undefined))
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument()
     })
   })
 

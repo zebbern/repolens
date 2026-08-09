@@ -141,7 +141,7 @@ export function IssuesPanel({ codeIndex, onNavigateToFile }: IssuesPanelProps) {
     if (!fixCacheRef.current.has(issue.id)) {
       const content = await getFileContent(codeIndex, issue.file)
       if (!isRepositorySessionCurrent(requestSession)) return
-      if (content) {
+      if (content !== null) {
         setFixCache(prev => new Map(prev).set(issue.id, generateFix(issue, content)))
       } else {
         setFixCache(prev => new Map(prev).set(issue.id, null))
@@ -159,7 +159,8 @@ export function IssuesPanel({ codeIndex, onNavigateToFile }: IssuesPanelProps) {
 
     setValidatingIssues(prev => new Set(prev).add(issue.id))
     try {
-      const content = (await getFileContent(codeIndex, issue.file)) ?? ''
+      const content = await getFileContent(codeIndex, issue.file)
+      if (content === null) throw new Error(`File content unavailable for ${issue.file}`)
       if (!isRepositorySessionCurrent(requestSession)) return
       const result = await validateFinding(issue, content, {
         provider: selectedProvider, model: selectedModel.id, apiKey,

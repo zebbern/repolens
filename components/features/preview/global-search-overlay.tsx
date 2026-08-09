@@ -9,7 +9,7 @@ import {
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import type { CodeIndex, SearchMatch } from "@/lib/code/code-index"
-import { buildSearchRegex } from "@/lib/code/code-index"
+import { buildSearchRegex, resolveFileContents } from "@/lib/code/code-index"
 import { searchInWorker, cancelPendingSearches } from "@/lib/code/search-worker-client"
 import { fuzzyMatch } from "@/lib/code/fuzzy-match"
 import { computeFileRenames, type FileRename } from "@/lib/code/rename-files"
@@ -333,12 +333,14 @@ export function GlobalSearchOverlay({
   const [codeResults, setCodeResults] = useState<CodeResultItem[]>([])
   const [totalCodeMatches, setTotalCodeMatches] = useState(0)
   const [isSearching, setIsSearching] = useState(false)
+  const [codeSearchError, setCodeSearchError] = useState<string | null>(null)
 
   useEffect(() => {
     if (activeTab !== 'code' || !debouncedQuery.trim()) {
       queueMicrotask(() => {
         setCodeResults([])
         setTotalCodeMatches(0)
+        setCodeSearchError(null)
         setIsSearching(false)
       })
       return
@@ -346,7 +348,10 @@ export function GlobalSearchOverlay({
 
     let stale = false
     queueMicrotask(() => {
-      if (!stale) setIsSearching(true)
+      if (!stale) {
+        setCodeSearchError(null)
+        setIsSearching(true)
+      }
     })
     cancelPendingSearches()
 
@@ -370,6 +375,7 @@ export function GlobalSearchOverlay({
       .catch(err => {
         if (!stale && err?.message !== 'Search cancelled') {
           console.warn('[search-worker] Search failed:', err)
+          setCodeSearchError(`Source unavailable for this repository search. ${err instanceof Error ? err.message : 'Search failed.'}`)
         }
       })
       .finally(() => {
@@ -428,36 +434,54 @@ export function GlobalSearchOverlay({
   // Build cross-file symbol index asynchronously (content may be in IDB)
   const [allSymbols, setAllSymbols] = useState<SymbolResult[]>([])
   const [isExtractingSymbols, setIsExtractingSymbols] = useState(false)
+  const [symbolSourceError, setSymbolSourceError] = useState<string | null>(null)
 
   useEffect(() => {
     if (activeTab !== 'symbols') return
 
     let stale = false
     queueMicrotask(() => {
-      if (!stale) setIsExtractingSymbols(true)
+      if (!stale) {
+        setSymbolSourceError(null)
+        setIsExtractingSymbols(true)
+      }
     })
 
-    // Collect all file paths and fetch content in batch
     const paths = Array.from(codeIndex.files.keys())
-    codeIndex.contentStore.getBatch(paths).then(contentMap => {
-      if (stale) return
-      const result: SymbolResult[] = []
-      for (const [, file] of codeIndex.files) {
-        const content = contentMap.get(file.path)
-        if (!content) continue
-        const symbols = extractSymbols(content, file.language)
-        for (const symbol of symbols) {
-          result.push({ symbol, filePath: file.path, fileName: file.name })
-          if (symbol.children) {
-            for (const child of symbol.children) {
-              result.push({ symbol: child, filePath: file.path, fileName: file.name })
+    resolveFileContents(codeIndex, paths)
+      .then(resolved => {
+        if (stale) return
+        const result: SymbolResult[] = []
+        for (const [, file] of codeIndex.files) {
+          const content = resolved.contents.get(file.path)
+          if (typeof content !== 'string') continue
+          const symbols = extractSymbols(content, file.language)
+          for (const symbol of symbols) {
+            result.push({ symbol, filePath: file.path, fileName: file.name })
+            if (symbol.children) {
+              for (const child of symbol.children) {
+                result.push({ symbol: child, filePath: file.path, fileName: file.name })
+              }
             }
           }
         }
-      }
-      setAllSymbols(result)
-      setIsExtractingSymbols(false)
-    })
+        setAllSymbols(result)
+        if (resolved.missingPaths.length > 0) {
+          const residentNote = resolved.residentOnly
+            ? ' On-demand repository content was not bulk fetched.'
+            : ''
+          setSymbolSourceError(`Source unavailable for ${resolved.missingPaths.length} of ${paths.length} files.${residentNote}`)
+        }
+      })
+      .catch(error => {
+        if (!stale) {
+          setAllSymbols([])
+          setSymbolSourceError(`Source unavailable for symbol search. ${error instanceof Error ? error.message : 'Content loading failed.'}`)
+        }
+      })
+      .finally(() => {
+        if (!stale) setIsExtractingSymbols(false)
+      })
 
     return () => { stale = true }
   }, [codeIndex, activeTab])
@@ -663,6 +687,16 @@ export function GlobalSearchOverlay({
 
         {/* Results */}
         <div ref={resultsRef} id="search-results" role="listbox" className="max-h-80 overflow-y-auto">
+          {activeTab === 'code' && codeSearchError && (
+            <div role="alert" className="px-3 py-2 text-xs text-status-error bg-status-error/10">
+              {codeSearchError}
+            </div>
+          )}
+          {activeTab === 'symbols' && symbolSourceError && (
+            <div role="alert" className="px-3 py-2 text-xs text-status-error bg-status-error/10">
+              {symbolSourceError}
+            </div>
+          )}
           {activeTab === 'files' && (
             renameEnabled && replaceMode ? (
               <RenamePreviewList query={query} preview={renamePreview} />

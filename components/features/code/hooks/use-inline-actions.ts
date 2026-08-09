@@ -101,6 +101,7 @@ export function useInlineActions(
 
   // Clean up on unmount
   useEffect(() => {
+    mountedRef.current = true
     return () => {
       mountedRef.current = false
       actionGenerationRef.current += 1

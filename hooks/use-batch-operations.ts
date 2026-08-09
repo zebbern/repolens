@@ -2,7 +2,7 @@
 
 import { useState, useCallback, useRef, useEffect } from 'react'
 import type { CodeIndex } from '@/lib/code/code-index'
-import { getFileContent } from '@/lib/code/code-index'
+import { resolveFileContents } from '@/lib/code/code-index'
 import type { CodeIssue, FixSuggestion, ValidationResult, ValidationOptions } from '@/lib/code/issue-scanner'
 import type { AIProvider, ProviderModel, APIKeysState } from '@/types/types'
 import type { RepositorySession } from '@/providers/repository-provider'
@@ -98,13 +98,29 @@ export function useBatchOperations({
     let completed = 0
     let failed = 0
 
+    const uniquePaths = [...new Set(criticalHigh.map(issue => issue.file))]
+    let resolvedContents = new Map<string, string>()
+    let resolutionError: unknown
+    try {
+      resolvedContents = (await resolveFileContents(codeIndex, uniquePaths)).contents
+    } catch (error) {
+      resolutionError = error
+    }
+    if (abortRef.current || !isRepositorySessionCurrent(requestSession)) return
+
     // Semaphore-based concurrency limiter
     const queue = [...criticalHigh]
     const workers = Array.from({ length: Math.min(MAX_CONCURRENCY, queue.length) }, async () => {
       while (queue.length > 0 && !abortRef.current && isRepositorySessionCurrent(requestSession)) {
         const issue = queue.shift()!
         try {
-          const content = await getFileContent(codeIndex, issue.file) ?? ''
+          if (resolutionError) {
+            throw new Error(`File content loading failed for ${issue.file}: ${resolutionError instanceof Error ? resolutionError.message : 'Unknown error'}`)
+          }
+          const content = resolvedContents.get(issue.file)
+          if (typeof content !== 'string') {
+            throw new Error(`File content unavailable for ${issue.file}`)
+          }
           if (!isRepositorySessionCurrent(requestSession)) return
           const result = await validateFinding(issue, content, {
             provider: selectedProvider,
@@ -155,7 +171,12 @@ export function useBatchOperations({
 
     // Pre-fetch all unique file contents in one batch
     const uniquePaths = [...new Set(issues.map(i => i.file))]
-    const contentMap = await codeIndex.contentStore.getBatch(uniquePaths)
+    let contentMap: Map<string, string>
+    try {
+      contentMap = (await resolveFileContents(codeIndex, uniquePaths)).contents
+    } catch {
+      contentMap = new Map()
+    }
     if (abortRef.current || !isRepositorySessionCurrent(requestSession)) return
 
     let completed = 0
@@ -165,8 +186,8 @@ export function useBatchOperations({
 
     for (const issue of issues) {
       if (abortRef.current || !isRepositorySessionCurrent(requestSession)) return
-      const content = codeIndex.files.get(issue.file)?.content ?? contentMap.get(issue.file) ?? null
-      if (content) {
+      const content = contentMap.get(issue.file)
+      if (typeof content === 'string') {
         const fix = generateFix(issue, content)
         newFixes.set(issue.id, fix)
         if (fix) idsWithFix.add(issue.id)

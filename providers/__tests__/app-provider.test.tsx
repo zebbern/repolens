@@ -142,12 +142,14 @@ describe('AppProvider', () => {
 
 describe('AppProvider chat-collapsed state', () => {
   function CollapseConsumer() {
-    const { isChatCollapsed, setChatCollapsed } = useApp()
+    const { isChatCollapsed, chatFocusRequest, setChatCollapsed, openChatAndFocus } = useApp()
     return (
       <div>
         <span data-testid="collapsed">{String(isChatCollapsed)}</span>
+        <span data-testid="focus-request">{chatFocusRequest}</span>
         <button onClick={() => setChatCollapsed(true)}>hide</button>
         <button onClick={() => setChatCollapsed(false)}>show</button>
+        <button onClick={openChatAndFocus}>open-chat</button>
       </div>
     )
   }
@@ -188,6 +190,23 @@ describe('AppProvider chat-collapsed state', () => {
     })
 
     expect(screen.getByTestId('collapsed')).toHaveTextContent('true')
+  })
+
+  it('opens a collapsed chat and issues a new focus request', async () => {
+    render(
+      <AppProvider>
+        <CollapseConsumer />
+      </AppProvider>
+    )
+
+    await act(async () => screen.getByText('hide').click())
+    expect(screen.getByTestId('collapsed')).toHaveTextContent('true')
+
+    await act(async () => screen.getByText('open-chat').click())
+
+    expect(screen.getByTestId('collapsed')).toHaveTextContent('false')
+    expect(screen.getByTestId('focus-request')).toHaveTextContent('1')
+    expect(localStorage.getItem('repolens:chat-collapsed')).toBe('0')
   })
 })
 

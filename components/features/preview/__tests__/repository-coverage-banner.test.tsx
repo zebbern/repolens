@@ -57,4 +57,23 @@ describe('RepositoryCoverageBanner', () => {
     expect(screen.getByRole('status')).toHaveTextContent('On-demand content')
     expect(screen.getByRole('status')).toHaveTextContent('12 of 900 supported files loaded')
   })
+
+  it('announces a terminal indexing failure instead of remaining in a loading state', () => {
+    render(
+      <RepositoryCoverageBanner
+        loadingStage="tree-ready"
+        error="ZIP extraction failed"
+        coverage={{
+          treeStatus: 'complete',
+          supportedFiles: { discovered: 20, loaded: 7 },
+          failures: { count: 0, samples: [] },
+          failedSubtrees: { count: 0, samples: [] },
+          mode: 'full',
+        }}
+      />,
+    )
+
+    expect(screen.getByRole('alert')).toHaveTextContent('Repository content loading failed — coverage is incomplete.')
+    expect(screen.queryByText(/Loading repository content/)).not.toBeInTheDocument()
+  })
 })

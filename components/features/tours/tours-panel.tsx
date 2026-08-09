@@ -4,7 +4,7 @@ import { useEffect, useState, useCallback } from "react"
 import { AlertCircle, Map, MessageSquare, Plus, Route } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
-import { useTours, useRepositoryData } from "@/providers"
+import { useApp, useTours, useRepositoryData } from "@/providers"
 import { executeToolLocally } from "@/lib/ai/client-tool-executor"
 import type { Tour } from "@/types/tours"
 import { TourList } from "./tour-list"
@@ -17,6 +17,7 @@ interface ToursPanelProps {
 }
 
 export function ToursPanel({ className, onNavigateToFile }: ToursPanelProps) {
+  const { openChatAndFocus } = useApp()
   const {
     tours,
     activeTour,
@@ -144,6 +145,7 @@ export function ToursPanel({ className, onNavigateToFile }: ToursPanelProps) {
         <EmptyState
           hasRepo={!!hasRepo}
           onGenerate={() => setShowGenerateDialog(true)}
+          onOpenChat={openChatAndFocus}
         />
       ) : (
         <TourList
@@ -168,9 +170,11 @@ export function ToursPanel({ className, onNavigateToFile }: ToursPanelProps) {
 function EmptyState({
   hasRepo,
   onGenerate,
+  onOpenChat,
 }: {
   hasRepo: boolean
   onGenerate: () => void
+  onOpenChat: () => void
 }) {
   return (
     <div className="flex flex-1 flex-col items-center justify-center gap-4 px-6 text-center">
@@ -196,7 +200,7 @@ function EmptyState({
           size="sm"
           variant="ghost"
           className="gap-1.5 text-xs text-text-muted"
-          onClick={() => window.dispatchEvent(new Event("focus-chat-input"))}
+          onClick={onOpenChat}
         >
           <MessageSquare className="h-3.5 w-3.5" aria-hidden="true" />
           Ask Chat for an AI walkthrough

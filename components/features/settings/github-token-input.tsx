@@ -87,7 +87,12 @@ export function GitHubTokenInput() {
             disabled={!token || isValidating}
             className="bg-primary text-primary-foreground hover:bg-primary/90"
           >
-            {isValidating ? <Loader2 className="h-4 w-4 animate-spin" /> : "Test"}
+            {isValidating ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                <span className="sr-only">Test</span>
+              </>
+            ) : "Test"}
           </Button>
         </div>
       </div>
@@ -95,7 +100,11 @@ export function GitHubTokenInput() {
       {/* Status */}
       {token && (
         <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
+          <div
+            className="flex items-center gap-2"
+            role={!isValidating && isValid === false ? "alert" : "status"}
+            aria-live={!isValidating && isValid === false ? "assertive" : "polite"}
+          >
             {getStatusIcon()}
             <span className="text-sm text-text-secondary">
               {isValidating && "Validating..."}

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { act, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 
 // Mock the APIKeys provider
@@ -72,7 +72,20 @@ describe('APIKeyInput', () => {
 
   it('renders "Invalid key" status for invalid key', () => {
     render(<APIKeyInput provider="openrouter" />)
-    expect(screen.getByText('Invalid key')).toBeInTheDocument()
+    expect(screen.getByRole('alert')).toHaveTextContent('Invalid key')
+  })
+
+  it('keeps the Test button accessible name while validation is running', async () => {
+    let finishValidation!: () => void
+    mockValidateAPIKey.mockImplementationOnce(() => new Promise<void>(resolve => { finishValidation = resolve }))
+    const user = userEvent.setup()
+    render(<APIKeyInput provider="anthropic" />)
+
+    await user.click(screen.getByRole('button', { name: 'Test' }))
+
+    expect(screen.getByRole('button', { name: 'Test' })).toBeDisabled()
+    expect(screen.getByRole('status')).toHaveTextContent('Validating...')
+    await act(async () => finishValidation())
   })
 
   it('renders available models when key is valid', () => {

@@ -13,7 +13,7 @@ import { SkillSelector } from "./skill-selector"
 import { TokenUsageFooter } from "./token-usage-footer"
 import { Bot, AlertCircle, Download, PanelLeftClose } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { useAPIKeys, useRepositoryData, useRepositoryActions, useRepositoryProgress, useTours, useGitHubToken } from "@/providers"
+import { useAPIKeys, useApp, useRepositoryData, useRepositoryActions, useRepositoryProgress, useTours, useGitHubToken } from "@/providers"
 import { toast } from "sonner"
 import { buildFileTreeString } from "@/lib/github/fetcher"
 import { downloadFile } from "@/lib/export"
@@ -32,6 +32,7 @@ import type { Tour } from "@/types/tours"
 // in a future iteration as a separate feature.
 
 export function ChatSidebar({ className, onCollapse }: { className?: string; onCollapse?: () => void }) {
+  const { chatFocusRequest } = useApp()
   const { selectedModel, apiKeys, getValidProviders } = useAPIKeys()
   const { repo, files, codeIndex, repositorySession } = useRepositoryData()
   const { pinFile, unpinFile, clearPins, getPinnedContents, isRepositorySessionCurrent } = useRepositoryActions()
@@ -447,6 +448,7 @@ export function ChatSidebar({ className, onCollapse }: { className?: string; onC
       {/* Input */}
       <div className="p-3">
         <ChatInput
+          focusRequest={chatFocusRequest}
           value={input}
           onChange={handleInputChange}
           onSubmit={handleSubmit}

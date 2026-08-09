@@ -17,11 +17,20 @@ import type { RepositoryCoverage } from "@/types/repository"
 interface RepositoryCoverageBannerProps {
   coverage: RepositoryCoverage | null
   loadingStage: LoadingStage
+  error?: string | null
 }
 
 const SETTLED_STAGES = new Set<LoadingStage>(["ready", "cached"])
 
-function coverageStatus(coverage: RepositoryCoverage | null, loadingStage: LoadingStage) {
+function coverageStatus(coverage: RepositoryCoverage | null, loadingStage: LoadingStage, error?: string | null) {
+  if (error) {
+    return {
+      label: "Repository content loading failed — coverage is incomplete.",
+      tone: "error" as const,
+      Icon: AlertTriangle,
+    }
+  }
+
   if (!coverage) {
     return {
       label: "Discovering repository coverage…",
@@ -84,8 +93,8 @@ function DetailRow({ label, value }: { label: string; value: string }) {
   )
 }
 
-export function RepositoryCoverageBanner({ coverage, loadingStage }: RepositoryCoverageBannerProps) {
-  const status = coverageStatus(coverage, loadingStage)
+export function RepositoryCoverageBanner({ coverage, loadingStage, error }: RepositoryCoverageBannerProps) {
+  const status = coverageStatus(coverage, loadingStage, error)
   const Icon = status.Icon
   const fileFailureSamples = coverage?.failures.samples.slice(0, 100) ?? []
   const failedSubtreeSamples = coverage?.failedSubtrees.samples.slice(0, 100) ?? []
@@ -98,12 +107,13 @@ export function RepositoryCoverageBanner({ coverage, loadingStage }: RepositoryC
       className={cn(
         "flex min-h-9 shrink-0 items-center gap-2 border-b px-4 py-1.5 text-xs",
         status.tone === "warning" && "border-amber-500/20 bg-amber-500/8 text-amber-700 dark:text-amber-300",
+        status.tone === "error" && "border-status-error/20 bg-status-error/8 text-status-error",
         status.tone === "complete" && "border-emerald-500/15 bg-emerald-500/6 text-emerald-700 dark:text-emerald-300",
         status.tone === "ondemand" && "border-blue-500/15 bg-blue-500/6 text-blue-700 dark:text-blue-300",
         (status.tone === "loading" || status.tone === "empty") && "border-foreground/6 bg-foreground/2 text-text-secondary",
       )}
-      role="status"
-      aria-live="polite"
+      role={status.tone === "error" ? "alert" : "status"}
+      aria-live={status.tone === "error" ? "assertive" : "polite"}
     >
       <Icon className={cn("h-3.5 w-3.5 shrink-0", status.tone === "loading" && "animate-spin")} aria-hidden="true" />
       <span className="min-w-0 flex-1">{status.label}</span>
@@ -141,6 +151,12 @@ export function RepositoryCoverageBanner({ coverage, loadingStage }: RepositoryC
               <DetailRow label="Content mode" value={!coverage ? "Pending" : coverage.mode === "on-demand" ? "On-demand" : "Full"} />
             </tbody>
           </table>
+
+          {error && (
+            <p className="rounded-md bg-status-error/10 p-3 text-xs text-status-error" role="alert">
+              Repository content loading stopped: {error}
+            </p>
+          )}
 
           {coverage?.treeStatus === "partial" && (
             <p className="rounded-md bg-amber-500/10 p-3 text-xs text-amber-800 dark:text-amber-200">

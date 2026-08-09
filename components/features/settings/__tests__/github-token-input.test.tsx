@@ -121,7 +121,20 @@ describe('GitHubTokenInput', () => {
 
     render(<GitHubTokenInput />)
 
-    expect(screen.getByText(/invalid token/i)).toBeInTheDocument()
+    expect(screen.getByRole('alert')).toHaveTextContent('Invalid token')
+  })
+
+  it('keeps the Test button name and exposes live status while validating', () => {
+    mockTokenState = {
+      ...mockTokenState,
+      token: 'ghp_pending',
+      isValidating: true,
+    }
+
+    render(<GitHubTokenInput />)
+
+    expect(screen.getByRole('button', { name: 'Test' })).toBeDisabled()
+    expect(screen.getByRole('status')).toHaveTextContent('Validating...')
   })
 
   it('shows "Not tested" when token is present but not validated', () => {

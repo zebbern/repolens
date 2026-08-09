@@ -765,7 +765,7 @@ All main-thread consumers (AI tools, UI components, analyzers, diagram generator
 
 ### Client-Side Tool Execution
 
-The most distinctive pattern in the codebase. AI tool definitions on the server have Zod schemas but no `execute` function, causing tool calls to stream to the client. The browser executes them against the local `CodeIndex` and feeds results back via `addToolOutput()`. This eliminates server-side file storage and reduces API route complexity — the server only proxies AI model calls.
+The most distinctive pattern in the codebase. AI tool definitions on the server have Zod schemas but no `execute` function, causing tool calls to stream to the client. The browser executes them against the local `CodeIndex` and feeds results back via `addToolOutput()`. This browser-first execution reduces server-side tool complexity, but it does not keep repository material outside the AI boundary: selected or pinned content and local tool results can pass through the RepoLens server to the selected provider. Storage and logging behavior then depends on the RepoLens deployment and provider policies; the client architecture makes no absolute no-storage or no-logging guarantee.
 
 ### IndexedDB Caching with LRU Eviction
 
@@ -777,7 +777,7 @@ Providers like `DocsProvider` use `useRef` for frequently-changing values (selec
 
 ### Structural Index
 
-Instead of sending raw file contents to the AI, `buildStructuralIndex()` extracts a compact JSON array of `{ path, language, lineCount, exports, imports, signatures }` per file. The index is progressively trimmed (signatures → imports → exports) to fit within a byte budget calculated as 10-15% of the model's context window. This gives the AI enough information to make informed tool calls without wasting context.
+The initial repository context built by `buildStructuralIndexAsync()` favors a compact structural JSON array of `{ path, language, lineCount, exports, imports, signatures }` per file. The index is progressively trimmed (signatures → imports → exports) to fit within a byte budget calculated as 10-15% of the model's context window. AI turns can still include raw selected or pinned content and raw-content tool results, which pass through the RepoLens server to the selected provider when those features are used.
 
 ### Memoized Scanning
 

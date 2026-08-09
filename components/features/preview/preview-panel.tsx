@@ -219,7 +219,7 @@ export function PreviewPanel({ className }: { className?: string }) {
         hasApiKey={hasApiKey}
       />
 
-      {repo && <RepositoryCoverageBanner coverage={coverage} loadingStage={loadingStage} />}
+      {repo && <RepositoryCoverageBanner coverage={coverage} loadingStage={loadingStage} error={repoError} />}
 
       <div
         id="preview-tabpanel"

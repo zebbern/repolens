@@ -13,6 +13,8 @@ interface AppState {
   selectedFilePath: string | null
   /** When true, the desktop chat sidebar is fully hidden. */
   isChatCollapsed: boolean
+  /** Increments for each explicit request to reveal Chat and focus its input. */
+  chatFocusRequest: number
 }
 
 interface AppContextType extends AppState {
@@ -21,6 +23,7 @@ interface AppContextType extends AppState {
   setSidebarWidth: (width: number) => void
   setSelectedFilePath: (path: string | null) => void
   setChatCollapsed: (collapsed: boolean) => void
+  openChatAndFocus: () => void
 }
 
 // Initial state
@@ -30,6 +33,7 @@ const initialState: AppState = {
   sidebarWidth: 320,
   selectedFilePath: null,
   isChatCollapsed: false,
+  chatFocusRequest: 0,
 }
 
 // Context
@@ -46,6 +50,7 @@ export function AppProvider({ children }: AppProviderProps) {
   const [sidebarWidth, setSidebarWidth] = useState(initialState.sidebarWidth)
   const [selectedFilePath, setSelectedFilePath] = useState<string | null>(initialState.selectedFilePath)
   const [isChatCollapsed, setIsChatCollapsed] = useState(initialState.isChatCollapsed)
+  const [chatFocusRequest, setChatFocusRequest] = useState(initialState.chatFocusRequest)
 
   const setPreviewUrl = useCallback((url: string | null) => {
     setPreviewUrlState(prev => prev === url ? prev : url)
@@ -71,18 +76,25 @@ export function AppProvider({ children }: AppProviderProps) {
     }
   }, [])
 
+  const openChatAndFocus = useCallback(() => {
+    setChatCollapsed(false)
+    setChatFocusRequest(request => request + 1)
+  }, [setChatCollapsed])
+
   const contextValue = useMemo<AppContextType>(() => ({
     previewUrl,
     isGenerating,
     sidebarWidth,
     selectedFilePath,
     isChatCollapsed,
+    chatFocusRequest,
     setPreviewUrl,
     setIsGenerating,
     setSidebarWidth,
     setSelectedFilePath,
     setChatCollapsed,
-  }), [previewUrl, isGenerating, sidebarWidth, selectedFilePath, isChatCollapsed, setPreviewUrl, setChatCollapsed])
+    openChatAndFocus,
+  }), [previewUrl, isGenerating, sidebarWidth, selectedFilePath, isChatCollapsed, chatFocusRequest, setPreviewUrl, setChatCollapsed, openChatAndFocus])
 
   return <AppContext.Provider value={contextValue}>{children}</AppContext.Provider>
 }

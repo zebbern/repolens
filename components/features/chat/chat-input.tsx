@@ -1,4 +1,4 @@
-import { type KeyboardEvent, type ReactNode, type DragEvent, type ClipboardEvent, useRef, useCallback } from 'react'
+import { type KeyboardEvent, type ReactNode, type DragEvent, type ClipboardEvent, useRef, useCallback, useEffect } from 'react'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { ArrowUp, ImagePlus, Loader2, Square, X } from 'lucide-react'
@@ -18,6 +18,8 @@ interface ChatInputProps {
   placeholder?: string
   className?: string
   disabled?: boolean
+  /** Increment to move focus to the chat textarea, including when it is read-only. */
+  focusRequest?: number
   /** Slot rendered above the textarea (e.g. pinned context chips). */
   pinnedChips?: ReactNode
   /** Slot rendered next to ModelSelector in the bottom bar (e.g. pin file picker). */
@@ -42,6 +44,7 @@ export function ChatInput({
   placeholder = 'Ask about the codebase...',
   className,
   disabled = false,
+  focusRequest = 0,
   pinnedChips,
   pinPicker,
   skillPicker,
@@ -51,7 +54,12 @@ export function ChatInput({
   onImageRemove,
 }: ChatInputProps) {
   const formRef = useRef<HTMLFormElement>(null)
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    if (focusRequest > 0) textareaRef.current?.focus()
+  }, [focusRequest])
 
   const processFiles = useCallback(async (files: FileList | File[]) => {
     if (!onImageAttach) return
@@ -166,6 +174,7 @@ export function ChatInput({
       )}
 
       <Textarea
+        ref={textareaRef}
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
@@ -173,7 +182,8 @@ export function ChatInput({
         rows={1}
         onKeyDown={handleKeyDown}
         onPaste={handlePaste}
-        disabled={isDisabled}
+        readOnly={isDisabled}
+        aria-disabled={isDisabled}
       />
 
       <input

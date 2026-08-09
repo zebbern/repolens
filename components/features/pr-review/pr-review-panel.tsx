@@ -70,7 +70,7 @@ export function PRReviewPanel() {
   // Error state
   if (status === "error" && error) {
     return (
-      <div className="flex h-full items-center justify-center p-8 text-center">
+      <div className="flex h-full items-center justify-center p-8 text-center" role="alert">
         <div className="space-y-3">
           <AlertCircle className="mx-auto h-8 w-8 text-destructive" />
           <p className="text-sm text-destructive">{error}</p>

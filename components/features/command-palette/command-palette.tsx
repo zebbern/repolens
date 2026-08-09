@@ -19,6 +19,7 @@ import {
   CommandShortcut,
   CommandSeparator,
 } from "@/components/ui/command"
+import { useApp } from "@/providers"
 
 const NAVIGATION_ITEMS = [
   { id: "repo", label: "Repo Overview", icon: Github, keywords: ["home", "overview", "summary", "project"] },
@@ -36,6 +37,7 @@ export function CommandPalette() {
   const [open, setOpen] = useState(false)
   const router = useRouter()
   const { theme, setTheme } = useTheme()
+  const { openChatAndFocus } = useApp()
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -131,9 +133,7 @@ export function CommandPalette() {
           </CommandItem>
           <CommandItem
             value="Start new AI chat conversation"
-            onSelect={() => runAndClose(() => {
-              window.dispatchEvent(new Event("focus-chat-input"))
-            })}
+            onSelect={() => runAndClose(openChatAndFocus)}
           >
             <MessageSquare className="mr-2 h-4 w-4" />
             Focus Chat

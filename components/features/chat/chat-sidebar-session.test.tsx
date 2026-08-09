@@ -71,6 +71,7 @@ vi.mock('ai', () => ({
 }))
 
 vi.mock('@/providers', () => ({
+  useApp: () => ({ chatFocusRequest: 0 }),
   useAPIKeys: () => ({
     selectedModel: { provider: 'openai', id: 'gpt-4o' },
     apiKeys: { openai: { key: 'test-key' } },

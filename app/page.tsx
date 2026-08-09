@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { MessageSquare } from "lucide-react"
 import { Header } from "@/components/layout/header"
 import { ResizableLayout } from "@/components/layout/resizable-layout"
@@ -14,7 +14,16 @@ import { useApp } from "@/providers"
 export default function HomePage() {
   const isMobile = useIsMobile()
   const [isChatOpen, setIsChatOpen] = useState(false)
-  const { isChatCollapsed, setChatCollapsed } = useApp()
+  const handledChatRequestRef = useRef(0)
+  const { isChatCollapsed, chatFocusRequest, setChatCollapsed } = useApp()
+
+  useEffect(() => {
+    if (chatFocusRequest <= handledChatRequestRef.current) return
+    handledChatRequestRef.current = chatFocusRequest
+    if (isMobile) {
+      queueMicrotask(() => setIsChatOpen(true))
+    }
+  }, [chatFocusRequest, isMobile])
 
   return (
     <div className="flex h-screen w-full flex-col bg-primary-background font-sans text-text-primary">

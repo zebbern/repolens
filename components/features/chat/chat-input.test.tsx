@@ -108,22 +108,33 @@ describe('ChatInput', () => {
     expect(submitBtn).not.toBeDisabled()
   })
 
-  it('disables all inputs when isLoading is true', () => {
+  it('keeps the textarea focusable but read-only when loading', () => {
     render(<ChatInput {...defaultProps} value="hello" isLoading={true} />)
 
     const textarea = screen.getByPlaceholderText('Ask about the codebase...')
-    expect(textarea).toBeDisabled()
+    expect(textarea).toHaveAttribute('readonly')
+    expect(textarea).toHaveAttribute('aria-disabled', 'true')
 
     const buttons = screen.getAllByRole('button')
     const submitBtn = buttons.find(btn => btn.getAttribute('type') === 'submit')!
     expect(submitBtn).toBeDisabled()
   })
 
-  it('disables all inputs when disabled prop is true', () => {
+  it('keeps the disabled textarea focusable but read-only', () => {
     render(<ChatInput {...defaultProps} value="hello" disabled={true} />)
 
     const textarea = screen.getByPlaceholderText('Ask about the codebase...')
-    expect(textarea).toBeDisabled()
+    expect(textarea).toHaveAttribute('readonly')
+    expect(textarea).toHaveAttribute('aria-disabled', 'true')
+  })
+
+  it('focuses the textarea for an explicit chat focus request', () => {
+    const { rerender } = render(<ChatInput {...defaultProps} disabled focusRequest={0} />)
+    const textarea = screen.getByPlaceholderText('Ask about the codebase...')
+
+    rerender(<ChatInput {...defaultProps} disabled focusRequest={1} />)
+
+    expect(textarea).toHaveFocus()
   })
 
   it('renders the model selector', () => {

@@ -39,6 +39,17 @@ describe('Category K: Framework-Specific Detection', () => {
     expect(hits[0].cwe).toBe('CWE-918')
   })
 
+  it('K1: Next.js RSC SSRF — interpolation immediately after authority', () => {
+    const code = [
+      "const userHost = '@evil.invalid/path'",
+      'const response = await fetch(`https://api.internal.com${userHost}`)',
+    ].join('\n')
+
+    const result = scanCode('app/api/route.ts', code, 'typescript')
+
+    expect(issuesForRule(result.issues, 'nextjs-rsc-ssrf')).toHaveLength(1)
+  })
+
   it('K2: Next.js RSC SSRF — FALSE POSITIVE — static URL', () => {
     const code = "const res = await fetch('https://api.internal.com/data')"
     const result = scanCode('app/api/route.ts', code, 'typescript')

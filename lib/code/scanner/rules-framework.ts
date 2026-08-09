@@ -433,7 +433,7 @@ export const FRAMEWORK_RULES: ScanRule[] = [
     patternOptions: { regex: true, caseSensitive: false },
     fileFilter: JS_TS,
     excludeFiles: /rules-security|rules-security-lang|rules-quality|rules-framework|rules-composite/i,
-    excludePattern: /['"]use client['"]|test|mock|fixture|example|static|\.json|allowlist|ALLOWED_HOSTS|ALLOWED_DOMAINS|whitelist|allowedOrigins|isValidUrl|validateUrl|new URL.*includes|fetch\s*\(\s*`https?:\/\/[a-z0-9.-]+(?::\d+)?(?:[/?#][^`]*)?\$\{/i,
+    excludePattern: /['"]use client['"]|test|mock|fixture|example|static|\.json|allowlist|ALLOWED_HOSTS|ALLOWED_DOMAINS|whitelist|allowedOrigins|isValidUrl|validateUrl|new URL.*includes|fetch\s*\(\s*`https?:\/\/[a-z0-9.-]+(?::\d+)?[/?#][^`]*\$\{/i,
     confidence: 'medium',
   },
   // --- SRI Missing on CDN ---

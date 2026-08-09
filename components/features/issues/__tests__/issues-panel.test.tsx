@@ -7,6 +7,21 @@ interface MockIssue {
   id: string
   title: string
 }
+const issuesHarness = vi.hoisted(() => {
+  const harness = {
+    session: { id: 1, signal: new AbortController().signal },
+    isCurrent: (session: unknown) => session === harness.session,
+    validateFinding: vi.fn(),
+    latestProps: null as null | {
+    onValidate: (issue: never) => void
+    onShowFix: (issue: never) => void
+    validationResults: Map<string, unknown>
+    fixCache: Map<string, unknown>
+    showFix: Set<string>
+    },
+  }
+  return harness
+})
 
 // Mock child components and providers
 vi.mock('../issue-summary', () => ({
@@ -24,17 +39,28 @@ vi.mock('../issue-filters', () => ({
   ),
 }))
 vi.mock('../issue-list', () => ({
-  IssueList: ({ groupedByFile, filteredIssueCount }: {
+  IssueList: (props: {
     groupedByFile?: Map<string, MockIssue[]>
     filteredIssueCount?: number
-  }) => (
+    onValidate: (issue: never) => void
+    onShowFix: (issue: never) => void
+    validationResults: Map<string, unknown>
+    fixCache: Map<string, unknown>
+    showFix: Set<string>
+  }) => {
+    issuesHarness.latestProps = props
+    const { groupedByFile, filteredIssueCount } = props
+    return (
     <div data-testid="issue-list">
       <span data-testid="issue-count">{filteredIssueCount ?? 0}</span>
       {groupedByFile && Array.from(groupedByFile.entries()).map(([file, issues]) =>
         issues.map(issue => <div key={`${file}:${issue.id}`}>{issue.title}</div>)
       )}
+      <button onClick={() => props.onValidate(mockScanResults.issues[0] as never)}>validate-first</button>
+      <button onClick={() => props.onShowFix(mockScanResults.issues[0] as never)}>fix-first</button>
     </div>
-  ),
+    )
+  },
 }))
 vi.mock('../compliance-dashboard', () => ({
   ComplianceDashboard: () => <div data-testid="compliance-dashboard">compliance</div>,
@@ -98,12 +124,7 @@ vi.mock('@/lib/code/issue-scanner', () => ({
     return Promise.resolve(mockScanResults)
   }),
   generateFix: vi.fn(() => null),
-  validateFinding: vi.fn().mockResolvedValue({
-    issueId: 'issue-1',
-    verdict: 'true-positive',
-    confidence: 'high',
-    reasoning: 'Confirmed',
-  }),
+  validateFinding: (...args: unknown[]) => issuesHarness.validateFinding(...args),
 }))
 
 vi.mock('@/providers', () => ({
@@ -114,10 +135,12 @@ vi.mock('@/providers', () => ({
   }),
   useRepositoryData: () => ({
     codebaseAnalysis: { files: new Map() },
+    repositorySession: issuesHarness.session,
   }),
   useRepositoryActions: () => ({
     getTabCache: () => undefined,
     setTabCache: () => {},
+    isRepositorySessionCurrent: issuesHarness.isCurrent,
   }),
 }))
 
@@ -163,6 +186,44 @@ const mockCodeIndex = {
 describe('IssuesPanel', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    issuesHarness.session = { id: 1, signal: new AbortController().signal }
+    issuesHarness.latestProps = null
+    issuesHarness.validateFinding.mockResolvedValue({ issueId: 'issue-1', verdict: 'true-positive', confidence: 'high', reasoning: 'Confirmed' })
+  })
+
+  it('does not publish a single validation that completes after a session switch', async () => {
+    let resolve!: (value: unknown) => void
+    issuesHarness.validateFinding.mockReturnValue(new Promise(done => { resolve = done }))
+    const { rerender } = render(<IssuesPanel codeIndex={mockCodeIndex as unknown as CodeIndex} />)
+    await waitFor(() => expect(screen.getByText('validate-first')).toBeInTheDocument())
+    await userEvent.click(screen.getByText('validate-first'))
+
+    issuesHarness.session = { id: 2, signal: new AbortController().signal }
+    rerender(<IssuesPanel codeIndex={mockCodeIndex as unknown as CodeIndex} />)
+    resolve({ issueId: 'issue-1', verdict: 'true-positive', confidence: 'high', reasoning: 'stale' })
+
+    await waitFor(() => expect(issuesHarness.latestProps?.validationResults.size).toBe(0))
+  })
+
+  it('does not publish a single fix whose content read completes after a session switch', async () => {
+    let resolve!: (value: string) => void
+    const index = {
+      ...mockCodeIndex,
+      files: new Map([['src/utils.ts', { content: '', path: 'src/utils.ts' }]]),
+      contentStore: { get: () => new Promise<string>(done => { resolve = done }) },
+    }
+    const { rerender } = render(<IssuesPanel codeIndex={index as unknown as CodeIndex} />)
+    await waitFor(() => expect(screen.getByText('fix-first')).toBeInTheDocument())
+    await userEvent.click(screen.getByText('fix-first'))
+
+    issuesHarness.session = { id: 2, signal: new AbortController().signal }
+    rerender(<IssuesPanel codeIndex={index as unknown as CodeIndex} />)
+    resolve('eval(x)')
+
+    await waitFor(() => {
+      expect(issuesHarness.latestProps?.fixCache.size).toBe(0)
+      expect(issuesHarness.latestProps?.showFix.size).toBe(0)
+    })
   })
 
   it('renders issue summary', async () => {

@@ -5,6 +5,7 @@ import type { CodeIndex } from '@/lib/code/code-index'
 import { getFileContent } from '@/lib/code/code-index'
 import type { CodeIssue, FixSuggestion, ValidationResult, ValidationOptions } from '@/lib/code/issue-scanner'
 import type { AIProvider, ProviderModel, APIKeysState } from '@/types/types'
+import type { RepositorySession } from '@/providers/repository-provider'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -31,6 +32,8 @@ export interface BatchOperationsOptions {
   setFixCache: React.Dispatch<React.SetStateAction<Map<string, FixSuggestion | null>>>
   setShowFix: React.Dispatch<React.SetStateAction<Set<string>>>
   setValidationResults: React.Dispatch<React.SetStateAction<Map<string, ValidationResult>>>
+  repositorySession: RepositorySession | null
+  isRepositorySessionCurrent: (session: RepositorySession | null) => boolean
 }
 
 const MAX_CONCURRENCY = 3
@@ -49,6 +52,8 @@ export function useBatchOperations({
   setFixCache,
   setShowFix,
   setValidationResults,
+  repositorySession,
+  isRepositorySessionCurrent,
 }: BatchOperationsOptions) {
   const [validationProgress, setValidationProgress] = useState<BatchProgress>({
     completed: 0, total: 0, failed: 0, inProgress: false,
@@ -60,13 +65,24 @@ export function useBatchOperations({
   const abortRef = useRef(false)
 
   // Cancel in-flight work on unmount
-  useEffect(() => () => { abortRef.current = true }, [])
+  useEffect(() => {
+    abortRef.current = true
+    let cancelled = false
+    queueMicrotask(() => {
+      if (cancelled) return
+      setValidationProgress({ completed: 0, total: 0, failed: 0, inProgress: false })
+      setFixProgress({ completed: 0, total: 0, failed: 0, inProgress: false })
+    })
+    return () => { cancelled = true; abortRef.current = true }
+  }, [repositorySession])
 
   // -----------------------------------------------------------------------
   // Batch validation (async, concurrency-limited)
   // -----------------------------------------------------------------------
 
   const batchValidate = useCallback(async (issues: CodeIssue[]) => {
+    const requestSession = repositorySession
+    if (!isRepositorySessionCurrent(requestSession)) return
     if (!selectedProvider || !selectedModel) return
     const apiKey = apiKeys[selectedProvider]?.key
     if (!apiKey) return
@@ -85,20 +101,21 @@ export function useBatchOperations({
     // Semaphore-based concurrency limiter
     const queue = [...criticalHigh]
     const workers = Array.from({ length: Math.min(MAX_CONCURRENCY, queue.length) }, async () => {
-      while (queue.length > 0 && !abortRef.current) {
+      while (queue.length > 0 && !abortRef.current && isRepositorySessionCurrent(requestSession)) {
         const issue = queue.shift()!
         try {
           const content = await getFileContent(codeIndex, issue.file) ?? ''
+          if (!isRepositorySessionCurrent(requestSession)) return
           const result = await validateFinding(issue, content, {
             provider: selectedProvider,
             model: selectedModel.id,
             apiKey,
           })
-          if (abortRef.current) return
+          if (abortRef.current || !isRepositorySessionCurrent(requestSession)) return
           setValidationResults((prev) => new Map(prev).set(issue.id, result))
         } catch (err) {
           failed++
-          if (abortRef.current) return
+          if (abortRef.current || !isRepositorySessionCurrent(requestSession)) return
           setValidationResults((prev) =>
             new Map(prev).set(issue.id, {
               issueId: issue.id,
@@ -109,7 +126,7 @@ export function useBatchOperations({
           )
         } finally {
           completed++
-          if (abortRef.current) return
+          if (abortRef.current || !isRepositorySessionCurrent(requestSession)) return
           setValidationProgress((prev) => ({
             ...prev,
             completed,
@@ -120,22 +137,26 @@ export function useBatchOperations({
     })
 
     await Promise.all(workers)
-    if (abortRef.current) return
+    if (abortRef.current || !isRepositorySessionCurrent(requestSession)) return
     setValidationProgress((prev) => ({ ...prev, inProgress: false }))
-  }, [selectedProvider, selectedModel, apiKeys, codeIndex, validateFinding, setValidationResults])
+  }, [selectedProvider, selectedModel, apiKeys, codeIndex, validateFinding, setValidationResults, repositorySession, isRepositorySessionCurrent])
 
   // -----------------------------------------------------------------------
   // Batch fix generation (async — fetches content from contentStore)
   // -----------------------------------------------------------------------
 
   const batchGenerateFixes = useCallback(async (issues: CodeIssue[]) => {
+    const requestSession = repositorySession
+    if (!isRepositorySessionCurrent(requestSession)) return
     if (issues.length === 0) return
 
+    abortRef.current = false
     setFixProgress({ completed: 0, total: issues.length, failed: 0, inProgress: true })
 
     // Pre-fetch all unique file contents in one batch
     const uniquePaths = [...new Set(issues.map(i => i.file))]
     const contentMap = await codeIndex.contentStore.getBatch(uniquePaths)
+    if (abortRef.current || !isRepositorySessionCurrent(requestSession)) return
 
     let completed = 0
     let failed = 0
@@ -143,6 +164,7 @@ export function useBatchOperations({
     const idsWithFix = new Set<string>()
 
     for (const issue of issues) {
+      if (abortRef.current || !isRepositorySessionCurrent(requestSession)) return
       const content = codeIndex.files.get(issue.file)?.content ?? contentMap.get(issue.file) ?? null
       if (content) {
         const fix = generateFix(issue, content)
@@ -168,7 +190,7 @@ export function useBatchOperations({
     })
 
     setFixProgress({ completed, total: issues.length, failed, inProgress: false })
-  }, [codeIndex, generateFix, setFixCache, setShowFix])
+  }, [codeIndex, generateFix, setFixCache, setShowFix, repositorySession, isRepositorySessionCurrent])
 
   // -----------------------------------------------------------------------
   // Cancel

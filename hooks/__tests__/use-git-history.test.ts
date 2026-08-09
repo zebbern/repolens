@@ -49,6 +49,28 @@ describe('useGitHistory', () => {
     vi.clearAllMocks()
   })
 
+  it('suppresses success, error, and loading commits after the repository session changes', async () => {
+    const sessionA = { id: 1, signal: new AbortController().signal }
+    const sessionB = { id: 2, signal: new AbortController().signal }
+    let current = sessionA
+    let resolve!: (value: ReturnType<typeof makeCommit>[]) => void
+    mockFetchCommits.mockReturnValue(new Promise(done => { resolve = done }))
+    const { result, rerender } = renderHook(
+      ({ session }) => useGitHistory(session, candidate => candidate === current),
+      { initialProps: { session: sessionA } },
+    )
+
+    let pending!: Promise<void>
+    act(() => { pending = result.current.fetchCommits('owner', 'repo') })
+    current = sessionB
+    rerender({ session: sessionB })
+    resolve([makeCommit('stale')])
+    await act(async () => pending)
+
+    expect(result.current.commits).toEqual([])
+    expect(result.current.error).toBeNull()
+  })
+
   it('returns initial empty state', () => {
     const { result } = renderHook(() => useGitHistory())
 

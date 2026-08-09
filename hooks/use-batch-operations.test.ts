@@ -78,6 +78,7 @@ const MOCK_API_KEYS: APIKeysState = {
   ...EMPTY_API_KEYS,
   openai: { key: 'sk-test', isValid: null, lastValidated: null },
 }
+const DEFAULT_SESSION = { id: 1, signal: new AbortController().signal }
 
 describe('useBatchOperations', () => {
   let setFixCache: Mock<BatchOperationsOptions['setFixCache']>
@@ -98,6 +99,48 @@ describe('useBatchOperations', () => {
     )
   })
 
+  it('suppresses batch validation publication after a repository session switch', async () => {
+    const sessionA = { id: 1, signal: new AbortController().signal }
+    const sessionB = { id: 2, signal: new AbortController().signal }
+    let current = sessionA
+    let resolve!: (result: ValidationResult) => void
+    validateFinding.mockReturnValue(new Promise(done => { resolve = done }))
+    const { result } = renderBatchHook({
+      repositorySession: sessionA,
+      isRepositorySessionCurrent: (session: unknown) => session === current,
+    })
+    const issue = createIssue()
+
+    let pending!: Promise<void>
+    act(() => { pending = result.current.batchValidate([issue]) })
+    current = sessionB
+    resolve(createValidationResult(issue.id))
+    await act(async () => pending)
+
+    expect(setValidationResults).not.toHaveBeenCalled()
+  })
+
+  it('suppresses batch fix publication after a repository session switch', async () => {
+    const sessionA = { id: 1, signal: new AbortController().signal }
+    const sessionB = { id: 2, signal: new AbortController().signal }
+    let current = sessionA
+    let resolve!: (content: Map<string, string>) => void
+    codeIndex.contentStore.getBatch = vi.fn(() => new Promise<Map<string, string>>(done => { resolve = done }))
+    const { result } = renderBatchHook({
+      repositorySession: sessionA,
+      isRepositorySessionCurrent: (session: unknown) => session === current,
+    })
+
+    let pending!: Promise<void>
+    act(() => { pending = result.current.batchGenerateFixes([createIssue()]) })
+    current = sessionB
+    resolve(new Map([['src/utils.ts', 'eval(x)']]))
+    await act(async () => pending)
+
+    expect(setFixCache).not.toHaveBeenCalled()
+    expect(setShowFix).not.toHaveBeenCalled()
+  })
+
   function renderBatchHook(overrides: Record<string, unknown> = {}) {
     return renderHook(() =>
       useBatchOperations({
@@ -110,6 +153,8 @@ describe('useBatchOperations', () => {
         setFixCache,
         setShowFix,
         setValidationResults,
+        repositorySession: DEFAULT_SESSION,
+        isRepositorySessionCurrent: session => session === DEFAULT_SESSION,
         ...overrides,
       } as BatchOperationsOptions),
     )

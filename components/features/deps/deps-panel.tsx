@@ -31,8 +31,23 @@ export function DepsPanel({ codeIndex }: DepsPanelProps) {
   const { repositorySession } = useRepositoryData()
   const { getTabCache, setTabCache, isRepositorySessionCurrent } = useRepositoryActions()
 
+  useEffect(() => {
+    let cancelled = false
+    queueMicrotask(() => {
+      if (cancelled) return
+      setLoadState('idle')
+      setErrorMessage('')
+      setHealthData([])
+      setDepTypes(new Map())
+      setCveResults([])
+      setSelectedDep(null)
+    })
+    return () => { cancelled = true }
+  }, [repositorySession])
+
   const loadDependencies = useCallback(async () => {
     const session = repositorySession
+    if (!isRepositorySessionCurrent(session)) return
     setLoadState('loading')
     setErrorMessage('')
 
@@ -42,6 +57,7 @@ export function DepsPanel({ codeIndex }: DepsPanelProps) {
       // package yields a single row — otherwise React sees duplicate keys.
       const parsed = dedupeDependencies(parseDependencies(codeIndex))
       if (parsed.length === 0) {
+        if (!isRepositorySessionCurrent(session)) return
         setLoadState('empty')
         return
       }
@@ -51,6 +67,7 @@ export function DepsPanel({ codeIndex }: DepsPanelProps) {
       for (const p of parsed) {
         typeMap.set(p.name, p.type)
       }
+      if (!isRepositorySessionCurrent(session)) return
       setDepTypes(typeMap)
 
       // Step 2: Fetch npm metadata
@@ -66,6 +83,7 @@ export function DepsPanel({ codeIndex }: DepsPanelProps) {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ packages: parsed }),
         })
+        if (!isRepositorySessionCurrent(session)) return
         if (cveResponse.ok) {
           const osvResult = (await cveResponse.json()) as { results: CveResult[]; errors: string[] }
           if (!isRepositorySessionCurrent(session)) return
@@ -76,6 +94,7 @@ export function DepsPanel({ codeIndex }: DepsPanelProps) {
         // CVE lookup failure is non-fatal — continue without CVE data
         console.warn('[deps-panel] CVE lookup failed, continuing without vulnerability data')
       }
+      if (!isRepositorySessionCurrent(session)) return
       setCveResults(cves)
 
       // Step 4: Build CVE count per package
@@ -116,6 +135,7 @@ export function DepsPanel({ codeIndex }: DepsPanelProps) {
       setLoadState('loaded')
       setTabCache('deps', { healthData: results, depTypes: typeMap, cveResults: cves })
     } catch (err) {
+      if (!isRepositorySessionCurrent(session)) return
       const message = err instanceof Error ? err.message : String(err)
       console.error('[deps-panel] Failed to load dependencies:', message)
       setErrorMessage(message)

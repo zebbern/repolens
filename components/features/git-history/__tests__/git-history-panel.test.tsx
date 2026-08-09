@@ -14,10 +14,12 @@ vi.mock('@/providers', () => ({
   })),
   useRepositoryData: vi.fn(() => ({
     repo: { owner: 'test', name: 'repo', defaultBranch: 'main' },
+    repositorySession: { id: 1, signal: new AbortController().signal },
   })),
   useRepositoryActions: vi.fn(() => ({
     getTabCache: vi.fn(() => undefined),
     setTabCache: vi.fn(),
+    isRepositorySessionCurrent: vi.fn(() => true),
   })),
 }))
 
@@ -66,6 +68,7 @@ describe('GitHistoryPanel', () => {
     vi.mocked(useRepositoryActions).mockReturnValue({
       getTabCache: vi.fn(() => undefined),
       setTabCache: vi.fn(),
+      isRepositorySessionCurrent: vi.fn(() => true),
     } as unknown as ReturnType<typeof useRepositoryActions>)
   })
 

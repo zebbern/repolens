@@ -3,6 +3,7 @@
 import { useState, useMemo, useCallback } from "react"
 import type { BlameData, CommitDetail } from "@/types/git-history"
 import type { GitHubCommit } from "@/types/repository"
+import type { RepositorySession } from '@/providers/repository-provider'
 import {
   fetchBlameViaProxy,
   fetchCommitsViaProxy,
@@ -27,6 +28,7 @@ interface UseGitHistoryReturn {
   blameData: BlameData | null
   /** Repo-wide commit list */
   commits: GitHubCommit[]
+  commitsSession: RepositorySession | null
   /** Commits for a specific file */
   fileCommits: GitHubCommit[]
   /** Expanded commit detail */
@@ -64,10 +66,14 @@ interface UseGitHistoryReturn {
   hydrateCommits: (data: { commits: GitHubCommit[]; hasMore: boolean }) => void
 }
 
-export function useGitHistory(): UseGitHistoryReturn {
+export function useGitHistory(
+  repositorySession: RepositorySession | null = null,
+  isRepositorySessionCurrent: (session: RepositorySession | null) => boolean = () => true,
+): UseGitHistoryReturn {
   const [viewMode, setViewMode] = useState<GitHistoryView>('timeline')
   const [blameData, setBlameData] = useState<BlameData | null>(null)
   const [commits, setCommits] = useState<GitHubCommit[]>([])
+  const [commitsSession, setCommitsSession] = useState<RepositorySession | null>(null)
   const [fileCommits, setFileCommits] = useState<GitHubCommit[]>([])
   const [selectedCommit, setSelectedCommit] = useState<CommitDetail | null>(null)
   const [isLoading, setIsLoading] = useState(false)
@@ -91,12 +97,16 @@ export function useGitHistory(): UseGitHistoryReturn {
     ref: string,
     path: string,
   ) => {
+    const requestSession = repositorySession
+    if (!isRepositorySessionCurrent(requestSession)) return
     setIsLoading(true)
     setError(null)
     try {
       const data = await fetchBlameViaProxy(owner, name, ref, path)
+      if (!isRepositorySessionCurrent(requestSession)) return
       setBlameData(data)
     } catch (err) {
+      if (!isRepositorySessionCurrent(requestSession)) return
       const message = err instanceof Error ? err.message : 'Failed to load blame data'
       // Detect auth errors
       if (message.includes('401') || message.toLowerCase().includes('unauthorized') || message.toLowerCase().includes('authentication')) {
@@ -105,15 +115,17 @@ export function useGitHistory(): UseGitHistoryReturn {
         setError(message)
       }
     } finally {
-      setIsLoading(false)
+      if (isRepositorySessionCurrent(requestSession)) setIsLoading(false)
     }
-  }, [])
+  }, [repositorySession, isRepositorySessionCurrent])
 
   const fetchCommits = useCallback(async (
     owner: string,
     name: string,
     opts?: { sha?: string },
   ) => {
+    const requestSession = repositorySession
+    if (!isRepositorySessionCurrent(requestSession)) return
     setIsLoading(true)
     setError(null)
     try {
@@ -121,6 +133,7 @@ export function useGitHistory(): UseGitHistoryReturn {
         sha: opts?.sha,
         perPage: PER_PAGE,
       })
+      if (!isRepositorySessionCurrent(requestSession)) return
       if (opts?.sha) {
         // Paginated load — append (skip first since it's the sha itself)
         setCommits(prev => [...prev, ...data.slice(1)])
@@ -128,57 +141,68 @@ export function useGitHistory(): UseGitHistoryReturn {
         setCommits(data)
       }
       setHasMore(data.length >= PER_PAGE)
+      setCommitsSession(requestSession)
     } catch (err) {
+      if (!isRepositorySessionCurrent(requestSession)) return
       setError(err instanceof Error ? err.message : 'Failed to load commits')
     } finally {
-      setIsLoading(false)
+      if (isRepositorySessionCurrent(requestSession)) setIsLoading(false)
     }
-  }, [])
+  }, [repositorySession, isRepositorySessionCurrent])
 
   const fetchFileHistory = useCallback(async (
     owner: string,
     name: string,
     path: string,
   ) => {
+    const requestSession = repositorySession
+    if (!isRepositorySessionCurrent(requestSession)) return
     setIsLoading(true)
     setError(null)
     try {
       const data = await fetchFileCommitsViaProxy(owner, name, path, { perPage: PER_PAGE })
+      if (!isRepositorySessionCurrent(requestSession)) return
       setFileCommits(data)
     } catch (err) {
+      if (!isRepositorySessionCurrent(requestSession)) return
       setError(err instanceof Error ? err.message : 'Failed to load file history')
     } finally {
-      setIsLoading(false)
+      if (isRepositorySessionCurrent(requestSession)) setIsLoading(false)
     }
-  }, [])
+  }, [repositorySession, isRepositorySessionCurrent])
 
   const fetchCommitDetail = useCallback(async (
     owner: string,
     name: string,
     sha: string,
   ) => {
+    const requestSession = repositorySession
+    if (!isRepositorySessionCurrent(requestSession)) return
     setIsLoading(true)
     setError(null)
     try {
       const data = await fetchCommitDetailViaProxy(owner, name, sha)
+      if (!isRepositorySessionCurrent(requestSession)) return
       setSelectedCommit(data)
       setViewMode('commit-detail')
     } catch (err) {
+      if (!isRepositorySessionCurrent(requestSession)) return
       setError(err instanceof Error ? err.message : 'Failed to load commit details')
     } finally {
-      setIsLoading(false)
+      if (isRepositorySessionCurrent(requestSession)) setIsLoading(false)
     }
-  }, [])
+  }, [repositorySession, isRepositorySessionCurrent])
 
   const loadMoreCommits = useCallback(async (
     owner: string,
     name: string,
   ) => {
+    if (!isRepositorySessionCurrent(repositorySession)) return
     if (commits.length === 0 || !hasMore) return
     const lastSha = commits[commits.length - 1].sha
     setCurrentPage(prev => prev + 1)
     await fetchCommits(owner, name, { sha: lastSha })
-  }, [commits, hasMore, fetchCommits])
+  }, [commits, hasMore, fetchCommits, repositorySession, isRepositorySessionCurrent])
 
   const clearError = useCallback(() => {
     setError(null)
@@ -188,6 +212,7 @@ export function useGitHistory(): UseGitHistoryReturn {
     setViewMode('timeline')
     setBlameData(null)
     setCommits([])
+    setCommitsSession(null)
     setFileCommits([])
     setSelectedCommit(null)
     setIsLoading(false)
@@ -197,14 +222,17 @@ export function useGitHistory(): UseGitHistoryReturn {
   }, [])
 
   const hydrateCommits = useCallback((data: { commits: GitHubCommit[]; hasMore: boolean }) => {
+    if (!isRepositorySessionCurrent(repositorySession)) return
     setCommits(data.commits)
     setHasMore(data.hasMore)
-  }, [])
+    setCommitsSession(repositorySession)
+  }, [repositorySession, isRepositorySessionCurrent])
 
   return {
     viewMode,
     blameData,
     commits,
+    commitsSession,
     fileCommits,
     selectedCommit,
     isLoading,

@@ -41,14 +41,15 @@ const VIEW_TABS: Array<{ id: GitHistoryView; label: string; icon: typeof History
 
 export function GitHistoryPanel({ navigateToFile }: GitHistoryPanelProps) {
   const { selectedFilePath } = useApp()
-  const { repo } = useRepositoryData()
-  const { getTabCache, setTabCache } = useRepositoryActions()
+  const { repo, repositorySession } = useRepositoryData()
+  const { getTabCache, setTabCache, isRepositorySessionCurrent } = useRepositoryActions()
   const { data: session } = useSession()
 
   const {
     viewMode,
     blameData,
     commits,
+    commitsSession,
     fileCommits,
     selectedCommit,
     isLoading,
@@ -65,7 +66,7 @@ export function GitHistoryPanel({ navigateToFile }: GitHistoryPanelProps) {
     clearError,
     reset,
     hydrateCommits,
-  } = useGitHistory()
+  } = useGitHistory(repositorySession, isRepositorySessionCurrent)
 
   const owner = repo?.owner ?? ''
   const name = repo?.name ?? ''
@@ -81,16 +82,24 @@ export function GitHistoryPanel({ navigateToFile }: GitHistoryPanelProps) {
   // Reset when repo changes
   useEffect(() => {
     reset()
-  }, [owner, name, reset])
+    let cancelled = false
+    queueMicrotask(() => {
+      if (cancelled) return
+      setFileContent('')
+      setIsLoadingFile(false)
+    })
+    return () => { cancelled = true }
+  }, [repositorySession, reset])
 
   // Auto-load commits when timeline view is first loaded
   useEffect(() => {
     let cancelled = false
-    if (!owner || !name) return
+    const requestSession = repositorySession
+    if (!owner || !name || !isRepositorySessionCurrent(requestSession)) return
     if ((viewMode === 'timeline' || viewMode === 'insights') && commits.length === 0 && !isLoading) {
       const cached = getTabCache<{ commits: typeof commits; hasMore: boolean }>('gitHistory')
       if (cached && cached.commits.length > 0) {
-        hydrateCommits(cached)
+        if (isRepositorySessionCurrent(requestSession)) hydrateCommits(cached)
         return
       }
       fetchCommits(owner, name).then(() => {
@@ -98,19 +107,20 @@ export function GitHistoryPanel({ navigateToFile }: GitHistoryPanelProps) {
       })
     }
     return () => { cancelled = true }
-  }, [owner, name, viewMode]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [owner, name, viewMode, repositorySession]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Cache commits when they change
   useEffect(() => {
-    if (commits.length > 0) {
+    if (commits.length > 0 && commitsSession === repositorySession && isRepositorySessionCurrent(repositorySession)) {
       setTabCache('gitHistory', { commits, hasMore })
     }
-  }, [commits, hasMore, setTabCache])
+  }, [commits, hasMore, commitsSession, repositorySession, isRepositorySessionCurrent, setTabCache])
 
   // Auto-load blame & file history when file changes (or when navigated to)
   useEffect(() => {
     let cancelled = false
-    if (!owner || !name || !activeFile) return
+    const requestSession = repositorySession
+    if (!owner || !name || !activeFile || !isRepositorySessionCurrent(requestSession)) return
 
     if (viewMode === 'blame') {
       fetchBlame(owner, name, defaultBranch, activeFile)
@@ -120,15 +130,15 @@ export function GitHistoryPanel({ navigateToFile }: GitHistoryPanelProps) {
       })
       fetchFileViaProxy(owner, name, defaultBranch, activeFile)
         .then((content) => {
-          if (cancelled) return
+          if (cancelled || !isRepositorySessionCurrent(requestSession)) return
           setFileContent(content)
         })
         .catch(() => {
-          if (cancelled) return
+          if (cancelled || !isRepositorySessionCurrent(requestSession)) return
           setFileContent('')
         })
         .finally(() => {
-          if (cancelled) return
+          if (cancelled || !isRepositorySessionCurrent(requestSession)) return
           setIsLoadingFile(false)
         })
     }
@@ -137,7 +147,7 @@ export function GitHistoryPanel({ navigateToFile }: GitHistoryPanelProps) {
       fetchFileHistory(owner, name, activeFile)
     }
     return () => { cancelled = true }
-  }, [activeFile, viewMode, owner, name, defaultBranch]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [activeFile, viewMode, owner, name, defaultBranch, repositorySession]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // When navigateToFile is set, switch to blame view
   useEffect(() => {

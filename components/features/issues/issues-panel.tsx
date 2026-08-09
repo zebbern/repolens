@@ -53,12 +53,26 @@ export function IssuesPanel({ codeIndex, onNavigateToFile }: IssuesPanelProps) {
   const validatingIssuesRef = useRef(validatingIssues)
   validatingIssuesRef.current = validatingIssues
 
-  const { repo, codebaseAnalysis: analysis } = useRepositoryData()
-  const { getTabCache, setTabCache } = useRepositoryActions()
+  const { repo, codebaseAnalysis: analysis, repositorySession } = useRepositoryData()
+  const { getTabCache, setTabCache, isRepositorySessionCurrent } = useRepositoryActions()
   const { selectedProvider, selectedModel, apiKeys } = useAPIKeys()
 
   const [results, setResults] = useState<ScanResults | null>(null)
   const [scanLoading, setScanLoading] = useState(false)
+
+  useEffect(() => {
+    let cancelled = false
+    queueMicrotask(() => {
+      if (cancelled) return
+      setResults(null)
+      setScanLoading(false)
+      setFixCache(new Map())
+      setShowFix(new Set())
+      setValidationResults(new Map())
+      setValidatingIssues(new Set())
+    })
+    return () => { cancelled = true }
+  }, [repositorySession])
 
   useEffect(() => {
     if (codeIndex.totalFiles === 0) {
@@ -72,25 +86,26 @@ export function IssuesPanel({ codeIndex, onNavigateToFile }: IssuesPanelProps) {
       return
     }
 
+    const requestSession = repositorySession
     let stale = false
     setScanLoading(true)
 
     scanInWorker(codeIndex, analysis)
       .then(scanResults => {
-        if (stale) return
+        if (stale || !isRepositorySessionCurrent(requestSession)) return
         setResults(scanResults)
         setTabCache('issues', scanResults)
       })
       .catch(err => {
-        if (stale) return
+        if (stale || !isRepositorySessionCurrent(requestSession)) return
         console.warn('[issues-panel] Scanner failed', err)
       })
       .finally(() => {
-        if (!stale) setScanLoading(false)
+        if (!stale && isRepositorySessionCurrent(requestSession)) setScanLoading(false)
       })
 
     return () => { stale = true }
-  }, [codeIndex, analysis, getTabCache, setTabCache])
+  }, [codeIndex, analysis, getTabCache, setTabCache, repositorySession, isRepositorySessionCurrent])
 
   const {
     batchValidate,
@@ -109,9 +124,13 @@ export function IssuesPanel({ codeIndex, onNavigateToFile }: IssuesPanelProps) {
     setFixCache,
     setShowFix,
     setValidationResults,
+    repositorySession,
+    isRepositorySessionCurrent,
   })
 
   const handleShowFix = useCallback(async (issue: CodeIssue) => {
+    const requestSession = repositorySession
+    if (!isRepositorySessionCurrent(requestSession)) return
     setShowFix(prev => {
       const next = new Set(prev)
       if (next.has(issue.id)) { next.delete(issue.id); return next }
@@ -121,15 +140,18 @@ export function IssuesPanel({ codeIndex, onNavigateToFile }: IssuesPanelProps) {
 
     if (!fixCacheRef.current.has(issue.id)) {
       const content = await getFileContent(codeIndex, issue.file)
+      if (!isRepositorySessionCurrent(requestSession)) return
       if (content) {
         setFixCache(prev => new Map(prev).set(issue.id, generateFix(issue, content)))
       } else {
         setFixCache(prev => new Map(prev).set(issue.id, null))
       }
     }
-  }, [codeIndex])
+  }, [codeIndex, repositorySession, isRepositorySessionCurrent])
 
   const handleValidate = useCallback(async (issue: CodeIssue) => {
+    const requestSession = repositorySession
+    if (!isRepositorySessionCurrent(requestSession)) return
     if (validationResultsRef.current.has(issue.id) || validatingIssuesRef.current.has(issue.id)) return
     if (!selectedProvider || !selectedModel) return
     const apiKey = apiKeys[selectedProvider]?.key
@@ -138,26 +160,34 @@ export function IssuesPanel({ codeIndex, onNavigateToFile }: IssuesPanelProps) {
     setValidatingIssues(prev => new Set(prev).add(issue.id))
     try {
       const content = (await getFileContent(codeIndex, issue.file)) ?? ''
+      if (!isRepositorySessionCurrent(requestSession)) return
       const result = await validateFinding(issue, content, {
         provider: selectedProvider, model: selectedModel.id, apiKey,
       })
+      if (!isRepositorySessionCurrent(requestSession)) return
       setValidationResults(prev => new Map(prev).set(issue.id, result))
     } catch (err) {
+      if (!isRepositorySessionCurrent(requestSession)) return
       setValidationResults(prev => new Map(prev).set(issue.id, {
         issueId: issue.id, verdict: 'uncertain', confidence: 'low',
         reasoning: err instanceof Error ? err.message : 'Validation failed',
       }))
     } finally {
-      setValidatingIssues(prev => { const next = new Set(prev); next.delete(issue.id); return next })
+      if (isRepositorySessionCurrent(requestSession)) {
+        setValidatingIssues(prev => { const next = new Set(prev); next.delete(issue.id); return next })
+      }
     }
-  }, [selectedProvider, selectedModel, apiKeys, codeIndex])
+  }, [selectedProvider, selectedModel, apiKeys, codeIndex, repositorySession, isRepositorySessionCurrent])
 
   const handleCopyPrompt = useCallback(async (issue: CodeIssue) => {
+    const requestSession = repositorySession
+    if (!isRepositorySessionCurrent(requestSession)) return
     const ok = await copyToClipboard(buildFixPrompt(issue, repo ?? null))
+    if (!isRepositorySessionCurrent(requestSession)) return
     toast[ok ? 'success' : 'error'](
       ok ? 'AI fix prompt copied — paste it into your CLI agent' : 'Failed to copy — clipboard not available',
     )
-  }, [repo])
+  }, [repo, repositorySession, isRepositorySessionCurrent])
 
   const filteredIssues = useMemo(() => {
     if (!results) return []

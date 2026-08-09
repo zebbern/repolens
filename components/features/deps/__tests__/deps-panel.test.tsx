@@ -12,6 +12,13 @@ import type { NpmPackageMeta } from '@/lib/deps/types'
 const mockParseDependencies = vi.fn()
 const mockQueryOSV = vi.fn()
 const mockFetchDependencyMeta = vi.fn()
+const repositoryHarness = vi.hoisted(() => {
+  const harness = {
+    session: { id: 1, signal: new AbortController().signal },
+    isCurrent: (session: unknown) => session === harness.session,
+  }
+  return harness
+})
 
 vi.mock('@/lib/code/scanner/cve-lookup', () => ({
   parseDependencies: (...args: unknown[]) => mockParseDependencies(...args),
@@ -66,7 +73,6 @@ vi.mock('@/components/ui/tooltip', () => ({
 vi.mock('@/providers', () => {
   const getTabCache = vi.fn(() => undefined)
   const setTabCache = vi.fn()
-  const repositorySession = { id: 1, signal: new AbortController().signal }
   return {
     useRepository: () => ({
       getTabCache,
@@ -75,9 +81,9 @@ vi.mock('@/providers', () => {
     useRepositoryActions: () => ({
       getTabCache,
       setTabCache,
-      isRepositorySessionCurrent: (session: unknown) => session === repositorySession,
+      isRepositorySessionCurrent: repositoryHarness.isCurrent,
     }),
-    useRepositoryData: () => ({ repositorySession }),
+    useRepositoryData: () => ({ repositorySession: repositoryHarness.session }),
   }
 })
 
@@ -117,7 +123,24 @@ function makeMeta(name: string): NpmPackageMeta {
 describe('DepsPanel', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mockParseDependencies.mockReset()
+    mockFetchDependencyMeta.mockReset()
     mockQueryOSV.mockResolvedValue({ results: [], errors: [] })
+    repositoryHarness.session = { id: 1, signal: new AbortController().signal }
+  })
+
+  it('clears and rejects dependency publication when the session switches to an empty repository', async () => {
+    let resolve!: (value: Map<string, NpmPackageMeta>) => void
+    mockParseDependencies.mockReturnValue([{ name: 'react', version: '18.0.0', type: 'production' }])
+    mockFetchDependencyMeta.mockReturnValue(new Promise(done => { resolve = done }))
+    const { rerender } = render(<DepsPanel codeIndex={makeCodeIndex()} />)
+
+    repositoryHarness.session = { id: 2, signal: new AbortController().signal }
+    rerender(<DepsPanel codeIndex={makeCodeIndex(0)} />)
+    resolve(new Map([['react', makeMeta('react')]]))
+
+    await waitFor(() => expect(screen.queryByTestId('deps-summary')).not.toBeInTheDocument())
+    expect(screen.queryByTestId('deps-table')).not.toBeInTheDocument()
   })
 
   it('shows loading state while fetching', () => {

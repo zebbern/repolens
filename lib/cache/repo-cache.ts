@@ -103,9 +103,18 @@ async function evictLRU(db: IDBDatabase): Promise<void> {
 export async function getCachedRepo(
   owner: string,
   repo: string,
+  options: { signal?: AbortSignal } = {},
 ): Promise<CachedRepo | null> {
+  const throwIfAborted = () => {
+    if (options.signal?.aborted) {
+      throw options.signal.reason ?? new DOMException('The operation was aborted', 'AbortError')
+    }
+  }
+
   try {
+    throwIfAborted()
     const db = await openDB()
+    throwIfAborted()
     const entry: CachedRepo | null = await new Promise((resolve) => {
       const tx = db.transaction(STORE_NAME, 'readonly')
       const store = tx.objectStore(STORE_NAME)
@@ -114,6 +123,7 @@ export async function getCachedRepo(
       request.onsuccess = () => resolve(request.result ?? null)
       request.onerror = () => resolve(null)
     })
+    throwIfAborted()
 
     // Touch timestamp so LRU eviction keeps frequently-accessed repos
     if (entry) {
@@ -123,7 +133,8 @@ export async function getCachedRepo(
     }
 
     return entry
-  } catch {
+  } catch (error) {
+    if (options.signal?.aborted) throw error
     return null
   }
 }

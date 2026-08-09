@@ -175,16 +175,30 @@ function mapProxyUrlToGitHubApi(proxyUrl: string): DirectUrlMapping | null {
  * Fetch from the GitHub API directly with PAT authentication.
  * Handles JSON responses and common GitHub error codes.
  */
-async function directFetch(url: string, pat: string, timeoutMs?: number): Promise<unknown> {
+interface ProxyRequestOptions {
+  timeoutMs?: number
+  signal?: AbortSignal
+}
+
+function getRequestSignal(options: ProxyRequestOptions): AbortSignal | undefined {
+  const signals = [
+    options.signal,
+    options.timeoutMs ? AbortSignal.timeout(options.timeoutMs) : undefined,
+  ].filter((signal): signal is AbortSignal => signal !== undefined)
+
+  if (signals.length === 0) return undefined
+  if (signals.length === 1) return signals[0]
+  return AbortSignal.any(signals)
+}
+
+async function directFetch(url: string, pat: string, options: ProxyRequestOptions = {}): Promise<unknown> {
   const fetchOptions: RequestInit = {
     headers: {
       'Accept': 'application/vnd.github.v3+json',
       'Authorization': `Bearer ${pat}`,
     },
     redirect: 'error',
-  }
-  if (timeoutMs) {
-    fetchOptions.signal = AbortSignal.timeout(timeoutMs)
+    signal: getRequestSignal(options),
   }
   const response = await fetch(url, fetchOptions)
 
@@ -524,7 +538,7 @@ interface BlameGraphQLResponse {
  * When a PAT is available, bypasses the proxy to reduce latency.
  * When no PAT is set, falls back to the proxy routes (used by OAuth users).
  */
-async function proxyFetch<T>(url: string, timeoutMs?: number): Promise<T> {
+async function proxyFetch<T>(url: string, options: ProxyRequestOptions = {}): Promise<T> {
   if (!url.startsWith('/') || url.startsWith('//')) {
     throw new Error('proxyFetch only accepts relative URLs')
   }
@@ -536,15 +550,15 @@ async function proxyFetch<T>(url: string, timeoutMs?: number): Promise<T> {
   if (pat) {
     const mapping = mapProxyUrlToGitHubApi(url)
     if (mapping && mapping.endpoint !== 'file') {
-      const raw = await directFetch(mapping.url, pat, timeoutMs)
+      const raw = await directFetch(mapping.url, pat, options)
       return normalizeDirectResponse<T>(raw, mapping.endpoint)
     }
   }
 
   // Proxy mode: no PAT or unrecognized path — use proxy routes
-  const fetchOptions: RequestInit = { headers: buildProxyHeaders() }
-  if (timeoutMs) {
-    fetchOptions.signal = AbortSignal.timeout(timeoutMs)
+  const fetchOptions: RequestInit = {
+    headers: buildProxyHeaders(),
+    signal: getRequestSignal(options),
   }
   const response = await fetch(url, fetchOptions)
 
@@ -569,7 +583,7 @@ async function cachedProxyFetch<T>(
   cacheKey: string,
   url: string,
   ttl: number,
-  timeoutMs?: number,
+  options: ProxyRequestOptions = {},
 ): Promise<T> {
   // 1. Fresh cache hit — return immediately
   const fresh = getCached<T>(cacheKey)
@@ -579,16 +593,22 @@ async function cachedProxyFetch<T>(
   const stale = getStale<T>(cacheKey)
   if (stale !== null && stale.isStale) {
     // Fire-and-forget background revalidation
-    proxyFetch<T>(url, timeoutMs)
-      .then((data) => setCache(cacheKey, data, ttl))
+    proxyFetch<T>(url, options)
+      .then((data) => {
+        if (!options.signal?.aborted) setCache(cacheKey, data, ttl)
+      })
       .catch((err) => {
+        if (options.signal?.aborted) return
         console.warn('[cachedProxyFetch] Background revalidation failed:', cacheKey, err)
       })
     return stale.data
   }
 
   // 3. Cache miss — fetch, cache, return
-  const data = await proxyFetch<T>(url, timeoutMs)
+  const data = await proxyFetch<T>(url, options)
+  if (options.signal?.aborted) {
+    throw options.signal.reason ?? new DOMException('The operation was aborted', 'AbortError')
+  }
   setCache(cacheKey, data, ttl)
   return data
 }
@@ -603,10 +623,11 @@ async function cachedProxyFetch<T>(
 export async function fetchRepoViaProxy(
   owner: string,
   name: string,
+  options: { signal?: AbortSignal } = {},
 ): Promise<GitHubRepo> {
   const key = `repo:${owner}/${name}`
   const url = `/api/github/repo?owner=${encodeURIComponent(owner)}&name=${encodeURIComponent(name)}`
-  return cachedProxyFetch<GitHubRepo>(key, url, CACHE_TTL_REPO_META)
+  return cachedProxyFetch<GitHubRepo>(key, url, CACHE_TTL_REPO_META, options)
 }
 
 /**
@@ -616,10 +637,11 @@ export async function fetchTreeViaProxy(
   owner: string,
   name: string,
   sha: string = "HEAD",
+  options: { signal?: AbortSignal } = {},
 ): Promise<RepoTree> {
   const key = `tree:${owner}/${name}:${sha}`
   const url = `/api/github/tree?owner=${encodeURIComponent(owner)}&name=${encodeURIComponent(name)}&sha=${encodeURIComponent(sha)}`
-  return cachedProxyFetch<RepoTree>(key, url, CACHE_TTL_TREE)
+  return cachedProxyFetch<RepoTree>(key, url, CACHE_TTL_TREE, options)
 }
 
 /**
@@ -630,13 +652,16 @@ export async function fetchFileViaProxy(
   name: string,
   branch: string,
   path: string,
-  options?: { timeoutMs?: number },
+  options: ProxyRequestOptions = {},
 ): Promise<string> {
   const key = `file:${owner}/${name}:${branch}:${path}`
   const url = `/api/github/file?owner=${encodeURIComponent(owner)}&name=${encodeURIComponent(name)}&branch=${encodeURIComponent(branch)}&path=${encodeURIComponent(path)}`
 
   // File content returns { content: string } — unwrap after caching the raw response
-  const data = await cachedProxyFetch<{ content: string }>(key, url, CACHE_TTL_FILE, options?.timeoutMs ?? 15_000)
+  const data = await cachedProxyFetch<{ content: string }>(key, url, CACHE_TTL_FILE, {
+    ...options,
+    timeoutMs: options.timeoutMs ?? 15_000,
+  })
   return data.content
 }
 

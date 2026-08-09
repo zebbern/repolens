@@ -79,6 +79,31 @@ export function ChangelogViewer({ className }: ChangelogViewerProps) {
   const [commitFetchError, setCommitFetchError] = useState<string | null>(null)
   const [isFetchingCommits, setIsFetchingCommits] = useState(false)
 
+  const repoKey = repo?.fullName
+  const previousRepoKeyRef = useRef(repoKey)
+  const repoSessionRef = useRef(0)
+  useEffect(() => {
+    if (previousRepoKeyRef.current === repoKey) return
+    previousRepoKeyRef.current = repoKey
+    repoSessionRef.current += 1
+    let cancelled = false
+    queueMicrotask(() => {
+      if (cancelled) return
+      setSelectedPreset(null)
+      setCustomPrompt('')
+      setRefSource('tags')
+      setFromRef('')
+      setToRef('')
+      setTags([])
+      setBranches([])
+      setRefsLoading(false)
+      setRefsError(null)
+      setCommitFetchError(null)
+      setIsFetchingCommits(false)
+    })
+    return () => { cancelled = true }
+  }, [repoKey])
+
   const isMobile = useIsMobile()
   const activeChangelog = generatedChangelogs.find(c => c.id === activeChangelogId)
   const contentRef = useRef<HTMLDivElement>(null)
@@ -145,11 +170,17 @@ export function ChangelogViewer({ className }: ChangelogViewerProps) {
     if (!hasValidKey || !repo || !fromRef || !toRef) return
     if (preset.id === 'custom' && !customPrompt.trim()) { setSelectedPreset('custom'); return }
 
+    const requestRepoKey = repo.fullName
+    const requestRepoSession = repoSessionRef.current
     setSelectedPreset(preset.id)
     setCommitFetchError(null)
     setIsFetchingCommits(true)
     try {
       const comparison = await fetchCompareViaProxy(repo.owner, repo.name, fromRef, toRef)
+      if (
+        previousRepoKeyRef.current !== requestRepoKey
+        || repoSessionRef.current !== requestRepoSession
+      ) return
       const commitSummary = comparison.commits
         .map(c => `- ${c.sha.slice(0, 7)} ${c.message.split('\n')[0]} (${c.authorName})`)
         .join('\n')
@@ -164,6 +195,10 @@ export function ChangelogViewer({ className }: ChangelogViewerProps) {
       setIsFetchingCommits(false)
       handleGenerate(preset, fromRef, toRef, customPrompt, commitData, QUALITY_STEPS[qualityLevel], Array.from(activeSkills))
     } catch (err) {
+      if (
+        previousRepoKeyRef.current !== requestRepoKey
+        || repoSessionRef.current !== requestRepoSession
+      ) return
       setIsFetchingCommits(false)
       setCommitFetchError(err instanceof Error ? err.message : 'Failed to fetch commit data for the selected range.')
     }

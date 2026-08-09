@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { act, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 
 // ---------- Module mocks (must be before component import) ----------
@@ -248,6 +248,27 @@ function makeSavedDoc(overrides: Partial<{ id: string; type: string; title: stri
 describe('DocViewer', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+  })
+
+  it('clears repository-derived draft state when the repository changes', async () => {
+    const user = userEvent.setup()
+    setupMocks()
+    const { rerender } = render(<DocViewer />)
+
+    await user.click(screen.getByText('Custom Prompt'))
+    await user.type(screen.getByLabelText('Custom documentation prompt'), 'Explain repository A')
+    expect(screen.getByLabelText('Custom documentation prompt')).toHaveValue('Explain repository A')
+
+    setupMocks({
+      repo: { ...defaultRepoValue.repo, fullName: 'test/repo-b', name: 'repo-b' },
+      files: [{ name: 'b.ts', path: 'b.ts', type: 'file' }],
+    })
+    await act(async () => {
+      rerender(<DocViewer />)
+      await Promise.resolve()
+    })
+
+    expect(screen.queryByLabelText('Custom documentation prompt')).not.toBeInTheDocument()
   })
 
   // ================================================================

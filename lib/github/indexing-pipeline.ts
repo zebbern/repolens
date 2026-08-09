@@ -66,6 +66,7 @@ export async function startIndexing(
     const fetchQueue = new FetchQueue({
       fetchFn: (path) => fetchFileViaProxy(
         repoData.owner, repoData.name, repoData.defaultBranch, path,
+        { signal },
       ),
       concurrency: CONCURRENCY_LIMIT,
       onProgress: (stats) => setIndexingProgress({
@@ -135,6 +136,7 @@ export async function startIndexing(
       await streamUnzipFiles(
         response,
         (path, content) => {
+          if (signal.aborted) return
           const filename = path.split('/').pop() || path
           accumulated.push({ path, content, language: detectLanguage(filename) })
 
@@ -186,12 +188,14 @@ export async function startIndexing(
             repoData.name,
             repoData.defaultBranch,
             file.path,
+            { signal },
           )
 
           if (signal.aborted) return
 
           accumulated.push({ path: file.path, content, language: file.language })
         } catch (err) {
+          if (signal.aborted) return
           const message = err instanceof Error ? err.message : 'Unknown error'
           errors.push({ path: file.path, error: message })
         }

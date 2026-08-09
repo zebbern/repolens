@@ -19,9 +19,9 @@ import { buildFileTreeString } from "@/lib/github/fetcher"
 import { downloadFile } from "@/lib/export"
 import { buildStructuralIndex } from "@/lib/ai/structural-index"
 import { getMaxIndexBytesForModel } from "@/lib/ai/providers"
-import { handleToolCall } from "@/lib/ai/tool-call-handler"
+import { handleToolCall, type AddToolOutputFn } from "@/lib/ai/tool-call-handler"
 import { executeToolLocally, type ToolExecutorOptions } from "@/lib/ai/client-tool-executor"
-import type { ToolCallInfo, AddToolOutputFn } from "@/lib/ai/tool-call-handler"
+import type { ToolCallInfo } from "@/lib/ai/tool-call-handler"
 import type { CodeIndex } from "@/lib/code/code-index"
 import type { PinnedContentsResult } from "@/types/types"
 import type { Tour } from "@/types/tours"
@@ -98,13 +98,24 @@ export function ChatSidebar({ className, onCollapse }: { className?: string; onC
 
   const repoRef = useRef(repo)
   useEffect(() => { repoRef.current = repo }, [repo])
+  const repoKey = repo?.fullName
+  const repoSessionRef = useRef(0)
 
   const githubTokenRef = useRef(githubToken)
   useEffect(() => { githubTokenRef.current = githubToken }, [githubToken])
 
   // Wrap tool call handler to intercept generateTour results
   const handleToolCallWithTourCapture = useMemo(() => {
-    return async (toolCall: ToolCallInfo, addOutput: AddToolOutputFn, indexRef: React.MutableRefObject<CodeIndex | null>, filePathsRef: React.MutableRefObject<string[]>) => {
+    return async (
+      toolCall: ToolCallInfo,
+      addOutput: AddToolOutputFn,
+      indexRef: React.MutableRefObject<CodeIndex | null>,
+      filePathsRef: React.MutableRefObject<string[]>,
+      repoSession: number,
+    ) => {
+      const addOutputIfCurrent: AddToolOutputFn = output => {
+        if (repoSessionRef.current === repoSession) addOutput(output)
+      }
       // Construct tool executor options from current refs
       const currentRepo = repoRef.current
       const toolOptions: ToolExecutorOptions = {
@@ -140,6 +151,7 @@ export function ChatSidebar({ className, onCollapse }: { className?: string; onC
             filePathsRef.current,
             toolOptions,
           )
+          if (repoSessionRef.current !== repoSession) return
           const parsed = JSON.parse(resultStr)
           if (parsed.tour && !parsed.error) {
             const tour = parsed.tour as Tour
@@ -147,13 +159,13 @@ export function ChatSidebar({ className, onCollapse }: { className?: string; onC
             startTourRef.current(tour)
             toast.success(`Tour created: ${tour.name}`)
           }
-          addOutput({
+          addOutputIfCurrent({
             tool: toolCall.toolName as never,
             toolCallId: toolCall.toolCallId,
             output: resultStr,
           })
         } catch (err) {
-          addOutput({
+          addOutputIfCurrent({
             state: 'output-error' as const,
             tool: toolCall.toolName as never,
             toolCallId: toolCall.toolCallId,
@@ -162,7 +174,7 @@ export function ChatSidebar({ className, onCollapse }: { className?: string; onC
         }
         return
       }
-      await handleToolCall(toolCall, addOutput, indexRef, filePathsRef.current, toolOptions)
+      await handleToolCall(toolCall, addOutputIfCurrent, indexRef, filePathsRef.current, toolOptions)
     }
   }, [])
 
@@ -173,16 +185,35 @@ export function ChatSidebar({ className, onCollapse }: { className?: string; onC
     [],
   )
 
-  const { messages, sendMessage, addToolOutput, status, error, stop } = useChat({
+  const { messages, sendMessage, addToolOutput, status, error, stop, setMessages } = useChat({
     transport,
     id: 'codedoc-chat',
 
-    onToolCall: async ({ toolCall }): Promise<void> => handleToolCallWithTourCapture(toolCall, addToolOutput, codeIndexRef, allFilePathsRef),
+    onToolCall: async ({ toolCall }): Promise<void> => handleToolCallWithTourCapture(
+      toolCall,
+      addToolOutput,
+      codeIndexRef,
+      allFilePathsRef,
+      repoSessionRef.current,
+    ),
 
     sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithToolCalls,
   })
 
   const isLoading = status === 'streaming' || status === 'submitted'
+
+  const previousRepoKeyRef = useRef(repoKey)
+  useEffect(() => {
+    if (previousRepoKeyRef.current !== repoKey) {
+      repoSessionRef.current += 1
+      stop()
+      setMessages([])
+      setInput('')
+      setAttachedImages([])
+      setPinnedResult({ content: '', fileCount: 0, totalBytes: 0, skipped: [] })
+    }
+    previousRepoKeyRef.current = repoKey
+  }, [repoKey, setMessages, stop])
 
   // Extract cumulative token usage from the last assistant message metadata
   const tokenUsage = useMemo(() => {

@@ -94,7 +94,8 @@ export function RepositoryProvider({ children }: { children: ReactNode }) {
   const codeIndexRef = useRef(codeIndex)
   useEffect(() => { codeIndexRef.current = codeIndex }, [codeIndex])
   const [indexingProgress, setIndexingProgress] = useState<IndexingProgress>(DEFAULT_INDEXING_PROGRESS)
-  const indexingAbortRef = useRef<AbortController | null>(null)
+  const connectionEpochRef = useRef(0)
+  const connectionAbortRef = useRef<AbortController | null>(null)
   const [searchState, setSearchState] = useState<SearchState>(DEFAULT_SEARCH_STATE)
   const [modifiedContents, setModifiedContents] = useState<Map<string, string>>(new Map())
   const [codebaseAnalysis, setCodebaseAnalysis] = useState<FullAnalysis | null>(null)
@@ -109,6 +110,45 @@ export function RepositoryProvider({ children }: { children: ReactNode }) {
 
   const { token: githubToken } = useGitHubToken()
 
+  const isCurrentConnection = useCallback((epoch: number, controller: AbortController) => (
+    connectionEpochRef.current === epoch
+    && connectionAbortRef.current === controller
+    && !controller.signal.aborted
+  ), [])
+
+  const resetRepositoryState = useCallback((next: {
+    isLoading: boolean
+    loadingStage: LoadingStage
+  }) => {
+    fetchQueueRef.current = null
+    tabCacheRef.current = {}
+
+    const emptyIndex = createEmptyIndex()
+    codeIndexRef.current = emptyIndex
+    setRepo(null)
+    setFiles([])
+    setParsedFiles(new Map())
+    setIsLoading(next.isLoading)
+    setError(null)
+    setCodeIndex(emptyIndex)
+    setIndexingProgress(DEFAULT_INDEXING_PROGRESS)
+    setSearchState(DEFAULT_SEARCH_STATE)
+    setModifiedContents(new Map())
+    setCodebaseAnalysis(null)
+    setFailedFiles([])
+    setIsCacheHit(false)
+    setLoadingStage(next.loadingStage)
+    setPinnedFiles(new Map())
+    setContentAvailability('full')
+    setContentLoadingStats(DEFAULT_CONTENT_LOADING_STATS)
+  }, [])
+
+  useEffect(() => () => {
+    connectionEpochRef.current += 1
+    connectionAbortRef.current?.abort()
+    connectionAbortRef.current = null
+  }, [])
+
   // Helper: get file content from modifiedContents first, then codeIndex, then contentStore
   const getFileContent = useCallback(async (path: string): Promise<string | null> => {
     if (modifiedContents.has(path)) return modifiedContents.get(path)!
@@ -122,7 +162,11 @@ export function RepositoryProvider({ children }: { children: ReactNode }) {
     if (codeIndex.contentStore instanceof LazyContentStore) {
       const fq = codeIndex.contentStore.getFetchQueue()
       fetchQueueRef.current = fq
-      queueMicrotask(() => setContentAvailability('metadata-only'))
+      let cancelled = false
+      queueMicrotask(() => {
+        if (!cancelled) setContentAvailability('metadata-only')
+      })
+      return () => { cancelled = true }
     } else {
       fetchQueueRef.current = null
     }
@@ -146,36 +190,33 @@ export function RepositoryProvider({ children }: { children: ReactNode }) {
     repoData: GitHubRepo,
     fileTree: FileNode[],
     treeSha: string,
-    signal: AbortSignal,
+    epoch: number,
+    controller: AbortController,
     options: { token?: string } = {},
   ) => {
-    return runIndexingPipeline(repoData, fileTree, treeSha, signal, {
-      setIndexingProgress,
-      setLoadingStage,
-      setCodeIndex,
-      setFailedFiles,
+    const commitIfCurrent = (commit: () => void) => {
+      if (isCurrentConnection(epoch, controller)) commit()
+    }
+
+    return runIndexingPipeline(repoData, fileTree, treeSha, controller.signal, {
+      setIndexingProgress: value => commitIfCurrent(() => setIndexingProgress(value)),
+      setLoadingStage: value => commitIfCurrent(() => setLoadingStage(value)),
+      setCodeIndex: value => commitIfCurrent(() => {
+        codeIndexRef.current = value
+        setCodeIndex(value)
+      }),
+      setFailedFiles: value => commitIfCurrent(() => setFailedFiles(value)),
     }, options)
-  }, [])
+  }, [isCurrentConnection])
 
   const connectRepository = useCallback(async (url: string): Promise<boolean> => {
-    // Abort any existing indexing
-    if (indexingAbortRef.current) {
-      indexingAbortRef.current.abort()
-    }
-    // Clean up existing FetchQueue reference
-    fetchQueueRef.current = null
-    
-    setIsLoading(true)
-    setError(null)
-    setCodeIndex(createEmptyIndex())
-    setContentAvailability('full')
-    setContentLoadingStats(DEFAULT_CONTENT_LOADING_STATS)
-    setIndexingProgress(DEFAULT_INDEXING_PROGRESS)
-    setFailedFiles([])
-    tabCacheRef.current = {}
-    setIsCacheHit(false)
-    setCodebaseAnalysis(null)
-    setLoadingStage('metadata')
+    connectionAbortRef.current?.abort()
+    const epoch = connectionEpochRef.current + 1
+    connectionEpochRef.current = epoch
+    const controller = new AbortController()
+    connectionAbortRef.current = controller
+
+    resetRepositoryState({ isLoading: true, loadingStage: 'metadata' })
 
     try {
       // Parse the URL
@@ -187,12 +228,14 @@ export function RepositoryProvider({ children }: { children: ReactNode }) {
       const { owner, repo: repoName } = parsed
 
       // Fetch repository metadata
-      const repoData = await fetchRepoViaProxy(owner, repoName)
+      const repoData = await fetchRepoViaProxy(owner, repoName, { signal: controller.signal })
+      if (!isCurrentConnection(epoch, controller)) return false
       setRepo(repoData)
 
       // Fetch file tree
       setLoadingStage('tree')
-      const tree = await fetchTreeViaProxy(owner, repoName, repoData.defaultBranch)
+      const tree = await fetchTreeViaProxy(owner, repoName, repoData.defaultBranch, { signal: controller.signal })
+      if (!isCurrentConnection(epoch, controller)) return false
       const fileTree = buildFileTree(tree)
       setFiles(fileTree)
       setLoadingStage('tree-ready')
@@ -200,7 +243,8 @@ export function RepositoryProvider({ children }: { children: ReactNode }) {
       setIsLoading(false)
 
       // B2: Check IndexedDB cache before indexing
-      const cached = await getCachedRepo(owner, repoName)
+      const cached = await getCachedRepo(owner, repoName, { signal: controller.signal })
+      if (!isCurrentConnection(epoch, controller)) return false
       if (cached && cached.sha === tree.sha) {
         // Cache hit — hydrate code index from cached data
         const useIDB = repoData.size != null && repoData.size >= getIdbThresholdKB()
@@ -208,6 +252,7 @@ export function RepositoryProvider({ children }: { children: ReactNode }) {
           ? createEmptyIndexWithStore(new IDBContentStore(`${owner}/${repoName}`))
           : createEmptyIndex()
         const index = batchIndexFiles(baseIndex, cached.files)
+        codeIndexRef.current = index
         setCodeIndex(index)
         setIndexingProgress({
           current: cached.files.length,
@@ -220,58 +265,52 @@ export function RepositoryProvider({ children }: { children: ReactNode }) {
       }
       
       // Start indexing immediately in background
-      const abortController = new AbortController()
-      indexingAbortRef.current = abortController
-      startIndexing(repoData, fileTree, tree.sha, abortController.signal, { token: githubToken ?? undefined })
+      void startIndexing(repoData, fileTree, tree.sha, epoch, controller, { token: githubToken ?? undefined })
+        .catch(err => {
+          if (!isCurrentConnection(epoch, controller)) return
+          const message = err instanceof Error ? err.message : 'Failed to index repository'
+          setError(message)
+          setIndexingProgress(DEFAULT_INDEXING_PROGRESS)
+          setLoadingStage('tree-ready')
+        })
       
       return true
     } catch (err) {
+      if (!isCurrentConnection(epoch, controller)) return false
       const message = err instanceof Error ? err.message : 'Failed to connect repository'
       setError(message)
       setIsLoading(false)
       setLoadingStage('idle')
       return false
     }
-  }, [startIndexing, githubToken])
+  }, [githubToken, isCurrentConnection, resetRepositoryState, startIndexing])
 
   const disconnectRepository = useCallback(() => {
-    // Abort any ongoing indexing
-    if (indexingAbortRef.current) {
-      indexingAbortRef.current.abort()
-      indexingAbortRef.current = null
-    }
-    // Clean up FetchQueue for lazy repos
-    fetchQueueRef.current = null
-    
-    setRepo(null)
-    setFiles([])
-    setParsedFiles(new Map())
-    setCodeIndex(createEmptyIndex())
-    setIndexingProgress(DEFAULT_INDEXING_PROGRESS)
-    setError(null)
-    setSearchState(DEFAULT_SEARCH_STATE)
-    setModifiedContents(new Map())
-    setCodebaseAnalysis(null)
-    setFailedFiles([])
-    setIsCacheHit(false)
-    setLoadingStage('idle')
-    setPinnedFiles(new Map())
-    setContentAvailability('full')
-    setContentLoadingStats(DEFAULT_CONTENT_LOADING_STATS)
-    tabCacheRef.current = {}
-  }, [])
+    connectionEpochRef.current += 1
+    connectionAbortRef.current?.abort()
+    connectionAbortRef.current = null
+    resetRepositoryState({ isLoading: false, loadingStage: 'idle' })
+  }, [resetRepositoryState])
   
   const updateCodeIndex = useCallback((index: CodeIndex) => {
+    codeIndexRef.current = index
     setCodeIndex(index)
   }, [])
   
   const loadFileContent = useCallback(async (path: string): Promise<string | null> => {
+    const epoch = connectionEpochRef.current
+    const controller = connectionAbortRef.current
+    const requestIsCurrent = () => (
+      controller !== null && isCurrentConnection(epoch, controller)
+    )
+
     // B4: Check code index first before hitting the network
     const existingFile = codeIndex?.files?.get(path)
     if (existingFile?.content) return existingFile.content
 
     // Check contentStore (covers IDB-backed repos)
     const storedContent = await codeIndex.contentStore.get(path)
+    if (!requestIsCurrent()) return null
     if (storedContent) return storedContent
 
     // Lazy repo: file exists in index with empty content — fetch on demand with critical priority
@@ -279,6 +318,7 @@ export function RepositoryProvider({ children }: { children: ReactNode }) {
       try {
         const fq = codeIndex.contentStore.getFetchQueue()
         const content = await fq.enqueue(path, 'critical')
+        if (!requestIsCurrent()) return null
         // Update IndexedFile content in-place for subsequent sync access
         existingFile.content = content
         existingFile.lineCount = content.split('\n').length
@@ -286,22 +326,30 @@ export function RepositoryProvider({ children }: { children: ReactNode }) {
         codeIndex.contentStore.put(path, content)
         return content
       } catch (err) {
-        if (err instanceof DOMException && err.name === 'AbortError') return null
+        if (!requestIsCurrent() || (err instanceof DOMException && err.name === 'AbortError')) return null
         console.error('Failed to lazy-load file content:', err)
         return null
       }
     }
 
-    if (!repo) return null
+    if (!repo || controller === null) return null
 
     try {
-      const content = await fetchFileViaProxy(repo.owner, repo.name, repo.defaultBranch, path)
+      const content = await fetchFileViaProxy(
+        repo.owner,
+        repo.name,
+        repo.defaultBranch,
+        path,
+        { signal: controller.signal },
+      )
+      if (!requestIsCurrent()) return null
       return content
     } catch (err) {
+      if (!requestIsCurrent()) return null
       console.error('Failed to load file content:', err)
       return null
     }
-  }, [repo, codeIndex, contentAvailability])
+  }, [repo, codeIndex, contentAvailability, isCurrentConnection])
 
   const getFileByPath = useCallback((path: string): FileNode | null => {
     function findNode(nodes: FileNode[], targetPath: string): FileNode | null {
@@ -348,6 +396,9 @@ export function RepositoryProvider({ children }: { children: ReactNode }) {
   // overlay, parsed files and pins. Returns the number of renames applied.
   const renameFiles = useCallback(async (renames: FileRename[]): Promise<number> => {
     if (renames.length === 0) return 0
+    const epoch = connectionEpochRef.current
+    const controller = connectionAbortRef.current
+    if (controller === null || !isCurrentConnection(epoch, controller)) return 0
     const renameMap = new Map(renames.map(r => [r.from, r.to]))
     const basename = (p: string) => p.split('/').pop() || p
 
@@ -384,9 +435,11 @@ export function RepositoryProvider({ children }: { children: ReactNode }) {
     const store = codeIndexRef.current.contentStore
     await Promise.all(renames.map(async ({ from, to }) => {
       const content = store.getSync(from) ?? (await store.get(from))
+      if (!isCurrentConnection(epoch, controller)) return
       if (content != null) store.put(to, content)
       store.delete(from)
     }))
+    if (!isCurrentConnection(epoch, controller)) return 0
 
     // 4. Re-key exact-path maps (edits + parsed cache) and pins.
     const rekeyExact = <T,>(prev: Map<string, T>): Map<string, T> => {
@@ -414,7 +467,7 @@ export function RepositoryProvider({ children }: { children: ReactNode }) {
     })
 
     return renames.length
-  }, [])
+  }, [isCurrentConnection])
 
   const getTabCache = useCallback(<T,>(key: string): T | undefined => {
     return tabCacheRef.current[key] as T | undefined
@@ -511,14 +564,39 @@ export function RepositoryProvider({ children }: { children: ReactNode }) {
       !indexingProgress.isComplete ||
       codeIndex.contentStore instanceof LazyContentStore
     ) {
-      queueMicrotask(() => setCodebaseAnalysis(null))
-      return
+      let cancelled = false
+      queueMicrotask(() => {
+        if (!cancelled) setCodebaseAnalysis(null)
+      })
+      return () => { cancelled = true }
     }
+    const epoch = connectionEpochRef.current
+    const controller = connectionAbortRef.current
+    let cancelled = false
     const timer = setTimeout(() => {
-      analyzeCodebase(codeIndex).then(setCodebaseAnalysis)
+      void analyzeCodebase(codeIndex).then(analysis => {
+        if (
+          !cancelled
+          && controller !== null
+          && isCurrentConnection(epoch, controller)
+        ) {
+          setCodebaseAnalysis(analysis)
+        }
+      }).catch(() => {
+        if (
+          !cancelled
+          && controller !== null
+          && isCurrentConnection(epoch, controller)
+        ) {
+          setCodebaseAnalysis(null)
+        }
+      })
     }, 50)
-    return () => clearTimeout(timer)
-  }, [codeIndex, indexingProgress.isComplete])
+    return () => {
+      cancelled = true
+      clearTimeout(timer)
+    }
+  }, [codeIndex, indexingProgress.isComplete, isCurrentConnection])
 
   const dataValue = useMemo<RepositoryDataContextType>(() => ({
     repo, files, parsedFiles, codeIndex, codebaseAnalysis, failedFiles, isCacheHit,

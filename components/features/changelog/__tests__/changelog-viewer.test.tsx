@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen } from '@testing-library/react'
 import React from 'react'
 
 // ---------------------------------------------------------------------------
@@ -72,7 +72,26 @@ vi.mock('../changelog-helpers', () => ({
 }))
 
 vi.mock('../new-changelog-view', () => ({
-  NewChangelogView: vi.fn(() => React.createElement('div', { 'data-testid': 'new-changelog-view' }, 'New Changelog Form')),
+  NewChangelogView: vi.fn((props: {
+    customPrompt: string
+    setCustomPrompt: (value: string) => void
+    activeSkills: Set<string>
+    onSkillToggle: (id: string) => void
+  }) => React.createElement(
+    'div',
+    { 'data-testid': 'new-changelog-view' },
+    React.createElement('span', null, 'New Changelog Form'),
+    React.createElement('input', {
+      'aria-label': 'changelog draft',
+      value: props.customPrompt,
+      onChange: (event: React.ChangeEvent<HTMLInputElement>) => props.setCustomPrompt(event.target.value),
+    }),
+    React.createElement('span', null, `skills:${props.activeSkills.size}`),
+    React.createElement('button', {
+      type: 'button',
+      onClick: () => props.onSkillToggle('release-notes'),
+    }, 'toggle skill'),
+  )),
 }))
 
 import { ChangelogViewer } from '../changelog-viewer'
@@ -132,5 +151,23 @@ describe('ChangelogViewer', () => {
     const { container } = render(React.createElement(ChangelogViewer, { className: 'my-custom-class' }))
     // The outermost div should contain the class
     expect(container.firstElementChild?.className).toContain('my-custom-class')
+  })
+
+  it('clears repository-derived draft state while preserving selected skills', async () => {
+    const { rerender } = render(React.createElement(ChangelogViewer))
+
+    fireEvent.change(screen.getByLabelText('changelog draft'), { target: { value: 'Repository A changes' } })
+    fireEvent.click(screen.getByRole('button', { name: 'toggle skill' }))
+    expect(screen.getByLabelText('changelog draft')).toHaveValue('Repository A changes')
+    expect(screen.getByText('skills:1')).toBeDefined()
+
+    mockRepo = { fullName: 'owner/repo-b', owner: 'owner', name: 'repo-b', description: 'Repository B' }
+    await act(async () => {
+      rerender(React.createElement(ChangelogViewer))
+      await Promise.resolve()
+    })
+
+    expect(screen.getByLabelText('changelog draft')).toHaveValue('')
+    expect(screen.getByText('skills:1')).toBeDefined()
   })
 })

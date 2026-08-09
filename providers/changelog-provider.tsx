@@ -17,7 +17,7 @@ import { useAPIKeys, useRepositoryData } from '@/providers'
 import { buildFileTreeString } from '@/lib/github/fetcher'
 import { buildStructuralIndex } from '@/lib/ai/structural-index'
 import { getMaxIndexBytesForModel } from '@/lib/ai/providers'
-import { handleToolCall } from '@/lib/ai/tool-call-handler'
+import { handleToolCall, type AddToolOutputFn } from '@/lib/ai/tool-call-handler'
 import type { CodeIndex } from '@/lib/code/code-index'
 import type { ChangelogGenContext, GeneratedChangelog } from '@/lib/changelog'
 import type { APIKeysState, ProviderModel } from '@/types/types'
@@ -126,6 +126,8 @@ function createChangelogTransportController() {
 export function ChangelogProvider({ children }: { children: ReactNode }) {
   const { selectedModel, apiKeys } = useAPIKeys()
   const { repo, files, codeIndex } = useRepositoryData()
+  const repoKey = repo?.fullName
+  const repoSessionRef = useRef(0)
 
   // --- Changelog state ---
   const [generatedChangelogs, setGeneratedChangelogs] = useState<GeneratedChangelog[]>([])
@@ -169,24 +171,46 @@ export function ChangelogProvider({ children }: { children: ReactNode }) {
     transport,
     id: 'changelog-generator',
 
-    onToolCall: async ({ toolCall }): Promise<void> => handleToolCall(toolCall, addToolOutput, codeIndexRef, allFilePathsRef.current),
+    onToolCall: async ({ toolCall }): Promise<void> => {
+      const repoSession = repoSessionRef.current
+      const addOutputIfCurrent: AddToolOutputFn = output => {
+        if (repoSessionRef.current === repoSession) addToolOutput(output)
+      }
+      await handleToolCall(toolCall, addOutputIfCurrent, codeIndexRef, allFilePathsRef.current)
+    },
 
     sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithToolCalls,
   })
 
   const isGenerating = status === 'streaming' || status === 'submitted'
 
-  // --- Clear changelogs on repo change ---
-  const prevRepoRef = useRef(repo?.fullName)
+  // --- Stop and clear repository-derived state on repo change ---
+  const currentRepoKeyRef = useRef(repoKey)
+  const prevRepoRef = useRef(repoKey)
   useEffect(() => {
-    if (prevRepoRef.current && prevRepoRef.current !== repo?.fullName) {
+    if (prevRepoRef.current !== repoKey) {
+      repoSessionRef.current += 1
+      stop()
       setGeneratedChangelogs([])
       setActiveChangelogId(null)
       setShowNewChangelog(true)
+      setGenContext(previous => ({
+        changelogType: 'conventional',
+        fromRef: '',
+        toRef: '',
+        customPrompt: '',
+        ...(previous.activeSkills?.length ? { activeSkills: previous.activeSkills } : {}),
+      }))
       setMessages([])
     }
-    prevRepoRef.current = repo?.fullName
-  }, [repo?.fullName, setMessages])
+    prevRepoRef.current = repoKey
+    currentRepoKeyRef.current = repoKey
+  }, [repoKey, setMessages, stop])
+
+  const sendMessageForCurrentRepo = useCallback((message: { text: string }) => {
+    if (!repoKey || currentRepoKeyRef.current !== repoKey) return
+    void sendMessage(message)
+  }, [repoKey, sendMessage])
 
   const clearChangelogs = useCallback(() => {
     setGeneratedChangelogs([])
@@ -212,7 +236,7 @@ export function ChangelogProvider({ children }: { children: ReactNode }) {
   const chatValue = useMemo<ChangelogChatContextType>(
     () => ({
       messages,
-      sendMessage,
+      sendMessage: sendMessageForCurrentRepo,
       status,
       setMessages,
       stop,
@@ -220,7 +244,7 @@ export function ChangelogProvider({ children }: { children: ReactNode }) {
       isGenerating,
       setGenContext,
     }),
-    [messages, sendMessage, status, setMessages, stop, error, isGenerating, setGenContext],
+    [messages, sendMessageForCurrentRepo, status, setMessages, stop, error, isGenerating, setGenContext],
   )
 
   return (

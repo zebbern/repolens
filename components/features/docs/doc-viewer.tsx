@@ -86,6 +86,23 @@ export function DocViewer({ className }: DocViewerProps) {
   const [qualityLevel, setQualityLevel] = useState<QualityLevel>('balanced')
   const [activeSkills, setActiveSkills] = useState<Set<string>>(new Set())
 
+  const repoKey = repo?.fullName
+  const previousRepoKeyRef = useRef(repoKey)
+  useEffect(() => {
+    if (previousRepoKeyRef.current === repoKey) return
+    previousRepoKeyRef.current = repoKey
+    let cancelled = false
+    queueMicrotask(() => {
+      if (cancelled) return
+      setSelectedPreset(null)
+      setCustomPrompt('')
+      setTargetFile(null)
+      setFileSearchQuery('')
+      setShowFileSearch(false)
+    })
+    return () => { cancelled = true }
+  }, [repoKey])
+
   const handleSkillToggle = useCallback((skillId: string) => {
     setActiveSkills(prev => {
       const next = new Set(prev)

@@ -82,6 +82,18 @@ describe('GitHub client — caching integration', () => {
         'Repository not found',
       )
     })
+
+    it('forwards the caller abort signal to the repository request', async () => {
+      const controller = new AbortController()
+      mockFetch.mockResolvedValueOnce(mockOkResponse({ owner: 'acme', name: 'repo' }))
+
+      await fetchRepoViaProxy('acme', 'repo', { signal: controller.signal })
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        '/api/github/repo?owner=acme&name=repo',
+        expect.objectContaining({ signal: controller.signal }),
+      )
+    })
   })
 
   // -----------------------------------------------------------------------

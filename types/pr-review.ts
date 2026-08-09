@@ -60,7 +60,7 @@ export interface PRComment {
   inReplyToId?: number
 }
 
-export type PRReviewStatus = 'idle' | 'loading-pr' | 'loading-files' | 'reviewing' | 'complete' | 'error'
+export type PRReviewStatus = 'idle' | 'loading-list' | 'loading-pr' | 'loading-files' | 'reviewing' | 'complete' | 'error'
 
 export interface PRReviewState {
   pr: PRMetadata | null

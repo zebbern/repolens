@@ -31,6 +31,7 @@ export function UserMenu() {
           variant="ghost"
           size="icon"
           className="h-7 w-7 rounded-full overflow-hidden hover:ring-2 hover:ring-foreground/10"
+          aria-label={`Open user menu${githubUsername ? ` for ${githubUsername}` : ''}`}
         >
           {githubAvatar ? (
             <Image

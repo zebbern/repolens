@@ -76,6 +76,7 @@ export function GitHubTokenInput() {
               size="icon"
               className="absolute right-1 top-1/2 -translate-y-1/2 h-7 w-7 text-text-muted hover:text-text-secondary"
               onClick={() => setShowToken(!showToken)}
+              aria-label={showToken ? "Hide GitHub token" : "Show GitHub token"}
             >
               {showToken ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
             </Button>
@@ -111,6 +112,7 @@ export function GitHubTokenInput() {
             size="sm"
             onClick={handleRemove}
             className="text-text-muted hover:text-status-error"
+            aria-label="Remove GitHub token"
           >
             <Trash2 className="h-4 w-4" />
           </Button>
@@ -136,8 +138,8 @@ export function GitHubTokenInput() {
 
       {/* Help text */}
       <p className="text-xs text-text-muted">
-        Your token is stored in your browser and sent directly to GitHub — it never touches our servers.
-        Enables access to private repositories and higher API rate limits.
+        Your token is stored in this browser. RepoLens may send it through its server for validation, ZIP downloads, and some GitHub requests; other supported requests may go directly from your browser to GitHub.
+        It enables private-repository access and higher API rate limits.
         No scopes needed for public repos. Add the <code className="text-text-secondary">repo</code> scope for private repos.
       </p>
     </div>

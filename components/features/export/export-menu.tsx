@@ -193,6 +193,7 @@ export function ExportMenu({ activeTab }: ExportMenuProps) {
           className="h-7 w-7 text-text-secondary hover:text-text-primary hover:bg-foreground/5"
           disabled={!hasData || isExporting}
           title={hasData ? 'Export & Share' : 'Connect a repository to enable export'}
+          aria-label={hasData ? 'Export and share repository analysis' : 'Export unavailable until a repository is connected'}
         >
           {isExporting ? (
             <Loader2 className="h-3.5 w-3.5 animate-spin" />

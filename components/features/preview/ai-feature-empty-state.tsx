@@ -15,9 +15,9 @@ const AI_TAB_INFO: Record<string, TabInfo> = {
   docs: {
     title: "AI Documentation Generator",
     description:
-      "Generate professional documentation for any repository in seconds. Choose from 5 templates including README, API Reference, and Architecture Overview.",
+      "Generate repository documentation with 6 presets, including Architecture, Setup, API Reference, File Explanation, Onboarding, and Custom.",
     features: [
-      "5 documentation templates with quality control",
+      "6 documentation presets with quality control",
       "Real-time streaming generation",
       "Markdown export and clipboard copy",
       "History of generated documents",
@@ -96,7 +96,7 @@ export function AIFeatureEmptyState({ tabId, onOpenSettings }: AIFeatureEmptySta
           <ArrowRight className="h-4 w-4" />
         </Button>
         <p className="text-xs text-muted-foreground">
-          Add your OpenAI, Anthropic, or Google API key in Settings to unlock AI features
+          Add a key for one of the 4 supported AI providers in Settings to unlock AI features
         </p>
       </div>
     </div>

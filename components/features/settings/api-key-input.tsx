@@ -73,6 +73,7 @@ export function APIKeyInput({ provider }: APIKeyInputProps) {
               size="icon"
               className="absolute right-1 top-1/2 -translate-y-1/2 h-7 w-7 text-text-muted hover:text-text-secondary"
               onClick={() => setShowKey(!showKey)}
+              aria-label={showKey ? `Hide ${providerInfo.name} API key` : `Show ${providerInfo.name} API key`}
             >
               {showKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
             </Button>
@@ -111,6 +112,7 @@ export function APIKeyInput({ provider }: APIKeyInputProps) {
               size="sm"
               onClick={handleRemove}
               className="text-text-muted hover:text-status-error"
+              aria-label={`Remove ${providerInfo.name} API key`}
             >
               <Trash2 className="h-4 w-4" />
             </Button>
@@ -145,6 +147,9 @@ export function APIKeyInput({ provider }: APIKeyInputProps) {
       {/* Provider Description */}
       <p className="text-xs text-text-muted">
         {providerInfo.description}
+      </p>
+      <p className="text-xs text-text-muted">
+        Your key is stored in this browser. For AI features, the key, your prompt, selected repository context, and local tool results are sent through the RepoLens server to the selected AI provider.
       </p>
     </div>
   )

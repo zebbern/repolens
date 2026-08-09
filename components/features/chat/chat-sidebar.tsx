@@ -334,6 +334,7 @@ export function ChatSidebar({ className, onCollapse }: { className?: string; onC
               size="icon"
               className="h-7 w-7 text-text-muted hover:text-text-primary"
               title="Export chat as Markdown"
+              aria-label="Export chat as Markdown"
               onClick={() => {
                 const md = messages.map(m => {
                   const role = m.role === 'user' ? 'User' : 'Assistant'

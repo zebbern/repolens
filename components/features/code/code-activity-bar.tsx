@@ -33,6 +33,8 @@ export function CodeActivityBar({ sidebarMode, onModeChange }: CodeActivityBarPr
           )}
           onClick={() => onModeChange(mode)}
           title={label}
+          aria-label={`Open ${label.toLowerCase()} sidebar`}
+          aria-pressed={sidebarMode === mode}
         >
           <Icon className="h-5 w-5" />
         </Button>

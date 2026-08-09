@@ -18,10 +18,11 @@ import { GitHubTokenInput } from "./github-token-input"
 interface SettingsModalProps {
   open: boolean
   onOpenChange: (open: boolean) => void
+  initialTab?: AIProvider | "github"
 }
 
-export function SettingsModal({ open, onOpenChange }: SettingsModalProps) {
-  const [activeTab, setActiveTab] = useState<AIProvider | "github">("github")
+export function SettingsModal({ open, onOpenChange, initialTab = "github" }: SettingsModalProps) {
+  const [activeTab, setActiveTab] = useState<AIProvider | "github">(initialTab)
   const { apiKeys } = useAPIKeys()
   const { isValid: isGitHubValid } = useGitHubToken()
 
@@ -45,7 +46,7 @@ export function SettingsModal({ open, onOpenChange }: SettingsModalProps) {
             >
               GitHub
               {isGitHubValid === true && (
-                <span className="absolute top-1 right-1 h-1.5 w-1.5 rounded-full bg-status-success" />
+                <span className="absolute top-1 right-1 h-1.5 w-1.5 rounded-full bg-status-success" aria-label="GitHub token configured" />
               )}
             </TabsTrigger>
             {providers.map((provider) => (
@@ -56,7 +57,7 @@ export function SettingsModal({ open, onOpenChange }: SettingsModalProps) {
               >
                 {provider.name}
                 {apiKeys[provider.id].isValid === true && (
-                  <span className="absolute top-1 right-1 h-1.5 w-1.5 rounded-full bg-status-success" />
+                  <span className="absolute top-1 right-1 h-1.5 w-1.5 rounded-full bg-status-success" aria-label={`${provider.name} key configured`} />
                 )}
               </TabsTrigger>
             ))}

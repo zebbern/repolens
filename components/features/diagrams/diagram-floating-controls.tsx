@@ -62,6 +62,7 @@ export function DiagramFloatingControls({
                 className="h-7 w-7 text-text-secondary hover:text-text-primary"
                 onClick={() => setFocusOpen(true)}
                 title="Focus on file"
+                aria-label="Focus diagram on a file"
               >
                 <Search className="h-3.5 w-3.5" />
               </Button>
@@ -97,6 +98,7 @@ export function DiagramFloatingControls({
                   size="icon"
                   className="h-6 w-6 text-text-muted hover:text-text-secondary"
                   onClick={onClearFocus}
+                  aria-label="Clear diagram focus"
                 >
                   <X className="h-3 w-3" />
                 </Button>
@@ -122,15 +124,15 @@ export function DiagramFloatingControls({
 
       {/* Zoom controls */}
       <div className="flex items-center gap-0.5 rounded-lg border border-foreground/10 bg-card/90 backdrop-blur-xs shadow-lg">
-        <Button variant="ghost" size="icon" className="h-7 w-7 text-text-secondary hover:text-text-primary" onClick={() => setZoom(z => Math.max(0.2, z - 0.15))}>
+        <Button variant="ghost" size="icon" className="h-7 w-7 text-text-secondary hover:text-text-primary" onClick={() => setZoom(z => Math.max(0.2, z - 0.15))} aria-label="Zoom out">
           <ZoomOut className="h-3.5 w-3.5" />
         </Button>
-        <button onClick={onResetView} className="text-xs text-text-muted hover:text-text-primary w-10 text-center tabular-nums">{Math.round(zoom * 100)}%</button>
-        <Button variant="ghost" size="icon" className="h-7 w-7 text-text-secondary hover:text-text-primary" onClick={() => setZoom(z => Math.min(4, z + 0.15))}>
+        <button onClick={onResetView} className="text-xs text-text-muted hover:text-text-primary w-10 text-center tabular-nums" aria-label={`Reset zoom from ${Math.round(zoom * 100)} percent`}>{Math.round(zoom * 100)}%</button>
+        <Button variant="ghost" size="icon" className="h-7 w-7 text-text-secondary hover:text-text-primary" onClick={() => setZoom(z => Math.min(4, z + 0.15))} aria-label="Zoom in">
           <ZoomIn className="h-3.5 w-3.5" />
         </Button>
         <div className="w-px h-4 bg-foreground/10" />
-        <Button variant="ghost" size="icon" className="h-7 w-7 text-text-secondary hover:text-text-primary" onClick={onResetView} title="Reset view">
+        <Button variant="ghost" size="icon" className="h-7 w-7 text-text-secondary hover:text-text-primary" onClick={onResetView} title="Reset view" aria-label="Reset diagram view">
           <RotateCcw className="h-3.5 w-3.5" />
         </Button>
       </div>

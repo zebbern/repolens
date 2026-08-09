@@ -51,7 +51,7 @@ const baseProps = {
 
 describe('IssueList', () => {
   describe('empty state', () => {
-    it('shows "Clean Codebase" when totalIssueCount is 0', () => {
+    it('does not present an empty scan as a security guarantee', () => {
       render(
         <IssueList
           {...baseProps}
@@ -60,8 +60,8 @@ describe('IssueList', () => {
           filteredIssueCount={0}
         />,
       )
-      expect(screen.getByText('Clean Codebase')).toBeInTheDocument()
-      expect(screen.getByText(/No security risks/)).toBeInTheDocument()
+      expect(screen.getByText('No rule matches found')).toBeInTheDocument()
+      expect(screen.getByText('The enabled rules found no potential issues in 100 scanned files. This is not a security guarantee.')).toBeInTheDocument()
     })
 
     it('shows "No issues match this filter" when total > 0 but filtered is 0', () => {

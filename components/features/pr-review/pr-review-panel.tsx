@@ -8,7 +8,7 @@ import { PRSelector } from "./pr-selector"
 import { PRHeader } from "./pr-header"
 import { FileNavigator } from "./file-navigator"
 import { DiffViewer } from "./diff-viewer"
-import { ReviewSummary, RequestReviewButton } from "./review-comments"
+import { ReviewSummary } from "./review-comments"
 
 // ---------------------------------------------------------------------------
 // PRReviewPanel
@@ -57,7 +57,7 @@ export function PRReviewPanel() {
   // No repo connected — show a prompt
   if (!repo) {
     return (
-      <div className="flex h-full items-center justify-center p-8 text-center">
+      <div className="flex h-full items-center justify-center p-8 text-center" role="alert">
         <div className="space-y-2">
           <p className="text-sm text-muted-foreground">
             Connect a GitHub repository to review pull requests.
@@ -89,7 +89,7 @@ export function PRReviewPanel() {
   // Loading state
   if (status === "loading-pr" || status === "loading-files") {
     return (
-      <div className="flex h-full items-center justify-center p-8">
+      <div className="flex h-full items-center justify-center p-8" role="status" aria-live="polite">
         <div className="flex items-center gap-2 text-sm text-muted-foreground">
           <Loader2 className="h-4 w-4 animate-spin" />
           {status === "loading-pr" ? "Loading pull request…" : "Loading files…"}
@@ -103,7 +103,7 @@ export function PRReviewPanel() {
     return (
       <PRSelector
         pulls={availablePRs}
-        isLoading={availablePRs.length === 0 && status !== "error"}
+        isLoading={status === "loading-list"}
         onSelect={handleSelectPR}
         onLoadPulls={handleLoadPulls}
       />

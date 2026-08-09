@@ -59,6 +59,7 @@ export function IssuesPanel({ codeIndex, onNavigateToFile }: IssuesPanelProps) {
 
   const [results, setResults] = useState<ScanResults | null>(null)
   const [scanLoading, setScanLoading] = useState(false)
+  const [scanError, setScanError] = useState<string | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -66,6 +67,7 @@ export function IssuesPanel({ codeIndex, onNavigateToFile }: IssuesPanelProps) {
       if (cancelled) return
       setResults(null)
       setScanLoading(false)
+      setScanError(null)
       setFixCache(new Map())
       setShowFix(new Set())
       setValidationResults(new Map())
@@ -89,6 +91,7 @@ export function IssuesPanel({ codeIndex, onNavigateToFile }: IssuesPanelProps) {
     const requestSession = repositorySession
     let stale = false
     setScanLoading(true)
+    setScanError(null)
 
     scanInWorker(codeIndex, analysis)
       .then(scanResults => {
@@ -99,6 +102,7 @@ export function IssuesPanel({ codeIndex, onNavigateToFile }: IssuesPanelProps) {
       .catch(err => {
         if (stale || !isRepositorySessionCurrent(requestSession)) return
         console.warn('[issues-panel] Scanner failed', err)
+        setScanError(err instanceof Error ? err.message : 'Scanner failed')
       })
       .finally(() => {
         if (!stale && isRepositorySessionCurrent(requestSession)) setScanLoading(false)
@@ -262,6 +266,17 @@ export function IssuesPanel({ codeIndex, onNavigateToFile }: IssuesPanelProps) {
         </div>
       )
     }
+    if (scanError) {
+      return (
+        <div className="flex h-full items-center justify-center p-8 text-center" role="alert">
+          <div className="flex max-w-sm flex-col items-center gap-3">
+            <AlertTriangle className="h-8 w-8 text-status-error" aria-hidden="true" />
+            <p className="text-sm font-medium text-status-error">Scanner could not complete</p>
+            <p className="text-xs text-text-muted">{scanError}</p>
+          </div>
+        </div>
+      )
+    }
     return null
   }
 
@@ -349,6 +364,9 @@ export function IssuesPanel({ codeIndex, onNavigateToFile }: IssuesPanelProps) {
         </div>
       </>
       )}
+      <div className="border-t border-foreground/6 px-4 py-2 text-[11px] text-text-muted" role="note">
+        Automated findings are heuristic. Review them before acting.
+      </div>
     </div>
     </TooltipProvider>
   )

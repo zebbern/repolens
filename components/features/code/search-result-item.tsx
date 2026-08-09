@@ -64,6 +64,7 @@ export function SearchResultItem({
               e.stopPropagation()
               onReplaceAll(result.file)
             }}
+            aria-label={`Replace all matches in ${filename}`}
             title="Replace All in File"
           >
             <Replace className="h-3 w-3" />
@@ -99,6 +100,7 @@ export function SearchResultItem({
                       e.stopPropagation()
                       onReplace(result.file, match.line)
                     }}
+                    aria-label={`Replace match on line ${match.line} in ${filename}`}
                     title="Replace"
                   >
                     <Replace className="h-2.5 w-2.5" />

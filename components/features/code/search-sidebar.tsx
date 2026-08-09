@@ -153,6 +153,8 @@ export function SearchSidebar({
             className={cn("h-6 w-6", searchOptions.caseSensitive ? "bg-foreground/20 text-text-primary" : "text-text-muted")}
             onClick={() => setSearchOptions(p => ({ ...p, caseSensitive: !p.caseSensitive }))}
             title="Match Case"
+            aria-label="Match case"
+            aria-pressed={searchOptions.caseSensitive}
           >
             <CaseSensitive className="h-3.5 w-3.5" />
           </Button>
@@ -162,6 +164,8 @@ export function SearchSidebar({
             className={cn("h-6 w-6", searchOptions.wholeWord ? "bg-foreground/20 text-text-primary" : "text-text-muted")}
             onClick={() => setSearchOptions(p => ({ ...p, wholeWord: !p.wholeWord }))}
             title="Match Whole Word"
+            aria-label="Match whole word"
+            aria-pressed={searchOptions.wholeWord}
           >
             <WholeWord className="h-3.5 w-3.5" />
           </Button>
@@ -171,6 +175,8 @@ export function SearchSidebar({
             className={cn("h-6 w-6", searchOptions.regex ? "bg-foreground/20 text-text-primary" : "text-text-muted")}
             onClick={() => setSearchOptions(p => ({ ...p, regex: !p.regex }))}
             title="Use Regular Expression"
+            aria-label="Use regular expression"
+            aria-pressed={searchOptions.regex}
           >
             <Regex className="h-3.5 w-3.5" />
           </Button>
@@ -181,6 +187,8 @@ export function SearchSidebar({
             className={cn("h-6 w-6", showReplace ? "bg-foreground/20 text-text-primary" : "text-text-muted")}
             onClick={() => setShowReplace(!showReplace)}
             title="Toggle Replace (Ctrl+H)"
+            aria-label="Toggle replace"
+            aria-pressed={showReplace}
           >
             <Replace className="h-3.5 w-3.5" />
           </Button>
@@ -191,6 +199,7 @@ export function SearchSidebar({
                 size="icon"
                 className={cn("h-6 w-6", fileFilter ? "bg-foreground/20 text-text-primary" : "text-text-muted")}
                 title="Filter Files"
+                aria-label="Filter files"
               >
                 <Filter className="h-3.5 w-3.5" />
               </Button>

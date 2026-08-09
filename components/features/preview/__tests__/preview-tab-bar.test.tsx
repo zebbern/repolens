@@ -145,4 +145,17 @@ describe('PreviewTabBar', () => {
     await user.click(screen.getByRole('tab', { name: /issues/i }))
     expect(onTabChange).toHaveBeenCalledWith('issues')
   })
+
+  it('supports arrow-key tab navigation and moves focus with selection', async () => {
+    const user = userEvent.setup()
+    const onTabChange = vi.fn()
+    render(<PreviewTabBar {...DEFAULT_PROPS} onTabChange={onTabChange} />)
+    const repoTab = screen.getByRole('tab', { name: 'Repo' })
+    repoTab.focus()
+
+    await user.keyboard('{ArrowRight}')
+
+    expect(onTabChange).toHaveBeenCalledWith('issues')
+    expect(screen.getByRole('tab', { name: 'Issues' })).toHaveFocus()
+  })
 })

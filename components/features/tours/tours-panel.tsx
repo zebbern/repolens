@@ -1,10 +1,10 @@
 "use client"
 
 import { useEffect, useState, useCallback } from "react"
-import { Map, Plus, Route } from "lucide-react"
+import { AlertCircle, Map, MessageSquare, Plus, Route } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
-import { useTours, useRepositoryData, useAPIKeys } from "@/providers"
+import { useTours, useRepositoryData } from "@/providers"
 import { executeToolLocally } from "@/lib/ai/client-tool-executor"
 import type { Tour } from "@/types/tours"
 import { TourList } from "./tour-list"
@@ -32,10 +32,9 @@ export function ToursPanel({ className, onNavigateToFile }: ToursPanelProps) {
     prevStop,
   } = useTours()
   const { repo, codeIndex } = useRepositoryData()
-  const { getValidProviders, isHydrated } = useAPIKeys()
-
   const [showGenerateDialog, setShowGenerateDialog] = useState(false)
   const [isGenerating, setIsGenerating] = useState(false)
+  const [generationError, setGenerationError] = useState<string | null>(null)
 
   // Load tours when repo changes
   useEffect(() => {
@@ -49,6 +48,7 @@ export function ToursPanel({ className, onNavigateToFile }: ToursPanelProps) {
       if (!repo?.fullName || !codeIndex) return
 
       setIsGenerating(true)
+      setGenerationError(null)
       try {
         const result = await executeToolLocally(
           "generateTour",
@@ -62,8 +62,7 @@ export function ToursPanel({ className, onNavigateToFile }: ToursPanelProps) {
 
         const parsed = JSON.parse(result)
         if (parsed.error) {
-          console.error("[tours-panel] Generation failed:", parsed.error)
-          return
+          throw new Error(typeof parsed.error === "string" ? parsed.error : "Could not build the tour")
         }
 
         const generatedTour = parsed.tour as Tour
@@ -72,6 +71,7 @@ export function ToursPanel({ className, onNavigateToFile }: ToursPanelProps) {
         setShowGenerateDialog(false)
       } catch (err) {
         console.error("[tours-panel] Generation error:", err)
+        setGenerationError(err instanceof Error ? err.message : "Could not build the tour")
       } finally {
         setIsGenerating(false)
       }
@@ -125,12 +125,21 @@ export function ToursPanel({ className, onNavigateToFile }: ToursPanelProps) {
             onClick={() => setShowGenerateDialog(true)}
           >
             <Plus className="h-3 w-3" />
-            Generate Tour
+            Build Tour
           </Button>
         )}
       </div>
 
       {/* Content */}
+      {generationError && (
+        <div className="mx-4 mt-3 flex items-start gap-2 rounded-md border border-status-error/20 bg-status-error/10 p-3" role="alert">
+          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-status-error" aria-hidden="true" />
+          <div className="space-y-1">
+            <p className="text-xs font-medium text-status-error">Tour creation failed</p>
+            <p className="text-xs text-text-secondary">{generationError}</p>
+          </div>
+        </div>
+      )}
       {tours.length === 0 ? (
         <EmptyState
           hasRepo={!!hasRepo}
@@ -150,6 +159,7 @@ export function ToursPanel({ className, onNavigateToFile }: ToursPanelProps) {
         onOpenChange={setShowGenerateDialog}
         onGenerate={handleGenerate}
         isGenerating={isGenerating}
+        error={generationError}
       />
     </div>
   )
@@ -171,14 +181,25 @@ function EmptyState({
         <h3 className="text-sm font-medium">No tours yet</h3>
         <p className="text-xs text-muted-foreground max-w-[280px]">
           {hasRepo
-            ? "Generate an AI-powered tour to explore this codebase, or use the chat to create one."
-            : "Connect a repository to generate code tours."}
+            ? "Build a deterministic tour from repository paths and symbols. For an AI-authored walkthrough, ask in Chat."
+            : "Connect a repository to build code tours."}
         </p>
       </div>
       {hasRepo && (
         <Button size="sm" className="gap-1.5" onClick={onGenerate}>
           <Plus className="h-3.5 w-3.5" />
-          Generate Tour
+          Build Tour
+        </Button>
+      )}
+      {hasRepo && (
+        <Button
+          size="sm"
+          variant="ghost"
+          className="gap-1.5 text-xs text-text-muted"
+          onClick={() => window.dispatchEvent(new Event("focus-chat-input"))}
+        >
+          <MessageSquare className="h-3.5 w-3.5" aria-hidden="true" />
+          Ask Chat for an AI walkthrough
         </Button>
       )}
     </div>

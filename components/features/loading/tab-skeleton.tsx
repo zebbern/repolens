@@ -264,12 +264,12 @@ export function ToursTabSkeleton() {
 }
 
 /**
- * Skeleton fallback for the PR Review tab.
+ * Skeleton fallback for the Pull Requests tab.
  * Mimics a file navigator sidebar + diff viewer layout.
  */
 export function PRReviewTabSkeleton() {
   return (
-    <div role="status" aria-label="Loading PR review" className="flex h-full">
+    <div role="status" aria-label="Loading pull requests" className="flex h-full">
       {/* File navigator sidebar */}
       <div className="w-60 border-r p-3 flex flex-col gap-2">
         <Skeleton className="h-8 w-full" />

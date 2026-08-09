@@ -48,6 +48,8 @@ export function TokenUsageFooter({ inputTokens, outputTokens, model }: TokenUsag
       </div>
       <Progress
         value={contextUtilization}
+        max={100}
+        aria-label="AI context window usage"
         className="h-1 bg-foreground/6"
         indicatorClassName={progressColor}
       />

@@ -1,7 +1,6 @@
 "use client"
 
-import { AlertCircle, AlertTriangle, Info, Lightbulb, ThumbsUp, Sparkles } from "lucide-react"
-import { Button } from "@/components/ui/button"
+import { AlertCircle, AlertTriangle, Lightbulb, ThumbsUp, Sparkles } from "lucide-react"
 import type { ReviewFinding, ReviewSeverity } from "@/types/pr-review"
 
 // ---------------------------------------------------------------------------
@@ -104,29 +103,5 @@ export function ReviewSummary({ findings }: ReviewSummaryProps) {
         )
       })}
     </div>
-  )
-}
-
-// ---------------------------------------------------------------------------
-// RequestReviewButton
-// ---------------------------------------------------------------------------
-
-interface RequestReviewButtonProps {
-  isReviewing: boolean
-  onRequestReview: () => void
-}
-
-export function RequestReviewButton({ isReviewing, onRequestReview }: RequestReviewButtonProps) {
-  return (
-    <Button
-      size="sm"
-      variant="outline"
-      className="gap-1.5"
-      onClick={onRequestReview}
-      disabled={isReviewing}
-    >
-      <Sparkles className="h-3.5 w-3.5" />
-      {isReviewing ? "Reviewing…" : "AI Review"}
-    </Button>
   )
 }

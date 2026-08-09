@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { useSession } from "next-auth/react"
 import { Button } from "@/components/ui/button"
 import { GitCompareArrows, GitFork, Settings, PanelLeftClose, PanelLeftOpen } from "lucide-react"
@@ -14,6 +14,7 @@ import { UserMenu } from "@/components/features/auth/user-menu"
 import { ExportMenu } from "@/components/features/export/export-menu"
 import { useAPIKeys, useApp } from "@/providers"
 import { useIsMobile } from "@/hooks/use-mobile"
+import type { AIProvider } from "@/types/types"
 
 const SHOW_AUTH = process.env.NEXT_PUBLIC_AUTH_ENABLED === "true"
 
@@ -23,6 +24,9 @@ interface HeaderProps {
 
 export function Header({ className }: HeaderProps) {
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [settingsTab, setSettingsTab] = useState<AIProvider | "github">("github")
+  const [settingsRequestId, setSettingsRequestId] = useState(0)
+  const settingsOpenerRef = useRef<HTMLElement | null>(null)
   const { getValidProviders } = useAPIKeys()
   const { isChatCollapsed, setChatCollapsed } = useApp()
   const isMobile = useIsMobile()
@@ -32,10 +36,23 @@ export function Header({ className }: HeaderProps) {
   const hasValidKey = validProviders.length > 0
 
   useEffect(() => {
-    const handleOpenSettings = () => setSettingsOpen(true)
+    const handleOpenSettings = (event: Event) => {
+      const requestedTab = (event as CustomEvent<{ tab?: AIProvider | "github" }>).detail?.tab
+      settingsOpenerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
+      if (requestedTab) setSettingsTab(requestedTab)
+      setSettingsRequestId((requestId) => requestId + 1)
+      setSettingsOpen(true)
+    }
     window.addEventListener("open-settings", handleOpenSettings)
     return () => window.removeEventListener("open-settings", handleOpenSettings)
   }, [])
+
+  const handleSettingsOpenChange = (open: boolean) => {
+    setSettingsOpen(open)
+    if (!open) {
+      window.requestAnimationFrame(() => settingsOpenerRef.current?.focus())
+    }
+  }
 
   return (
     <>
@@ -75,7 +92,13 @@ export function Header({ className }: HeaderProps) {
             variant="ghost"
             size="icon"
             className="relative h-7 w-7 text-text-secondary hover:text-text-primary hover:bg-foreground/5 transition-colors duration-150"
-            onClick={() => setSettingsOpen(true)}
+            onClick={(event) => {
+              settingsOpenerRef.current = event.currentTarget
+              setSettingsTab("github")
+              setSettingsRequestId((requestId) => requestId + 1)
+              setSettingsOpen(true)
+            }}
+            aria-label="Open API settings"
           >
             <Settings className="h-3.5 w-3.5" />
             {hasValidKey && (
@@ -88,7 +111,7 @@ export function Header({ className }: HeaderProps) {
             className="h-7 w-7 text-text-secondary hover:text-text-primary hover:bg-foreground/5"
             asChild
           >
-            <a href="https://github.com/zebbern/repolens/fork" target="_blank" rel="noopener noreferrer">
+            <a href="https://github.com/zebbern/repolens/fork" target="_blank" rel="noopener noreferrer" aria-label="Fork RepoLens on GitHub">
               <GitFork className="h-3.5 w-3.5" />
             </a>
           </Button>
@@ -98,14 +121,19 @@ export function Header({ className }: HeaderProps) {
             className="h-7 w-7 text-text-secondary hover:text-text-primary hover:bg-foreground/5"
             asChild
           >
-            <a href="https://github.com/zebbern/repolens" target="_blank" rel="noopener noreferrer">
+            <a href="https://github.com/zebbern/repolens" target="_blank" rel="noopener noreferrer" aria-label="Open the RepoLens GitHub repository">
               <Github className="h-3.5 w-3.5" />
             </a>
           </Button>
         </div>
       </header>
 
-      <SettingsModal open={settingsOpen} onOpenChange={setSettingsOpen} />
+      <SettingsModal
+        key={`${settingsTab}-${settingsRequestId}`}
+        open={settingsOpen}
+        onOpenChange={handleSettingsOpenChange}
+        initialTab={settingsTab}
+      />
     </>
   )
 }

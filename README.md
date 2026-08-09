@@ -28,8 +28,10 @@ https://github.com/user-attachments/assets/b8e775c1-0b64-4c0d-a58f-0a66b784496c
 - **Code Browser** — Syntax-highlighted source viewer powered by Shiki, with file outline and breadcrumb navigation
 - **Issues Scanner** — Automated code quality analysis that detects security vulnerabilities, performance problems, and best practice violations
 - **Diagrams** — Auto-generated architecture diagrams using Mermaid.js — dependency graphs, component relationships, and more
-- **Documentation Generator** — AI-powered docs generation including README, Architecture Overview, API Reference, and Contributing Guide
-- **AI Chat** — Ask questions about any codebase with full context awareness and 9 specialized AI tools for deep analysis
+- **Documentation Generator** — AI-powered docs generation with 6 presets, including Architecture, Setup, API Reference, File Explanation, Onboarding, and Custom
+- **AI Chat** — Ask questions about a selected codebase with 15 progressively available analysis and skill tools
+- **Pull Requests** — Browse pull requests, changed files, and diffs without requiring indexed source content
+- **Code Tours** — Build deterministic local walkthroughs from repository paths and symbols; use Chat for AI-authored walkthroughs
 - **Compare** — Side-by-side repository comparison with similarity/clone detection scoring to evaluate alternatives
 - **Git Insights** — Coding hours estimation, activity punchcard, and per-author contribution charts derived from commit history
 
@@ -38,15 +40,15 @@ https://github.com/user-attachments/assets/b8e775c1-0b64-4c0d-a58f-0a66b784496c
 ## How It Works
 
 1. Navigate to `mgithub.com/owner/repo` (or paste any GitHub URL on the homepage)
-2. RepoLens fetches the entire repo via GitHub's Zipball API in a single download
-3. Files are indexed and cached in IndexedDB for instant repeat visits
-4. All tabs become available — browse code, scan issues, generate docs, chat with AI
+2. RepoLens resolves the Git tree adaptively and reports when GitHub returns a truncated or partial result
+3. Supported content is loaded through a ZIP or per-file fallback; very large repositories load content on demand
+4. Complete, failure-free indexes can be cached in IndexedDB for repeat visits; the coverage banner reports what was discovered and loaded
 
 ---
 
 ## Supported AI Providers
 
-RepoLens works with multiple AI providers. You configure API keys directly in the app — no environment variables needed.
+RepoLens supports 4 AI providers. You configure API keys directly in the app — no environment variables needed.
 
 | Provider | Example Models |
 |---|---|
@@ -59,7 +61,7 @@ RepoLens works with multiple AI providers. You configure API keys directly in th
 
 ## GitHub Personal Access Token
 
-Add a GitHub Personal Access Token (PAT) to access **private repositories** and raise the API rate limit from 60 to **5,000 requests/hour**. When a PAT is configured, GitHub API calls go **directly from your browser to `api.github.com`** — the token never touches the RepoLens server.
+Add a GitHub Personal Access Token (PAT) to access **private repositories** and raise the API rate limit from 60 to **5,000 requests/hour**. The PAT is stored in your browser. RepoLens may send it through its server for validation, ZIP downloads, and some GitHub requests; other supported requests may go directly from the browser to GitHub.
 
 ### How to Configure
 
@@ -77,7 +79,7 @@ Add a GitHub Personal Access Token (PAT) to access **private repositories** and 
 ### Security
 
 - The token is stored in your browser's `localStorage` — same as AI API keys.
-- API calls are made directly from the browser over HTTPS; the token is **never sent to the RepoLens server**.
+- Depending on the operation, authenticated GitHub traffic may go directly from the browser to GitHub or through RepoLens server routes.
 - Already signed in with OAuth? OAuth continues to work through server-side proxy routes. You can use either method, or both.
 
 ---
@@ -102,6 +104,8 @@ pnpm dev
 ```
 
 Open [http://localhost:3000](http://localhost:3000), click the **gear icon** (Settings), and enter your API key(s).
+
+AI API keys are stored in your browser. When you use an AI feature, the selected key, your prompt, selected repository context, and local tool results are sent through the RepoLens server to the selected provider.
 
 ### Environment Variables (Optional)
 

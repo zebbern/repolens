@@ -52,7 +52,7 @@ export function PRSelector({ pulls, isLoading, onSelect, onLoadPulls }: PRSelect
           <GitPullRequest className="mx-auto h-10 w-10 text-muted-foreground" />
           <h2 className="text-lg font-semibold">Select a Pull Request</h2>
           <p className="text-sm text-muted-foreground">
-            Choose a PR to review its changes, diffs, and comments.
+            Choose a pull request to inspect its changed files and diffs.
           </p>
         </div>
 
@@ -85,7 +85,7 @@ export function PRSelector({ pulls, isLoading, onSelect, onLoadPulls }: PRSelect
         {/* PR list */}
         <ScrollArea className="h-100 rounded-md border">
           {isLoading ? (
-            <div className="space-y-2 p-3">
+            <div className="space-y-2 p-3" role="status" aria-live="polite" aria-label="Loading pull requests">
               {Array.from({ length: 5 }).map((_, i) => (
                 <div key={i} className="flex items-center gap-3 rounded-md p-3">
                   <Skeleton className="h-5 w-5" />
@@ -97,7 +97,7 @@ export function PRSelector({ pulls, isLoading, onSelect, onLoadPulls }: PRSelect
               ))}
             </div>
           ) : filtered.length === 0 ? (
-            <div className="flex h-full items-center justify-center p-8 text-sm text-muted-foreground">
+            <div className="flex h-full items-center justify-center p-8 text-sm text-muted-foreground" role="status">
               {query ? "No PRs match your search" : "No pull requests found"}
             </div>
           ) : (

@@ -45,7 +45,7 @@ function ScoreBar({ label, value, icon }: ScoreBarProps) {
         {icon}
         {label}
       </div>
-      <Progress value={value} className="h-2 flex-1" />
+      <Progress value={value} max={100} aria-label={`${label} score`} className="h-2 flex-1" />
       <span className="text-xs font-medium tabular-nums w-8 text-right">{value}</span>
     </div>
   )

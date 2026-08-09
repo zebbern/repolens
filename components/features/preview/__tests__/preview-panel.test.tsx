@@ -36,6 +36,13 @@ const mockUseRepository = vi.fn(() => ({
 }))
 
 const mockGetValidProviders = vi.fn(() => ['openai'])
+const mockCoverage = vi.fn(() => null as null | {
+  treeStatus: 'complete' | 'partial'
+  supportedFiles: { discovered: number; loaded: number }
+  failures: { count: number; samples: Array<{ path: string; error: string }> }
+  failedSubtrees: { count: number; samples: string[] }
+  mode: 'full' | 'on-demand'
+})
 const mockUseAPIKeys = vi.fn(() => ({
   getValidProviders: mockGetValidProviders,
   isHydrated: true,
@@ -46,7 +53,7 @@ vi.mock('@/providers', () => ({
   useRepository: () => mockUseRepository(),
   useRepositoryData: () => {
     const r = mockUseRepository()
-    return { repo: r.repo, files: r.files, codeIndex: r.codeIndex, isCacheHit: r.isCacheHit, parsedFiles: [], codebaseAnalysis: null, failedFiles: [] }
+    return { repo: r.repo, files: r.files, codeIndex: r.codeIndex, isCacheHit: r.isCacheHit, coverage: mockCoverage(), parsedFiles: [], codebaseAnalysis: null, failedFiles: [] }
   },
   useRepositoryActions: () => {
     const r = mockUseRepository()
@@ -182,6 +189,26 @@ vi.mock('@/components/ui/feature-error-boundary', () => ({
 import { PreviewPanel } from '../preview-panel'
 
 describe('PreviewPanel', () => {
+  const useConnectedRepository = () => {
+    mockUseRepository.mockReturnValue({
+      repo: {
+        owner: 'owner', name: 'repo', fullName: 'owner/repo', description: null,
+        defaultBranch: 'main', stars: 0, forks: 0, language: null, topics: [],
+        isPrivate: false, url: 'https://github.com/owner/repo', openIssuesCount: 0,
+        pushedAt: '2026-01-01T00:00:00Z', license: null,
+      },
+      files: [],
+      isLoading: false,
+      error: null,
+      connectRepository: vi.fn(),
+      disconnectRepository: vi.fn(),
+      codeIndex: { totalFiles: 1, files: new Map([['src/index.ts', { path: 'src/index.ts' }]]) },
+      loadingStage: 'ready',
+      indexingProgress: { current: 1, total: 1, isComplete: true },
+      isCacheHit: false,
+    } as never)
+  }
+
   beforeEach(() => {
     vi.clearAllMocks()
     // Re-establish defaults
@@ -199,6 +226,7 @@ describe('PreviewPanel', () => {
       isCacheHit: false,
     })
     mockGetValidProviders.mockReturnValue(['openai'])
+    mockCoverage.mockReturnValue(null)
     mockUseAPIKeys.mockReturnValue({
       getValidProviders: mockGetValidProviders,
       isHydrated: true,
@@ -215,8 +243,41 @@ describe('PreviewPanel', () => {
     expect(container.firstChild).toHaveClass('custom-class')
   })
 
+  it('gates lazy tab content before a repository is connected', async () => {
+    const user = userEvent.setup()
+    render(<PreviewPanel />)
+
+    await user.click(screen.getByText('code-tab'))
+
+    expect(screen.getByText('No repository connected')).toBeInTheDocument()
+    expect(screen.queryByText('CodeBrowser')).not.toBeInTheDocument()
+  })
+
+  it('shows a terminal state for source-dependent tabs when no supported files exist', async () => {
+    const user = userEvent.setup()
+    useConnectedRepository()
+    mockUseRepository.mockReturnValue({
+      ...mockUseRepository(),
+      codeIndex: { totalFiles: 0, files: new Map() },
+    } as never)
+    mockCoverage.mockReturnValue({
+      treeStatus: 'complete',
+      supportedFiles: { discovered: 0, loaded: 0 },
+      failures: { count: 0, samples: [] },
+      failedSubtrees: { count: 0, samples: [] },
+      mode: 'full',
+    })
+    render(<PreviewPanel />)
+
+    await user.click(screen.getByText('code-tab'))
+
+    expect(screen.getByText('No supported files found')).toBeInTheDocument()
+    expect(screen.queryByText('CodeBrowser')).not.toBeInTheDocument()
+  })
+
   describe('AI tab conditional rendering — no API key', () => {
     beforeEach(() => {
+      useConnectedRepository()
       mockGetValidProviders.mockReturnValue([])
       mockUseAPIKeys.mockReturnValue({
         getValidProviders: mockGetValidProviders,
@@ -262,6 +323,7 @@ describe('PreviewPanel', () => {
 
   describe('AI tab conditional rendering — has API key', () => {
     beforeEach(() => {
+      useConnectedRepository()
       mockGetValidProviders.mockReturnValue(['openai'])
       mockUseAPIKeys.mockReturnValue({
         getValidProviders: mockGetValidProviders,

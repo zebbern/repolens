@@ -10,7 +10,6 @@ import {
 import type {
   PRMetadata,
   PRFile,
-  PRComment,
   ReviewFinding,
   PRReviewStatus,
 } from "@/types/pr-review"
@@ -18,7 +17,6 @@ import {
   fetchPullsViaProxy,
   fetchPullRequestViaProxy,
   fetchPullRequestFilesViaProxy,
-  fetchPullRequestCommentsViaProxy,
 } from "@/lib/github/client"
 import { toast } from "sonner"
 
@@ -29,7 +27,6 @@ import { toast } from "sonner"
 interface PRReviewStateContextType {
   pr: PRMetadata | null
   files: PRFile[]
-  comments: PRComment[]
   findings: ReviewFinding[]
   status: PRReviewStatus
   error: string | null
@@ -61,7 +58,6 @@ const PRReviewActionsContext = createContext<PRReviewActionsContextType | null>(
 export function PRReviewProvider({ children }: { children: ReactNode }) {
   const [pr, setPr] = useState<PRMetadata | null>(null)
   const [files, setFiles] = useState<PRFile[]>([])
-  const [comments, setComments] = useState<PRComment[]>([])
   const [findings, setFindings] = useState<ReviewFinding[]>([])
   const [status, setStatus] = useState<PRReviewStatus>('idle')
   const [error, setError] = useState<string | null>(null)
@@ -69,6 +65,8 @@ export function PRReviewProvider({ children }: { children: ReactNode }) {
   const [isFileTruncated, setIsFileTruncated] = useState(false)
 
   const loadPRList = useCallback(async (owner: string, name: string, state?: 'open' | 'closed' | 'all') => {
+    setStatus('loading-list')
+    setError(null)
     try {
       const pulls = await fetchPullsViaProxy(owner, name, {
         state: state ?? 'open',
@@ -77,8 +75,11 @@ export function PRReviewProvider({ children }: { children: ReactNode }) {
         direction: 'desc',
       })
       setAvailablePRs(pulls)
+      setStatus('idle')
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to load pull requests'
+      setError(message)
+      setStatus('error')
       toast.error(message)
     }
   }, [])
@@ -93,14 +94,10 @@ export function PRReviewProvider({ children }: { children: ReactNode }) {
       setPr(prData)
       setStatus('loading-files')
 
-      const [prFiles, prComments] = await Promise.all([
-        fetchPullRequestFilesViaProxy(owner, name, number, { perPage: 100 }),
-        fetchPullRequestCommentsViaProxy(owner, name, number, { perPage: 100 }),
-      ])
+      const prFiles = await fetchPullRequestFilesViaProxy(owner, name, number, { perPage: 100 })
 
       setFiles(prFiles)
       setIsFileTruncated(prFiles.length >= 100)
-      setComments(prComments)
       setStatus('idle')
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to load pull request'
@@ -125,7 +122,6 @@ export function PRReviewProvider({ children }: { children: ReactNode }) {
   const reset = useCallback(() => {
     setPr(null)
     setFiles([])
-    setComments([])
     setFindings([])
     setStatus('idle')
     setError(null)
@@ -134,7 +130,7 @@ export function PRReviewProvider({ children }: { children: ReactNode }) {
 
   return (
     <PRReviewStateContext.Provider
-      value={{ pr, files, comments, findings, status, error, availablePRs, isFileTruncated }}
+      value={{ pr, files, findings, status, error, availablePRs, isFileTruncated }}
     >
       <PRReviewActionsContext.Provider
         value={{ loadPRList, selectPR, addFinding, addFindings, clearFindings, reset }}

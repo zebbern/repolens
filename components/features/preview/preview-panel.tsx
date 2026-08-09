@@ -15,6 +15,7 @@ import { GlobalSearchOverlay } from "./global-search-overlay"
 import { PreviewRepoHeader } from "./preview-repo-header"
 import { PreviewTabBar } from "./preview-tab-bar"
 import { AIFeatureEmptyState } from "./ai-feature-empty-state"
+import { RepositoryCoverageBanner } from "./repository-coverage-banner"
 import {
   IssuesTabSkeleton,
   DocsTabSkeleton,
@@ -28,6 +29,7 @@ import {
 } from "@/components/features/loading/tab-skeleton"
 import { PRReviewProvider } from "@/providers/pr-review-provider"
 import { FeatureErrorBoundary } from "@/components/ui/feature-error-boundary"
+import { AlertCircle, FileQuestion } from "lucide-react"
 
 // Lazy-loaded heavy tab components (code-split per tab)
 const CodeBrowser = lazy(() =>
@@ -58,9 +60,11 @@ const PRReviewPanel = lazy(() =>
   import("@/components/features/pr-review/pr-review-panel").then(m => ({ default: m.PRReviewPanel }))
 )
 
+const SOURCE_REQUIRED_TABS = new Set(["issues", "docs", "diagram", "code", "deps", "tours"])
+
 export function PreviewPanel({ className }: { className?: string }) {
   const { previewUrl, isGenerating: isLoading } = useApp()
-  const { repo, files, codeIndex, isCacheHit } = useRepositoryData()
+  const { repo, files, codeIndex, isCacheHit, coverage } = useRepositoryData()
   const { connectRepository, disconnectRepository, renameFiles } = useRepositoryActions()
   const { isLoading: isConnecting, error: repoError, loadingStage, indexingProgress } = useRepositoryProgress()
   const { getValidProviders, isHydrated } = useAPIKeys()
@@ -133,7 +137,7 @@ export function PreviewPanel({ className }: { className?: string }) {
   }
 
   const handleOpenSettings = useCallback(() => {
-    window.dispatchEvent(new Event("open-settings"))
+    window.dispatchEvent(new CustomEvent("open-settings", { detail: { tab: "openai" } }))
   }, [])
 
   // Global file search
@@ -178,6 +182,30 @@ export function PreviewPanel({ className }: { className?: string }) {
     setPendingNavigateLine(null)
   }, [])
 
+  const isSettled = loadingStage === "ready" || loadingStage === "cached"
+  const hasNoSupportedFiles = Boolean(
+    repo
+    && coverage
+    && isSettled
+    && (
+      coverage.supportedFiles.discovered === 0
+      || codeIndex.totalFiles === 0
+    ),
+  )
+  const centralTerminalState = activeTab !== "repo" && !repo ? (
+    <RepositoryTerminalState
+      title="No repository connected"
+      description="Connect a GitHub repository from the Repo tab to use this view."
+    />
+  ) : SOURCE_REQUIRED_TABS.has(activeTab) && hasNoSupportedFiles ? (
+    <RepositoryTerminalState
+      title="No supported files found"
+      description="This repository has no files that RepoLens can load for this feature. Git History, Changelog, and Pull Requests may still be available."
+    />
+  ) : SOURCE_REQUIRED_TABS.has(activeTab) && repoError && codeIndex.totalFiles === 0 ? (
+    <RepositoryTerminalState title="Repository content could not be loaded" description={repoError} isError />
+  ) : null
+
   return (
     <div className={cn("relative flex h-full flex-col", className)}>
       <PreviewTabBar
@@ -191,8 +219,16 @@ export function PreviewPanel({ className }: { className?: string }) {
         hasApiKey={hasApiKey}
       />
 
-      <div className="flex-1 bg-background overflow-hidden">
-        {activeTab === "repo" ? (
+      {repo && <RepositoryCoverageBanner coverage={coverage} loadingStage={loadingStage} />}
+
+      <div
+        id="preview-tabpanel"
+        role="tabpanel"
+        aria-labelledby={`preview-tab-${activeTab}`}
+        tabIndex={0}
+        className="flex-1 bg-background overflow-hidden"
+      >
+        {centralTerminalState ?? (activeTab === "repo" ? (
           repo ? (
             // Connected repository view
             <div className="flex h-full flex-col">
@@ -212,6 +248,11 @@ export function PreviewPanel({ className }: { className?: string }) {
                   </div>
                 ) : codeIndex && codeIndex.totalFiles > 0 ? (
                   <ProjectSummaryPanel codeIndex={codeIndex} onNavigateToFile={handleNavigateToFile} />
+                ) : hasNoSupportedFiles ? (
+                  <RepositoryTerminalState
+                    title="No supported files found"
+                    description="Repository metadata is available, but RepoLens found no supported source files to summarize."
+                  />
                 ) : null}
               </div>
             </div>
@@ -304,7 +345,7 @@ export function PreviewPanel({ className }: { className?: string }) {
             </Suspense>
           </FeatureErrorBoundary>
         ) : activeTab === "pr-review" ? (
-          <FeatureErrorBoundary featureName="PR Review">
+          <FeatureErrorBoundary featureName="Pull Requests">
             <PRReviewProvider>
               <Suspense fallback={<PRReviewTabSkeleton />}>
                 <PRReviewPanel />
@@ -319,7 +360,7 @@ export function PreviewPanel({ className }: { className?: string }) {
           </FeatureErrorBoundary>
         ) : (
           <DefaultContent />
-        )}
+        ))}
       </div>
 
       {/* Global search overlay */}
@@ -332,6 +373,31 @@ export function PreviewPanel({ className }: { className?: string }) {
           onRename={renameFiles}
         />
       )}
+    </div>
+  )
+}
+
+function RepositoryTerminalState({
+  title,
+  description,
+  isError = false,
+}: {
+  title: string
+  description: string
+  isError?: boolean
+}) {
+  const Icon = isError ? AlertCircle : FileQuestion
+  return (
+    <div
+      className="flex h-full items-center justify-center p-8 text-center"
+      role={isError ? "alert" : "status"}
+      aria-live={isError ? "assertive" : "polite"}
+    >
+      <div className="flex max-w-sm flex-col items-center gap-3">
+        <Icon className={cn("h-8 w-8", isError ? "text-status-error" : "text-text-muted")} aria-hidden="true" />
+        <h2 className="text-sm font-semibold text-text-primary">{title}</h2>
+        <p className="text-xs leading-relaxed text-text-muted">{description}</p>
+      </div>
     </div>
   )
 }

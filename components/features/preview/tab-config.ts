@@ -18,6 +18,6 @@ export const PREVIEW_TABS: PreviewTab[] = [
   { id: "docs", label: "Docs", icon: FileText, requiresAI: true },
   { id: "changelog", label: "Changelog", icon: History, requiresAI: true },
   { id: "git-history", label: "Git History", icon: GitCommitHorizontal },
-  { id: "pr-review", label: "PR Review", icon: GitPullRequest },
+  { id: "pr-review", label: "Pull Requests", icon: GitPullRequest },
   { id: "tours", label: "Tours", icon: Route },
 ]

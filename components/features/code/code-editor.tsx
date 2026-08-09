@@ -317,6 +317,7 @@ const CodeEditor = React.forwardRef<HTMLDivElement, CodeEditorProps>(
           size="icon"
           className="absolute top-2 right-4 h-7 w-7 z-10 bg-surface hover:bg-surface-elevated"
           onClick={handleCopy}
+          aria-label={copied ? "Code copied" : "Copy code"}
         >
           {copied ? <Check className="h-3.5 w-3.5 text-status-success" /> : <Copy className="h-3.5 w-3.5" />}
         </Button>

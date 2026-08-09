@@ -4,7 +4,7 @@ RepoLens is a client-heavy Next.js application that connects to GitHub repositor
 
 ## Overview
 
-Users paste a GitHub URL (or navigate to `/:owner/:repo`). The app fetches the repository tree and file contents, builds an in-memory `CodeIndex`, caches it in IndexedDB, and exposes it to AI models through client-side tool execution. The AI never sees raw file contents in its context window — instead it receives a compact structural index and calls tools (`readFile`, `searchFiles`, etc.) that execute locally in the browser against the `CodeIndex`.
+Users paste a GitHub URL (or navigate to `/:owner/:repo`). The app resolves the repository tree, loads supported file content, builds a `CodeIndex`, and caches only complete, failure-free indexes in IndexedDB. AI tools execute against the browser index, but AI requests still send the user's key, prompt, selected repository context, and tool results through the RepoLens server to the selected provider.
 
 ## Data Flow
 
@@ -16,9 +16,9 @@ graph LR
   D -->|Yes| E["Hydrate from IndexedDB"]
   D -->|No| F["Fetch metadata via GitHub API"]
   F --> G["Fetch tree"]
-  G --> H{"Repo < 200MB?"}
-  H -->|Yes| I["Stream zipball (fflate Unzip)"]
-  H -->|No| J["Per-file fetch with concurrency"]
+  G --> H{"Content mode"}
+  H -->|Full| I["Stream zipball or per-file fallback"]
+  H -->|On-demand| J["Index metadata; fetch content as needed"]
   I --> K["Index files during streaming"]
   J --> K
   K --> L["Persist to IndexedDB"]
@@ -36,13 +36,13 @@ graph LR
 1. **URL entry** — The user enters a GitHub URL or navigates to `/:owner/:repo`.
 2. **Middleware rewrite** — Next.js middleware rewrites `/:owner/:repo` to `/?repo=https://github.com/owner/repo`, preserving query params. Reserved segments (`api`, `_next`, `compare`, etc.) are excluded.
 3. **Metadata fetch** — `RepositoryProvider.connectRepository()` parses the URL, calls `fetchRepoMetadata()` via the GitHub REST API.
-4. **Tree fetch** — `fetchRepoTree()` retrieves the recursive tree for the default branch.
+4. **Tree fetch** — The adaptive resolver retrieves the recursive tree and splits truncated subtrees within request/time budgets. Partial discovery remains usable and is represented explicitly in repository coverage.
 5. **Cache check** — The provider checks IndexedDB (`getCachedRepo`) for a cached entry matching the tree SHA. On hit, the `CodeIndex` is hydrated immediately from cache.
 6. **Content fetch** — On cache miss, the provider attempts a streaming zipball download for repos under 200 MB. The server streams the GitHub zipball response body directly (no buffering), and the client uses fflate's streaming `Unzip` + `UnzipInflate` to extract and index files as chunks arrive, reducing peak memory from ~3–4× zip size to ~1×. If streaming extraction fails or the repo is larger, it falls back to per-file fetching with a concurrency limit of 10.
 7. **Indexing** — `batchIndexFiles()` builds the `CodeIndex` — a `Map<string, IndexedFile>` with split lines, language detection, and file metadata.
-8. **Cache persist** — The indexed data is written to IndexedDB with LRU eviction (max 5 repos).
-9. **Structural index** — On chat/docs requests, `buildStructuralIndex()` extracts exports, imports, and symbol signatures from the `CodeIndex` into a compact JSON string sized to ~15% of the model's context window.
-10. **AI interaction** — The structural index and file tree are sent as context. Tool calls stream back and are executed locally by `executeToolLocally()`.
+8. **Cache persist** — Complete, failure-free indexed data is written to IndexedDB with LRU eviction (max 5 repos). Partial sessions are not reused as complete caches.
+9. **Structural index** — On chat/docs requests, `buildStructuralIndexAsync()` extracts exports, imports, and symbol signatures from the `CodeIndex` into a compact JSON string sized to ~15% of the model's context window.
+10. **AI interaction** — Selected repository context is sent through the server to the provider inside a typed untrusted-data envelope. Tool calls stream back, execute locally through `executeToolLocally()`, and their results return through the server/provider boundary.
 
 ## ContentStore (Tiered Content Storage)
 
@@ -93,7 +93,7 @@ Search and scanner workers use `IDBContentStore` directly for large repos, readi
 
 ## Provider Architecture
 
-The app uses eight nested React Context providers. The nesting order determines dependency availability — inner providers can consume outer providers via hooks.
+The app uses nine nested React Context providers. The nesting order determines dependency availability — inner providers can consume outer providers via hooks.
 
 ```mermaid
 graph TD
@@ -181,7 +181,7 @@ graph LR
 
 1. **User sends message** — `ChatSidebar.handleSubmit()` calls `sendMessage()` with the message text and a body containing the selected model, API key, repo context, and structural index.
 2. **Server receives request** — The API route (`/api/chat` or `/api/docs/generate`) validates the request with Zod, applies rate limiting via `applyRateLimit()`, and delegates to `repoLensAgent` which uses `createAgentUIStreamResponse` to stream the response.
-3. **Tools have no `execute`** — The `codeTools` object defines 11 tools using `tool()` from the AI SDK, each with a Zod `inputSchema` but no `execute` function. This means tool calls are streamed to the client instead of being executed on the server.
+3. **Tools have no `execute`** — The `codeTools` object defines 13 local tools using `tool()` from the AI SDK, each with a Zod `inputSchema` but no `execute` function. Together with 2 server-executed skill tools, the agent has 15 progressively available tools. Local tool calls are streamed to the client instead of being executed on the server.
 4. **Client intercepts tool calls** — The `useChat` hook's `onToolCall` callback fires for each tool call. It delegates to `handleToolCall()`, which calls `executeToolLocally()`.
 5. **Local execution** — `executeToolLocally()` runs the tool against the in-memory `CodeIndex`: reading files, searching content, listing directories, finding symbols, scanning issues, or generating diagrams.
 6. **Results fed back** — Tool results are passed to `addToolOutput()`, which adds them to the message stream.
@@ -434,7 +434,7 @@ Multi-signal scoring determines how similar two repositories are, detecting pote
 
 ## Annotated Repo Tours
 
-Interactive code tours stored in IndexedDB. Each tour has ordered stops — a file path, line range, and markdown annotation. Tours can be created manually or generated by AI.
+Interactive code tours are stored in IndexedDB. Each tour has ordered stops — a file path, line range, and markdown annotation. The Tours tab builds deterministic local tours from indexed paths and symbols; AI-authored walkthroughs belong in Chat.
 
 ### Data model
 
@@ -446,7 +446,7 @@ Interactive code tours stored in IndexedDB. Each tour has ordered stops — a fi
 
 1. **CRUD** — `ToursProvider` manages tour state. Create, update, and delete operations persist to IndexedDB via `tour-cache.ts`.
 2. **Playback** — The provider tracks `activeTour`, `currentStopIndex`, and `isPlaying`. Navigation (next/prev stop) updates the code browser's selected file and scroll position.
-3. **AI generation** — The `generateTour` AI tool selects key files, identifies important line ranges using declaration patterns, and generates educational annotations. The tool result is parsed and persisted as a new tour.
+3. **Local generation** — The Tours tab invokes the local `generateTour` executor directly. A focus path/topic prioritizes deterministic path and symbol matches; it is not sent as an AI prompt.
 4. **Rendering** — The tour player highlights the target line range in the code editor with a `bg-blue-500/10` overlay and displays the stop annotation in a side panel.
 
 ## AI Changelog Generator

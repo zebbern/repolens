@@ -13,13 +13,13 @@ describe('AIFeatureEmptyState', () => {
       render(<AIFeatureEmptyState tabId="docs" onOpenSettings={vi.fn()} />)
 
       expect(screen.getByText('AI Documentation Generator')).toBeInTheDocument()
-      expect(screen.getByText(/Generate professional documentation/)).toBeInTheDocument()
+      expect(screen.getByText(/Generate repository documentation with 6 presets/)).toBeInTheDocument()
     })
 
     it('shows all feature bullet points for docs', () => {
       render(<AIFeatureEmptyState tabId="docs" onOpenSettings={vi.fn()} />)
 
-      expect(screen.getByText(/5 documentation templates/)).toBeInTheDocument()
+      expect(screen.getByText(/6 documentation presets/)).toBeInTheDocument()
       expect(screen.getByText(/Real-time streaming generation/)).toBeInTheDocument()
       expect(screen.getByText(/Markdown export and clipboard copy/)).toBeInTheDocument()
       expect(screen.getByText(/History of generated documents/)).toBeInTheDocument()
@@ -89,7 +89,7 @@ describe('AIFeatureEmptyState', () => {
       render(<AIFeatureEmptyState tabId="docs" onOpenSettings={vi.fn()} />)
 
       expect(
-        screen.getByText(/Add your OpenAI, Anthropic, or Google API key/)
+        screen.getByText(/4 supported AI providers/)
       ).toBeInTheDocument()
     })
   })

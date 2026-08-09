@@ -85,6 +85,13 @@ describe('SettingsModal', () => {
     expect(screen.getByTestId('github-token-input')).toBeInTheDocument()
   })
 
+  it('opens the requested provider tab', () => {
+    render(<SettingsModal open={true} onOpenChange={vi.fn()} initialTab="openai" />)
+
+    expect(screen.getByRole('tab', { name: /openai/i })).toHaveAttribute('data-state', 'active')
+    expect(screen.getByTestId('api-key-input-openai')).toBeInTheDocument()
+  })
+
   it('switches to another provider tab on click', async () => {
     const user = userEvent.setup()
     render(<SettingsModal open={true} onOpenChange={vi.fn()} />)

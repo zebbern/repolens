@@ -181,7 +181,7 @@ export function LoadingProgress({
 
   if (error) {
     return (
-      <div className="flex flex-col items-center gap-4 w-full max-w-sm mx-auto p-6">
+      <div className="flex flex-col items-center gap-4 w-full max-w-sm mx-auto p-6" role="alert">
         {/* Steps showing error */}
         <div className="flex w-full items-center">
           {STEPS.map((step, i) => {
@@ -245,7 +245,7 @@ export function LoadingProgress({
   }
 
   return (
-    <div className="flex flex-col items-center gap-4 w-full max-w-sm mx-auto p-6 animate-in fade-in duration-300">
+    <div className="flex flex-col items-center gap-4 w-full max-w-sm mx-auto p-6 animate-in fade-in duration-300" role="status" aria-live="polite">
       {/* Step dots with connectors */}
       <div className="flex w-full items-center">
         {STEPS.map((step, i) => {
@@ -314,6 +314,8 @@ export function LoadingProgress({
         {hasProgressBar && (
           <Progress
             value={progressPercent}
+            max={100}
+            aria-label="Repository indexing progress"
             className="h-1.5 w-full bg-foreground/5"
           />
         )}

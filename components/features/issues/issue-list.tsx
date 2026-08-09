@@ -31,7 +31,7 @@ interface IssueListProps {
 export function IssueList({
   groupedByFile, isGroupExpanded, toggleGroup,
   expandedIssues, toggleIssue, onNavigateToFile,
-  ruleOverflow, scannedFiles, languagesDetected,
+  ruleOverflow, scannedFiles,
   totalIssueCount, filteredIssueCount,
   showFix, fixCache, validationResults, validatingIssues,
   hasValidApiKey, onShowFix, onValidate, onCopyPrompt,
@@ -44,10 +44,9 @@ export function IssueList({
             <div className="h-14 w-14 rounded-full bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center">
               <Shield className="h-7 w-7 text-emerald-400" />
             </div>
-            <p className="text-sm font-medium text-text-secondary">Clean Codebase</p>
+            <p className="text-sm font-medium text-text-secondary">No rule matches found</p>
             <p className="text-xs text-text-muted/70 text-center max-w-xs leading-relaxed">
-              No security risks, bad practices, or reliability issues detected across {scannedFiles} files
-              {languagesDetected.length > 0 && ` (${languagesDetected.join(', ')})`}.
+              The enabled rules found no potential issues in {scannedFiles} scanned files. This is not a security guarantee.
             </p>
           </>
         ) : (

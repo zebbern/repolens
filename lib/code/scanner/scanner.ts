@@ -6,7 +6,7 @@
 // with the same index.
 
 import type { CodeIndex, IndexedFile } from '../code-index'
-import { buildSearchRegex, getFileLines } from '../code-index'
+import { buildSearchRegex, getFileLines, hydrateCodeIndexContent } from '../code-index'
 import type { FullAnalysis } from '../import-parser'
 import type { ScanRule, CodeIssue, IssueSeverity, HealthGrade, ScanResults } from './types'
 import { SKIP_VENDORED, SCANNER_EXCLUDE_PATTERNS, detectLanguages } from './constants'
@@ -917,6 +917,16 @@ async function scanIssuesAsyncImpl(
   const changedFiles = options?.changedFiles
   const isStale = options?.isStale
   const metadataOnly = options?.metadataOnly ?? false
+  const originalCodeIndex = codeIndex
+
+  if (!metadataOnly) {
+    const hydrated = await hydrateCodeIndexContent(codeIndex)
+    if (isStale?.()) return null
+    if (hydrated.missingPaths.length > 0) {
+      throw new Error(`Content unavailable for indexed files: ${hydrated.missingPaths.join(', ')}`)
+    }
+    codeIndex = hydrated.index
+  }
 
   const issues: CodeIssue[] = []
   const seenIds = new Set<string>()
@@ -1129,7 +1139,7 @@ async function scanIssuesAsyncImpl(
 
   // Cache full scan results for memoization (not cached for partial or metadata-only scans)
   if (!changedFiles && !metadataOnly) {
-    lastScanRef = new WeakRef(codeIndex)
+    lastScanRef = new WeakRef(originalCodeIndex)
     lastScanAnalysis = analysis
     lastScanResult = result
   }

@@ -1,7 +1,7 @@
 import { useState, useMemo, useCallback, useRef, useEffect } from "react"
 import type { FileNode } from "@/types/repository"
 import type { CodeIndex, SearchResult } from "@/lib/code/code-index"
-import { searchIndexPartial, flattenFiles } from "@/lib/code/code-index"
+import { searchIndexAsync, flattenFiles } from "@/lib/code/code-index"
 import type { SidebarMode, SearchOptions } from "../types"
 
 interface UseSearchOptions {
@@ -27,40 +27,58 @@ export function useSearch({
   fileFilter,
   files,
   openFile,
-  sidebarMode,
 }: UseSearchOptions) {
   const [highlightedLine, setHighlightedLine] = useState<{ path: string; line: number } | null>(null)
   const [expandAllMatches, setExpandAllMatches] = useState(false)
   const [visibleResultCount, setVisibleResultCount] = useState(50)
+  const [searchResults, setSearchResults] = useState<SearchResult[]>([])
+  const [unsearchedCount, setUnsearchedCount] = useState(0)
   const searchInputRef = useRef<HTMLInputElement>(null)
   const resultsContainerRef = useRef<HTMLDivElement>(null)
 
-  // Compute search results
-  const { searchResults, unsearchedCount } = useMemo(() => {
+  // Compute search results after resolving metadata-only source from ContentStore.
+  useEffect(() => {
+    let stale = false
     if (!debouncedSearchQuery.trim() || !isIndexingComplete) {
-      return { searchResults: [] as SearchResult[], unsearchedCount: 0 }
-    }
-
-    const partial = searchIndexPartial(codeIndex, debouncedSearchQuery, searchOptions)
-    let results = partial.results
-
-    if (fileFilter.trim()) {
-      const filters = fileFilter.split(',').map(f => f.trim().toLowerCase()).filter(Boolean)
-      results = results.filter(result => {
-        const filePath = result.file.toLowerCase()
-        return filters.some(filter => {
-          if (filter.startsWith('*.')) {
-            return filePath.endsWith(filter.slice(1))
-          }
-          if (filter.endsWith('/*')) {
-            return filePath.startsWith(filter.slice(0, -1))
-          }
-          return filePath.includes(filter)
-        })
+      queueMicrotask(() => {
+        if (!stale) {
+          setSearchResults([])
+          setUnsearchedCount(0)
+        }
       })
+      return () => { stale = true }
     }
 
-    return { searchResults: results, unsearchedCount: partial.unsearchedPaths.length }
+    void searchIndexAsync(codeIndex, debouncedSearchQuery, searchOptions)
+      .then(results => {
+        if (stale) return
+        let filtered = results
+        if (fileFilter.trim()) {
+          const filters = fileFilter.split(',').map(f => f.trim().toLowerCase()).filter(Boolean)
+          filtered = results.filter(result => {
+            const filePath = result.file.toLowerCase()
+            return filters.some(filter => {
+              if (filter.startsWith('*.')) return filePath.endsWith(filter.slice(1))
+              if (filter.endsWith('/*')) return filePath.startsWith(filter.slice(0, -1))
+              return filePath.includes(filter)
+            })
+          })
+        }
+        setSearchResults(filtered)
+        setUnsearchedCount(0)
+      })
+      .catch(error => {
+        if (stale) return
+        console.warn('[code-search] Full-content search failed:', error)
+        setSearchResults([])
+        let missing = 0
+        for (const file of codeIndex.files.values()) {
+          if (typeof file.content !== 'string') missing++
+        }
+        setUnsearchedCount(missing)
+      })
+
+    return () => { stale = true }
   }, [debouncedSearchQuery, codeIndex, searchOptions, isIndexingComplete, fileFilter])
 
   // Go to search result

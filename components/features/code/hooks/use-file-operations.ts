@@ -34,7 +34,6 @@ export function useFileOperations({
   navigateToFile,
   onNavigateComplete,
   loadFileContent,
-  contentAvailability,
   repositorySession,
   isRepositorySessionCurrent,
 }: UseFileOperationsOptions) {
@@ -86,11 +85,12 @@ export function useFileOperations({
               : t
           ))
         } else if (indexed) {
-          if (!indexed.content && contentAvailability !== 'full' && loadFileContent) {
-            // Lazy repo: content not loaded yet — fetch on demand
+          if (typeof indexed.content !== 'string' && loadFileContent) {
+            // Source may live in IDB or require an on-demand fetch.
             try {
               const content = await loadFileContent(file.path, session)
               if (!isRepositorySessionCurrent(session)) return
+              if (content === null) throw new Error('File content is unavailable')
               setOpenTabs(prev => prev.map(t =>
                 t.path === file.path ? { ...t, content, originalContent: content, isLoading: false } : t
               ))
@@ -119,7 +119,7 @@ export function useFileOperations({
         ))
       }
     }
-  }, [repo, codeIndex, modifiedContents, loadFileContent, contentAvailability, repositorySession, isRepositorySessionCurrent])
+  }, [repo, codeIndex, modifiedContents, loadFileContent, repositorySession, isRepositorySessionCurrent])
 
   useEffect(() => {
     let cancelled = false

@@ -1,5 +1,5 @@
 import React from 'react'
-import { act, fireEvent, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { FileUIPart, UIMessage } from 'ai'
 
@@ -128,7 +128,7 @@ vi.mock('./pinned-context-chips', () => ({ PinnedContextChips: () => null }))
 vi.mock('./pin-file-picker', () => ({ PinFilePicker: () => null }))
 vi.mock('./token-usage-footer', () => ({ TokenUsageFooter: () => null }))
 vi.mock('@/lib/github/fetcher', () => ({ buildFileTreeString: vi.fn(() => 'tree') }))
-vi.mock('@/lib/ai/structural-index', () => ({ buildStructuralIndex: vi.fn(() => '{}') }))
+vi.mock('@/lib/ai/structural-index', () => ({ buildStructuralIndexAsync: vi.fn(async () => '{}') }))
 vi.mock('@/lib/ai/providers', () => ({ getMaxIndexBytesForModel: vi.fn(() => 50_000) }))
 vi.mock('@/lib/ai/tool-call-handler', () => ({ handleToolCall: vi.fn() }))
 vi.mock('@/lib/ai/client-tool-executor', () => ({ executeToolLocally: vi.fn() }))
@@ -201,6 +201,7 @@ describe('ChatSidebar repository session isolation', () => {
     await act(async () => rerender(<ChatSidebar />))
     fireEvent.change(screen.getByLabelText('chat-draft'), { target: { value: 'Question about B' } })
     fireEvent.click(screen.getByRole('button', { name: 'send' }))
+    await waitFor(() => expect(harness.chat.sendMessage).toHaveBeenCalledOnce())
 
     expect(harness.chat.stop.mock.invocationCallOrder[0])
       .toBeLessThan(harness.chat.setMessages.mock.invocationCallOrder[0])

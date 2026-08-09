@@ -36,7 +36,7 @@ const linesCache = new WeakMap<IndexedFile, string[]>()
 export function getFileLines(file: IndexedFile): string[] {
   let lines = linesCache.get(file)
   if (!lines) {
-    lines = file.content ? file.content.split('\n') : ['']
+    lines = typeof file.content === 'string' ? file.content.split('\n') : ['']
     linesCache.set(file, lines)
   }
   return lines
@@ -49,19 +49,19 @@ export function invalidateLinesCache(file: IndexedFile): void {
 /** Async content access: tries in-memory `file.content` first, then falls back to contentStore. */
 export async function getFileContent(index: CodeIndex, path: string): Promise<string | null> {
   const file = index.files.get(path)
-  if (file?.content) return file.content
+  if (typeof file?.content === 'string') return file.content
   return index.contentStore.get(path)
 }
 
 /** Type guard: true when `file.content` is a non-empty string (content is loaded). */
 export function hasContent(file: IndexedFile): file is IndexedFile & { content: string } {
-  return typeof file.content === 'string' && file.content.length > 0
+  return typeof file.content === 'string'
 }
 
 /** Sync content access: tries in-memory `file.content` first, then contentStore.getSync(). */
 export function getFileContentSync(index: CodeIndex, path: string): string | null {
   const file = index.files.get(path)
-  if (file?.content) return file.content
+  if (typeof file?.content === 'string') return file.content
   return index.contentStore.getSync(path)
 }
 
@@ -96,6 +96,46 @@ export interface CodeIndex {
   contentStore: ContentStore
   /** Repository-level discovery/loading truth for scanners, exports, and AI tools. */
   coverage?: RepositoryCoverage
+}
+
+export interface HydratedCodeIndex {
+  index: CodeIndex
+  missingPaths: string[]
+}
+
+/** Resolve resident and external source into an isolated in-memory index. */
+export async function hydrateCodeIndexContent(
+  index: CodeIndex,
+): Promise<HydratedCodeIndex> {
+  const missingFromFiles = Array.from(index.files)
+    .filter(([, file]) => typeof file.content !== 'string')
+    .map(([path]) => path)
+  const stored = await index.contentStore.getBatch(missingFromFiles)
+  const content = new Map<string, string>()
+  const files = new Map(index.files)
+  const missingPaths: string[] = []
+
+  for (const [path, file] of index.files) {
+    let source = file.content
+    if (typeof source !== 'string') {
+      source = stored.get(path) ?? await index.contentStore.get(path) ?? undefined
+    }
+    if (typeof source !== 'string') {
+      missingPaths.push(path)
+      continue
+    }
+    content.set(path, source)
+    files.set(path, { ...file, content: source })
+  }
+
+  return {
+    index: {
+      ...index,
+      files,
+      contentStore: new InMemoryContentStore(content),
+    },
+    missingPaths,
+  }
 }
 
 /**
@@ -206,7 +246,9 @@ export function removeFromIndex(index: CodeIndex, path: string): CodeIndex {
 export function batchIndexFiles(
   index: CodeIndex,
   updates: Array<{ path: string; content: string; language?: string }>,
+  options: { retainContent?: boolean } = {},
 ): CodeIndex {
+  const retainContent = options.retainContent ?? true
   const newFiles = new Map(index.files)
   const newMeta = new Map(index.meta ?? new Map())
 
@@ -226,7 +268,13 @@ export function batchIndexFiles(
   for (const { path, content, language } of updates) {
     const lineCount = countLines(content)
     const name = path.split('/').pop() || path
-    newFiles.set(path, { path, name, content, language, lineCount })
+    newFiles.set(path, {
+      path,
+      name,
+      ...(retainContent ? { content } : {}),
+      language,
+      lineCount,
+    })
     newMeta.set(path, { path, name, language, lineCount })
   }
 
@@ -242,11 +290,10 @@ export function batchIndexFiles(
 
 /**
  * Create a metadata-only CodeIndex for lazy-loaded repos (>200MB).
- * Populates `files` with empty content and `meta` with metadata entries.
+ * Populates `files` and `meta` with metadata entries and leaves content absent.
  * Does NOT write to contentStore — content is fetched on demand.
  *
- * `content: ''` preserves totalFiles counting for UI and is search-safe
- * (empty string matches nothing).
+ * Omitting content distinguishes a metadata-only record from a real empty file.
  */
 export function batchIndexMetadataOnly(
   index: CodeIndex,
@@ -258,7 +305,7 @@ export function batchIndexMetadataOnly(
   for (const { path, language, lineCount } of entries) {
     const name = path.split('/').pop() || path
     const lc = lineCount ?? 0
-    newFiles.set(path, { path, name, content: '', language, lineCount: lc })
+    newFiles.set(path, { path, name, language, lineCount: lc })
     newMeta.set(path, { path, name, language, lineCount: lc })
   }
 
@@ -324,7 +371,7 @@ export function searchIndex(
   const results: SearchResult[] = []
   
   for (const [path, file] of index.files) {
-    if (!file.content) continue
+    if (typeof file.content !== 'string') continue
 
     const matches: SearchMatch[] = []
     
@@ -361,6 +408,25 @@ export function searchIndex(
   return results
 }
 
+/**
+ * Search every indexed file after resolving source through its ContentStore.
+ * Unlike the synchronous fast path, metadata-only IDB/lazy records are hydrated.
+ */
+export async function searchIndexAsync(
+  index: CodeIndex,
+  query: string,
+  options: { caseSensitive?: boolean; regex?: boolean; wholeWord?: boolean } = {},
+): Promise<SearchResult[]> {
+  const searchPattern = buildSearchRegex(query, options)
+  if (!searchPattern) return []
+
+  const hydrated = await hydrateCodeIndexContent(index)
+  if (hydrated.missingPaths.length > 0) {
+    throw new Error(`Content unavailable for indexed files: ${hydrated.missingPaths.join(', ')}`)
+  }
+  return searchIndex(hydrated.index, query, options)
+}
+
 /** Result of a partial search over a lazy-loaded index. */
 export interface PartialSearchResult {
   results: SearchResult[]
@@ -385,7 +451,7 @@ export function searchIndexPartial(
   const unsearchedPaths: string[] = []
 
   for (const [path, file] of index.files) {
-    if (!file.content) {
+    if (typeof file.content !== 'string') {
       unsearchedPaths.push(path)
       continue
     }

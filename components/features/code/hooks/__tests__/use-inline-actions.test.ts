@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { renderHook, act } from '@testing-library/react'
+import { renderHook, act, waitFor } from '@testing-library/react'
 import type { CodeIndex, SearchResult } from '@/lib/code/code-index'
 import { InMemoryContentStore } from '@/lib/code/content-store'
 import type { ExtractedSymbol } from '../use-symbol-extraction'
@@ -9,10 +9,10 @@ import type { SymbolRange, InlineActionType } from '../../types'
 // Mocks
 // ---------------------------------------------------------------------------
 
-const mockSearchIndex = vi.fn<(...args: unknown[]) => SearchResult[]>()
+const mockSearchIndex = vi.fn<(...args: unknown[]) => Promise<SearchResult[]>>()
 
 vi.mock('@/lib/code/code-index', () => ({
-  searchIndex: (...args: unknown[]) => mockSearchIndex(...args),
+  searchIndexAsync: (...args: unknown[]) => mockSearchIndex(...args),
 }))
 
 import { useInlineActions } from '../use-inline-actions'
@@ -111,7 +111,7 @@ describe('useInlineActions', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     codeIndex = createMockCodeIndex()
-    mockSearchIndex.mockReturnValue([])
+    mockSearchIndex.mockResolvedValue([])
   })
 
   afterEach(() => {
@@ -130,13 +130,13 @@ describe('useInlineActions', () => {
 
   // --- find-usages ---
 
-  it('find-usages searches index without calling fetch', () => {
+  it('find-usages searches index without calling fetch', async () => {
     const searchResults: SearchResult[] = [{
       file: 'src/other.ts',
       language: 'typescript',
       matches: [{ line: 5, content: 'import { testFunc }', column: 10, length: 8 }],
     }]
-    mockSearchIndex.mockReturnValue(searchResults)
+    mockSearchIndex.mockResolvedValue(searchResults)
     const fetchSpy = vi.spyOn(globalThis, 'fetch')
 
     const { result } = renderHook(() => useInlineActions(codeIndex))
@@ -144,17 +144,17 @@ describe('useInlineActions', () => {
 
     expect(mockSearchIndex).toHaveBeenCalledWith(codeIndex, 'testFunc')
     expect(fetchSpy).not.toHaveBeenCalled()
-    expect(result.current.result?.type).toBe('find-usages')
+    await waitFor(() => expect(result.current.result?.type).toBe('find-usages'))
     expect(result.current.result?.content).toContain('src/other.ts')
     expect(result.current.isStreaming).toBe(false)
     fetchSpy.mockRestore()
   })
 
-  it('find-usages with no results shows "No usages" message', () => {
-    mockSearchIndex.mockReturnValue([])
+  it('find-usages with no results shows "No usages" message', async () => {
+    mockSearchIndex.mockResolvedValue([])
     const { result } = renderHook(() => useInlineActions(codeIndex))
     act(() => { trigger(result.current, 'find-usages') })
-    expect(result.current.result?.content).toContain('No usages')
+    await waitFor(() => expect(result.current.result?.content).toContain('No usages'))
   })
 
   // --- AI actions ---
@@ -198,10 +198,10 @@ describe('useInlineActions', () => {
 
   // --- dismissAction ---
 
-  it('dismissAction clears result and active state', () => {
+  it('dismissAction clears result and active state', async () => {
     const { result } = renderHook(() => useInlineActions(codeIndex))
     act(() => { trigger(result.current, 'find-usages') })
-    expect(result.current.result).not.toBeNull()
+    await waitFor(() => expect(result.current.result).not.toBeNull())
 
     act(() => { result.current.dismissAction() })
     expect(result.current.result).toBeNull()

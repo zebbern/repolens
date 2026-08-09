@@ -14,16 +14,30 @@ const mockDetectLanguage = vi.fn((name: string) => {
 const mockMemoryStore = {
   putBatch: vi.fn(),
   flush: vi.fn().mockResolvedValue(undefined),
+  fallback: true,
 }
 const mockIDBStore = {
+  storeKey: '',
   put: vi.fn(),
   putBatch: vi.fn(),
   flush: vi.fn().mockResolvedValue(undefined),
 }
-const mockBatchIndexFiles = vi.fn((base, files) => {
+const mockBatchIndexFiles = vi.fn((base, files, options?: { retainContent?: boolean }) => {
   base.contentStore.putBatch(files)
   return {
-  files: new Map(files.map((f: { path: string; content: string }) => [f.path, { path: f.path, name: f.path.split('/').pop(), content: f.content }])),
+  files: new Map(files.map((f: { path: string; content: string; language?: string }) => [f.path, {
+    path: f.path,
+    name: f.path.split('/').pop(),
+    ...(options?.retainContent === false ? {} : { content: f.content }),
+    language: f.language,
+    lineCount: 1,
+  }])),
+  meta: new Map(files.map((f: { path: string; language?: string }) => [f.path, {
+    path: f.path,
+    name: f.path.split('/').pop(),
+    language: f.language,
+    lineCount: 1,
+  }])),
   totalFiles: files.length,
   totalLines: 0,
   contentStore: base.contentStore,
@@ -34,6 +48,7 @@ const mockCreateEmptyIndex = vi.fn(() => ({
   totalFiles: 0,
   totalLines: 0,
   contentStore: mockMemoryStore,
+  meta: new Map(),
 }))
 const mockFlattenFiles = vi.fn((tree) => tree)
 const mockSetCachedRepo = vi.fn().mockResolvedValue(undefined)
@@ -60,13 +75,20 @@ vi.mock('@/lib/github/client', () => ({
 vi.mock('@/lib/code/code-index', () => ({
   createEmptyIndex: () => mockCreateEmptyIndex(),
   createEmptyIndexWithStore: (store: unknown) => ({ ...mockCreateEmptyIndex(), contentStore: store }),
-  batchIndexFiles: (...args: unknown[]) => mockBatchIndexFiles(args[0], args[1]),
+  batchIndexFiles: (...args: unknown[]) => mockBatchIndexFiles(
+    args[0],
+    args[1],
+    args[2] as { retainContent?: boolean } | undefined,
+  ),
   batchIndexMetadataOnly: vi.fn(),
   flattenFiles: (...args: unknown[]) => mockFlattenFiles(args[0]),
 }))
 
 vi.mock('@/lib/code/content-store', () => ({
-  IDBContentStore: vi.fn(function IDBContentStore() { return mockIDBStore }),
+  IDBContentStore: vi.fn(function IDBContentStore(storeKey: string) {
+    mockIDBStore.storeKey = storeKey
+    return mockIDBStore
+  }),
   InMemoryContentStore: vi.fn(function InMemoryContentStore() {
     return { ...mockMemoryStore, fallback: true }
   }),
@@ -78,7 +100,8 @@ vi.mock('@/lib/code/fetch-queue', () => ({
 }))
 
 vi.mock('@/lib/cache/repo-cache', () => ({
-  publishCachedRepo: (...args: unknown[]) => mockSetCachedRepo(args[1], args[2], args[3]),
+  getContentStoreKey: (owner: string, repo: string, sha: string) => `${owner}/${repo}@${sha}`,
+  publishCachedRepo: (...args: unknown[]) => mockSetCachedRepo(...args.slice(1)),
 }))
 
 vi.mock('@/lib/github/fetch-utils', () => ({
@@ -242,6 +265,21 @@ describe('startIndexing — streaming pipeline', () => {
     expect(mockIDBStore.put).not.toHaveBeenCalled()
     expect(mockIDBStore.putBatch).toHaveBeenCalledOnce()
     expect(mockIDBStore.flush).toHaveBeenCalledOnce()
+    expect(mockBatchIndexFiles).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      { retainContent: false },
+    )
+    expect(mockIDBStore.storeKey).toBe('acme/project@tree-sha')
+    const cachedContent = mockSetCachedRepo.mock.calls[0][3]
+    expect(cachedContent).toEqual({
+      kind: 'idb',
+      storeKey: 'acme/project@tree-sha',
+      files: expect.arrayContaining([
+        expect.objectContaining({ path: 'src/index.ts', lineCount: 1 }),
+      ]),
+    })
+    expect(JSON.stringify(cachedContent)).not.toContain('export const x = 1;')
     expect(mockIDBStore.flush.mock.invocationCallOrder[0]).toBeLessThan(
       mockSetCachedRepo.mock.invocationCallOrder[0],
     )

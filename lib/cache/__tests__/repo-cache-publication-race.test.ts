@@ -9,6 +9,7 @@ import {
 import {
   clearAllCache,
   clearCachedRepo,
+  getContentStoreKey,
   getCachedRepo,
   publishCachedRepo,
   setCachedRepo,
@@ -66,32 +67,35 @@ describe('origin-wide repository cache publication', () => {
 
     const firstEntered = deferred()
     const releaseFirst = deferred()
-    const store = new IDBContentStore('owner/repo')
+    const storeAKey = getContentStoreKey('owner', 'repo', 'sha-a')
+    const storeBKey = getContentStoreKey('owner', 'repo', 'sha-b')
     const publishA = withCacheMutationLock(undefined, async lease => {
+      const store = new IDBContentStore(storeAKey, lease.signal, { kind: 'coordinated', lease })
       store.put('a-only.ts', 'a')
       await store.flush()
       firstEntered.resolve()
       await releaseFirst.promise
-      await publishCachedRepo(lease, 'owner', 'repo', 'sha-a', [
-        { path: 'a-only.ts', content: 'a' },
-      ], TREE, COVERAGE, undefined, { contentPaths: ['a-only.ts'] })
+      await publishCachedRepo(lease, 'owner', 'repo', 'sha-a', {
+        kind: 'idb', storeKey: storeAKey, files: [{ path: 'a-only.ts', lineCount: 1 }],
+      }, TREE, COVERAGE)
     }, firstClient)
     await firstEntered.promise
 
     const publishB = withCacheMutationLock(undefined, async lease => {
+      const store = new IDBContentStore(storeBKey, lease.signal, { kind: 'coordinated', lease })
       store.put('b-only.ts', 'b')
       await store.flush()
-      await publishCachedRepo(lease, 'owner', 'repo', 'sha-b', [
-        { path: 'b-only.ts', content: 'b' },
-      ], TREE, COVERAGE, undefined, { contentPaths: ['b-only.ts'] })
+      await publishCachedRepo(lease, 'owner', 'repo', 'sha-b', {
+        kind: 'idb', storeKey: storeBKey, files: [{ path: 'b-only.ts', lineCount: 1 }],
+      }, TREE, COVERAGE)
     }, secondClient)
 
     releaseFirst.resolve()
     await Promise.all([publishA, publishB])
 
     expect((await getCachedRepo('owner', 'repo'))?.sha).toBe('sha-b')
-    expect(await store.get('b-only.ts')).toBe('b')
-    expect(await store.get('a-only.ts')).toBeNull()
+    expect(await new IDBContentStore(storeBKey).get('b-only.ts')).toBe('b')
+    expect(await new IDBContentStore(storeAKey).get('a-only.ts')).toBeNull()
   })
 
   it('clear-all acquiring first clears both stores and a later publication survives', async () => {
@@ -101,33 +105,35 @@ describe('origin-wide repository cache publication', () => {
     const clear = clearAllCache({ coordinator: clearingClient })
     await entered.promise
 
-    const store = new IDBContentStore('owner/repo')
+    const storeKey = getContentStoreKey('owner', 'repo', 'sha-new')
     const publish = withCacheMutationLock(undefined, async lease => {
+      const store = new IDBContentStore(storeKey, lease.signal, { kind: 'coordinated', lease })
       store.put('new.ts', 'new')
       await store.flush()
-      await publishCachedRepo(lease, 'owner', 'repo', 'sha-new', [
-        { path: 'new.ts', content: 'new' },
-      ], TREE, COVERAGE, undefined, { contentPaths: ['new.ts'] })
+      await publishCachedRepo(lease, 'owner', 'repo', 'sha-new', {
+        kind: 'idb', storeKey, files: [{ path: 'new.ts', lineCount: 1 }],
+      }, TREE, COVERAGE)
     }, secondClient)
 
     release.resolve()
     await Promise.all([clear, publish])
     expect((await getCachedRepo('owner', 'repo'))?.sha).toBe('sha-new')
-    expect(await store.get('new.ts')).toBe('new')
+    expect(await new IDBContentStore(storeKey).get('new.ts')).toBe('new')
   })
 
   it('publication acquiring first completes before a later clear removes both stores', async () => {
     const entered = deferred()
     const release = deferred()
-    const store = new IDBContentStore('owner/repo')
+    const storeKey = getContentStoreKey('owner', 'repo', 'sha-new')
     const publish = withCacheMutationLock(undefined, async lease => {
+      const store = new IDBContentStore(storeKey, lease.signal, { kind: 'coordinated', lease })
       store.put('new.ts', 'new')
       await store.flush()
       entered.resolve()
       await release.promise
-      await publishCachedRepo(lease, 'owner', 'repo', 'sha-new', [
-        { path: 'new.ts', content: 'new' },
-      ], TREE, COVERAGE, undefined, { contentPaths: ['new.ts'] })
+      await publishCachedRepo(lease, 'owner', 'repo', 'sha-new', {
+        kind: 'idb', storeKey, files: [{ path: 'new.ts', lineCount: 1 }],
+      }, TREE, COVERAGE)
     }, firstClient)
     await entered.promise
 
@@ -135,7 +141,7 @@ describe('origin-wide repository cache publication', () => {
     release.resolve()
     await Promise.all([publish, clear])
     expect(await getCachedRepo('owner', 'repo')).toBeNull()
-    expect(await store.get('new.ts')).toBeNull()
+    expect(await new IDBContentStore(storeKey).get('new.ts')).toBeNull()
   })
 
   it('serializes a concurrent cache touch before LRU selection and revalidation', async () => {
@@ -204,19 +210,20 @@ describe('origin-wide repository cache publication', () => {
     })
     await consumed.promise
 
-    const store = new IDBContentStore('owner/repo')
+    const storeKey = getContentStoreKey('owner', 'repo', 'sha-new')
     const publish = withCacheMutationLock(undefined, async lease => {
+      const store = new IDBContentStore(storeKey, lease.signal, { kind: 'coordinated', lease })
       store.put('value.ts', 'new')
       await store.flush()
-      await publishCachedRepo(lease, 'owner', 'repo', 'sha-new', [
-        { path: 'value.ts', content: 'new' },
-      ], TREE, COVERAGE, undefined, { contentPaths: ['value.ts'] })
+      await publishCachedRepo(lease, 'owner', 'repo', 'sha-new', {
+        kind: 'idb', storeKey, files: [{ path: 'value.ts', lineCount: 1 }],
+      }, TREE, COVERAGE)
     }, secondClient)
     release.resolve()
     await Promise.all([lookup, publish])
 
     expect((await getCachedRepo('owner', 'repo'))?.sha).toBe('sha-new')
-    expect(await store.get('value.ts')).toBe('new')
+    expect(await new IDBContentStore(storeKey).get('value.ts')).toBe('new')
   })
 
   it('makes a lookup queued behind publication observe only the new manifest', async () => {

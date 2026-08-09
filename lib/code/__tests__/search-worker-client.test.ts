@@ -1,7 +1,14 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { createEmptyIndex, indexFile } from '@/lib/code/code-index'
+import {
+  batchIndexFiles,
+  createEmptyIndex,
+  createEmptyIndexWithStore,
+  indexFile,
+  searchIndexAsync,
+} from '@/lib/code/code-index'
+import { InMemoryContentStore } from '@/lib/code/content-store'
 
-// In jsdom, `Worker` is undefined, so searchInWorker falls back to searchIndex.
+// In jsdom, `Worker` is undefined, so searchInWorker falls back to async hydration.
 describe('searchInWorker', () => {
   beforeEach(() => {
     vi.resetModules()
@@ -17,6 +24,35 @@ describe('searchInWorker', () => {
     expect(results.length).toBe(1)
     expect(results[0].file).toBe('src/app.ts')
     expect(results[0].matches.length).toBe(2)
+  })
+
+  it('hydrates metadata-only files through the content store in the no-worker fallback', async () => {
+    const stored = batchIndexFiles(
+      createEmptyIndexWithStore(new InMemoryContentStore()),
+      [{ path: 'stored.ts', content: 'export const hydratedNeedle = true', language: 'typescript' }],
+    )
+    delete stored.files.get('stored.ts')!.content
+
+    const { searchInWorker } = await import('../search-worker-client')
+    const results = await searchInWorker(stored, 'hydratedNeedle')
+
+    expect(results).toEqual([
+      expect.objectContaining({ file: 'stored.ts', matches: [expect.objectContaining({ line: 1 })] }),
+    ])
+  })
+
+  it('keeps async search results identical for inline and content-store-only source', async () => {
+    const source = 'const first = "needle"\nconst second = needle\n'
+    const inline = indexFile(createEmptyIndex(), 'parity.ts', source, 'typescript')
+    const stored = batchIndexFiles(
+      createEmptyIndexWithStore(new InMemoryContentStore()),
+      [{ path: 'parity.ts', content: source, language: 'typescript' }],
+      { retainContent: false },
+    )
+
+    await expect(searchIndexAsync(stored, 'needle')).resolves.toEqual(
+      await searchIndexAsync(inline, 'needle'),
+    )
   })
 
   it('returns empty array for no matches', async () => {

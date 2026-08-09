@@ -1,13 +1,13 @@
 /// <reference lib="webworker" />
 
-import { searchIndex } from './code-index'
+import { searchIndexAsync } from './code-index'
 import { deserializeCodeIndex } from './scanner/serialization'
 import type { SerializedCodeIndex } from './scanner/serialization'
 import type { CodeIndex, SearchResult } from './code-index'
 import { IDBContentStore } from './content-store'
 
 export type SearchWorkerRequest =
-  | { type: 'setIndex'; codeIndex: SerializedCodeIndex; repoKey?: string }
+  | { type: 'setIndex'; codeIndex: SerializedCodeIndex; storeKey?: string }
   | {
       type: 'search'
       id: number
@@ -20,35 +20,16 @@ export type SearchWorkerResponse =
   | { type: 'error'; id: number; error: string }
 
 let currentIndex: CodeIndex | null = null
-let contentReady: Promise<void> | null = null
-
 self.onmessage = (event: MessageEvent<SearchWorkerRequest>) => {
   const msg = event.data
 
   if (msg.type === 'setIndex') {
     currentIndex = deserializeCodeIndex(msg.codeIndex)
 
-    if (msg.repoKey) {
-      // IDB-backed repo: load all content from IDB into the deserialized index
-      const store = new IDBContentStore(msg.repoKey, undefined, { kind: 'disabled' })
-      const paths = Array.from(currentIndex.files.keys())
-      contentReady = store
-        .getBatch(paths)
-        .then((contents) => {
-          if (!currentIndex) return
-          for (const [path, content] of contents) {
-            const file = currentIndex.files.get(path)
-            if (file) {
-              // Mutate in-place — worker owns this copy
-              ;(file as { content: string }).content = content
-            }
-          }
-        })
-        .catch(() => {
-          // IDB read failed — content stays empty, search will return no results
-        })
-    } else {
-      contentReady = null
+    if (msg.storeKey) {
+      const store = new IDBContentStore(msg.storeKey, undefined, { kind: 'disabled' })
+      store.registerPaths(currentIndex.files.keys())
+      currentIndex.contentStore = store
     }
     return
   }
@@ -63,9 +44,9 @@ self.onmessage = (event: MessageEvent<SearchWorkerRequest>) => {
       return
     }
 
-    const doSearch = () => {
+    const doSearch = async () => {
       try {
-        const results = searchIndex(currentIndex!, msg.query, msg.options)
+        const results = await searchIndexAsync(currentIndex!, msg.query, msg.options)
         self.postMessage({
           type: 'result',
           id: msg.id,
@@ -80,12 +61,6 @@ self.onmessage = (event: MessageEvent<SearchWorkerRequest>) => {
       }
     }
 
-    // For IDB repos, wait for content to be loaded before searching
-    if (contentReady) {
-      contentReady.then(doSearch)
-    } else {
-      // InMemory repos: synchronous search (zero behavior change)
-      doSearch()
-    }
+    void doSearch()
   }
 }

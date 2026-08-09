@@ -39,15 +39,15 @@ describe('batchIndexMetadataOnly', () => {
     expect(meta!.lineCount).toBe(42)
   })
 
-  it('files Map has empty content strings', () => {
+  it('files Map leaves source absent', () => {
     const index = batchIndexMetadataOnly(createEmptyIndex(), [
       { path: 'a.ts', language: 'typescript', lineCount: 10 },
       { path: 'b.ts', language: 'typescript', lineCount: 20 },
     ])
 
     expect(index.files.size).toBe(2)
-    expect(index.files.get('a.ts')!.content).toBe('')
-    expect(index.files.get('b.ts')!.content).toBe('')
+    expect(index.files.get('a.ts')!.content).toBeUndefined()
+    expect(index.files.get('b.ts')!.content).toBeUndefined()
   })
 
   it('totalFiles equals the meta size', () => {
@@ -128,7 +128,7 @@ describe('batchIndexMetadataOnly', () => {
 
     // New lazy file added
     expect(result.files.has('new-lazy.ts')).toBe(true)
-    expect(result.files.get('new-lazy.ts')!.content).toBe('')
+    expect(result.files.get('new-lazy.ts')!.content).toBeUndefined()
 
     expect(result.totalFiles).toBe(2)
     expect(result.meta!.size).toBe(2)
@@ -154,14 +154,13 @@ describe('batchIndexMetadataOnly', () => {
 // ---------------------------------------------------------------------------
 
 describe('batchIndexMetadataOnly integration', () => {
-  it('metadata-only index files are searchable as empty (no false matches)', () => {
+  it('metadata-only index files have absent source (no false matches)', () => {
     const index = batchIndexMetadataOnly(createEmptyIndex(), [
       { path: 'secret.ts', language: 'typescript', lineCount: 100 },
     ])
 
     const file = index.files.get('secret.ts')!
-    // Empty content means no search matches
-    expect(file.content).toBe('')
+    expect(file.content).toBeUndefined()
     expect((file.content ?? '').includes('secret')).toBe(false)
   })
 
@@ -174,7 +173,7 @@ describe('batchIndexMetadataOnly integration', () => {
     ])
 
     expect(index.files.get('loaded.ts')!.content).toBe('const x = 1')
-    expect(index.files.get('lazy.ts')!.content).toBe('')
+    expect(index.files.get('lazy.ts')!.content).toBeUndefined()
     expect(index.totalFiles).toBe(2)
     expect(index.meta!.size).toBe(2)
   })

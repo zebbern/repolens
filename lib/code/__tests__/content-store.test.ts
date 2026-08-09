@@ -923,3 +923,20 @@ describe('CodeIndex with IDBContentStore', () => {
     expect(store.has('b.ts')).toBe(true)
   })
 })
+
+describe('batchIndexFiles retainContent option', () => {
+  it('keeps source in the content store while omitting it from resident file metadata', async () => {
+    const index = batchIndexFiles(
+      createEmptyIndex(),
+      [{ path: 'src/medium.ts', content: 'export const medium = true', language: 'typescript' }],
+      { retainContent: false },
+    )
+
+    expect(index.files.get('src/medium.ts')).toEqual(expect.objectContaining({
+      path: 'src/medium.ts',
+      lineCount: 1,
+    }))
+    expect(index.files.get('src/medium.ts')).not.toHaveProperty('content')
+    await expect(index.contentStore.get('src/medium.ts')).resolves.toBe('export const medium = true')
+  })
+})

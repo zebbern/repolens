@@ -1,6 +1,6 @@
 import type { CodeIndex, IndexedFile } from '@/lib/code/code-index'
 import type { RepositoryCoverage } from '@/types/repository'
-import { getFileLines, getFileContent, getFileLinesAsync } from '@/lib/code/code-index'
+import { getFileLines, getFileContent, getFileLinesAsync, hydrateCodeIndexContent } from '@/lib/code/code-index'
 import { coverageNotice } from '@/lib/repository'
 
 export interface RichFileMetadata {
@@ -84,14 +84,35 @@ export function buildStructuralIndex(
     metadata.push(entry)
   }
 
-  const notice = coverageNotice(codeIndex.coverage)
+  return serializeStructuralMetadata(metadata, codeIndex.coverage, maxBytes)
+}
+
+/** Build the structural index after resolving metadata-only source from ContentStore. */
+export async function buildStructuralIndexAsync(
+  codeIndex: CodeIndex | null,
+  options?: { maxIndexBytes?: number },
+): Promise<string> {
+  if (!codeIndex?.files) return ''
+  const hydrated = await hydrateCodeIndexContent(codeIndex)
+  if (hydrated.missingPaths.length > 0) {
+    throw new Error(`Content unavailable for indexed files: ${hydrated.missingPaths.join(', ')}`)
+  }
+  return buildStructuralIndex(hydrated.index, options)
+}
+
+function serializeStructuralMetadata(
+  metadata: RichFileMetadata[],
+  coverage: RepositoryCoverage | undefined,
+  maxBytes: number,
+): string {
+  const notice = coverageNotice(coverage)
   if (notice) {
     metadata.unshift({
       path: '[repository-coverage]',
       language: 'metadata',
       lineCount: 0,
       coverageNotice: notice,
-      repositoryCoverage: codeIndex.coverage,
+      repositoryCoverage: coverage,
     })
   }
 

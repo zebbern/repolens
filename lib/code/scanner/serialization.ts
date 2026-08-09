@@ -60,7 +60,7 @@ export interface ScanWorkerRequest {
   analysis: SerializedFullAnalysis | null
   changedFiles?: string[]
   /** When set, worker loads content from IDB instead of using serialized content. */
-  repoKey?: string
+  storeKey?: string
 }
 
 export type ScanWorkerResponse =

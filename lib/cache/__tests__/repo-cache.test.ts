@@ -11,6 +11,8 @@ import {
   clearCachedRepo,
   clearAllCache,
   isReusableCachedRepo,
+  getContentStoreKey,
+  publishCachedRepo,
   withHydratedCachedRepo,
 } from '../repo-cache'
 import { IDBContentStore } from '@/lib/code/content-store'
@@ -19,6 +21,7 @@ import { installFakeWebLocks } from './fake-web-lock-manager'
 import {
   CacheCoordinationUnavailableError,
   createCacheMutationCoordinator,
+  withCacheMutationLock,
 } from '../cache-mutation-lock'
 
 // ---------------------------------------------------------------------------
@@ -43,6 +46,32 @@ const SAMPLE_COVERAGE: RepositoryCoverage = {
   failures: { count: 0, samples: [] },
   failedSubtrees: { count: 0, samples: [] },
   mode: 'full',
+}
+
+async function publishIdbRepo(
+  owner: string,
+  repo: string,
+  sha: string,
+  files: Array<{ path: string; content: string; language?: string }> = SAMPLE_FILES,
+): Promise<IDBContentStore> {
+  const storeKey = getContentStoreKey(owner, repo, sha)
+  await withCacheMutationLock(undefined, async lease => {
+    const store = new IDBContentStore(storeKey, lease.signal, { kind: 'coordinated', lease })
+    store.putBatch(files)
+    await store.flush()
+    await publishCachedRepo(lease, owner, repo, sha, {
+      kind: 'idb',
+      storeKey,
+      files: files.map(file => ({
+        path: file.path,
+        language: file.language,
+        lineCount: file.content.split('\n').length,
+      })),
+    }, SAMPLE_TREE, SAMPLE_COVERAGE)
+  })
+  const reader = new IDBContentStore(storeKey, undefined, { kind: 'disabled' })
+  reader.registerPaths(files.map(file => file.path))
+  return reader
 }
 
 // ---------------------------------------------------------------------------
@@ -85,7 +114,7 @@ describe('repo-cache (IndexedDB)', () => {
     expect(cached).not.toBeNull()
     expect(cached!.key).toBe('owner/repo')
     expect(cached!.sha).toBe('sha123')
-    expect(cached!.files).toEqual(SAMPLE_FILES)
+    expect(cached!.content).toEqual({ kind: 'inline', files: SAMPLE_FILES })
     expect(cached!.tree).toEqual(SAMPLE_TREE)
   })
 
@@ -115,13 +144,12 @@ describe('repo-cache (IndexedDB)', () => {
   })
 
   it('clearCachedRepo removes only the matching repository content', async () => {
-    const alpha = new IDBContentStore('owner/alpha')
-    const beta = new IDBContentStore('owner/beta')
-    alpha.put('src/index.ts', 'alpha')
-    beta.put('src/index.ts', 'beta')
-    await Promise.all([alpha.flush(), beta.flush()])
-    await setCachedRepo('owner', 'alpha', 'sha1', SAMPLE_FILES, SAMPLE_TREE, SAMPLE_COVERAGE)
-    await setCachedRepo('owner', 'beta', 'sha2', SAMPLE_FILES, SAMPLE_TREE, SAMPLE_COVERAGE)
+    const alpha = await publishIdbRepo('owner', 'alpha', 'sha1', [
+      { path: 'src/index.ts', content: 'alpha' },
+    ])
+    const beta = await publishIdbRepo('owner', 'beta', 'sha2', [
+      { path: 'src/index.ts', content: 'beta' },
+    ])
 
     await clearCachedRepo('owner', 'alpha')
 
@@ -193,13 +221,9 @@ describe('repo-cache (IndexedDB)', () => {
   it('LRU eviction removes evicted repository content but preserves retained repos', async () => {
     const stores: IDBContentStore[] = []
     for (let i = 1; i <= 6; i++) {
-      const store = new IDBContentStore(`owner/repo-${i}`)
-      store.put('index.ts', `repo-${i}`)
-      await store.flush()
-      stores.push(store)
-      await setCachedRepo('owner', `repo-${i}`, `sha-${i}`, SAMPLE_FILES, SAMPLE_TREE, SAMPLE_COVERAGE, undefined, {
-        contentPaths: ['index.ts'],
-      })
+      stores.push(await publishIdbRepo('owner', `repo-${i}`, `sha-${i}`, [
+        { path: 'index.ts', content: `repo-${i}` },
+      ]))
     }
 
     expect(await stores[0].get('index.ts')).toBeNull()
@@ -208,7 +232,9 @@ describe('repo-cache (IndexedDB)', () => {
 
   it('observes background LRU content cleanup failures without failing publication', async () => {
     for (let i = 1; i <= 5; i++) {
-      await setCachedRepo('owner', `repo-${i}`, `sha-${i}`, SAMPLE_FILES, SAMPLE_TREE, SAMPLE_COVERAGE)
+      await publishIdbRepo('owner', `repo-${i}`, `sha-${i}`, [
+        { path: 'index.ts', content: `repo-${i}` },
+      ])
     }
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     vi.spyOn(FakeIDBObjectStore.prototype, 'openCursor').mockImplementationOnce(() => {
@@ -242,21 +268,10 @@ describe('repo-cache (IndexedDB)', () => {
   })
 
   it('publishes a replacement manifest before deleting only superseded content', async () => {
-    const store = new IDBContentStore('owner/repo')
-    store.putBatch([
+    const oldStore = await publishIdbRepo('owner', 'repo', 'sha-old', [
       { path: 'old.ts', content: 'old' },
       { path: 'keep.ts', content: 'old keep' },
     ])
-    await store.flush()
-    await setCachedRepo('owner', 'repo', 'sha-old', SAMPLE_FILES, SAMPLE_TREE, SAMPLE_COVERAGE, undefined, {
-      contentPaths: ['old.ts', 'keep.ts'],
-    })
-
-    store.putBatch([
-      { path: 'keep.ts', content: 'new keep' },
-      { path: 'new.ts', content: 'new' },
-    ])
-    await store.flush()
     const writes: string[] = []
     const originalTransaction = FakeIDBDatabase.prototype.transaction
     vi.spyOn(FakeIDBDatabase.prototype, 'transaction').mockImplementation(function (
@@ -267,15 +282,83 @@ describe('repo-cache (IndexedDB)', () => {
       return originalTransaction.apply(this, args)
     })
 
-    await setCachedRepo('owner', 'repo', 'sha-new', SAMPLE_FILES, SAMPLE_TREE, SAMPLE_COVERAGE, undefined, {
-      contentPaths: ['keep.ts', 'new.ts'],
+    const newFiles = [
+      { path: 'keep.ts', content: 'new keep' },
+      { path: 'new.ts', content: 'new' },
+    ]
+    const newStoreKey = getContentStoreKey('owner', 'repo', 'sha-new')
+    await withCacheMutationLock(undefined, async lease => {
+      const newStore = new IDBContentStore(newStoreKey, lease.signal, { kind: 'coordinated', lease })
+      newStore.putBatch(newFiles)
+      await newStore.flush()
+      await publishCachedRepo(lease, 'owner', 'repo', 'sha-new', {
+        kind: 'idb',
+        storeKey: newStoreKey,
+        files: newFiles.map(file => ({
+          path: file.path,
+          lineCount: file.content.split('\n').length,
+        })),
+      }, SAMPLE_TREE, SAMPLE_COVERAGE)
     })
 
-    expect(writes.slice(0, 2)).toEqual(['repolens-cache', 'repolens-content'])
+    expect(writes.slice(0, 3)).toEqual(['repolens-content', 'repolens-cache', 'repolens-content'])
     expect((await getCachedRepo('owner', 'repo'))?.sha).toBe('sha-new')
-    expect(await store.get('old.ts')).toBeNull()
-    expect(await store.get('keep.ts')).toBe('new keep')
-    expect(await store.get('new.ts')).toBe('new')
+    expect(await oldStore.get('old.ts')).toBeNull()
+    expect(await oldStore.get('keep.ts')).toBeNull()
+    const newStore = new IDBContentStore(newStoreKey, undefined, { kind: 'disabled' })
+    expect(await newStore.get('keep.ts')).toBe('new keep')
+    expect(await newStore.get('new.ts')).toBe('new')
+  })
+
+  it('retains the previous namespace when replacement manifest publication fails', async () => {
+    const oldStore = await publishIdbRepo('owner', 'repo', 'sha-old', [
+      { path: 'old.ts', content: 'old' },
+    ])
+    const originalTransaction = FakeIDBDatabase.prototype.transaction
+    vi.spyOn(FakeIDBDatabase.prototype, 'transaction').mockImplementation(function (
+      this: InstanceType<typeof FakeIDBDatabase>,
+      ...args
+    ) {
+      if (this.name === 'repolens-cache' && args[1] === 'readwrite') {
+        throw new DOMException('manifest publication failed', 'UnknownError')
+      }
+      return originalTransaction.apply(this, args)
+    })
+
+    const newStoreKey = getContentStoreKey('owner', 'repo', 'sha-new')
+    await expect(withCacheMutationLock(undefined, async lease => {
+      const newStore = new IDBContentStore(newStoreKey, lease.signal, { kind: 'coordinated', lease })
+      newStore.put('new.ts', 'new')
+      await newStore.flush()
+      await publishCachedRepo(lease, 'owner', 'repo', 'sha-new', {
+        kind: 'idb',
+        storeKey: newStoreKey,
+        files: [{ path: 'new.ts', lineCount: 1 }],
+      }, SAMPLE_TREE, SAMPLE_COVERAGE)
+    })).rejects.toMatchObject({ name: 'UnknownError' })
+
+    vi.restoreAllMocks()
+    expect((await getCachedRepo('owner', 'repo'))?.sha).toBe('sha-old')
+    expect(await oldStore.get('old.ts')).toBe('old')
+  })
+
+  it('does not delete the active namespace when the same tree SHA is republished', async () => {
+    const store = await publishIdbRepo('owner', 'repo', 'same-sha', [
+      { path: 'index.ts', content: 'first' },
+    ])
+    const storeKey = getContentStoreKey('owner', 'repo', 'same-sha')
+
+    await withCacheMutationLock(undefined, async lease => {
+      const writer = new IDBContentStore(storeKey, lease.signal, { kind: 'coordinated', lease })
+      writer.put('index.ts', 'second')
+      await writer.flush()
+      await publishCachedRepo(lease, 'owner', 'repo', 'same-sha', {
+        kind: 'idb', storeKey, files: [{ path: 'index.ts', lineCount: 1 }],
+      }, SAMPLE_TREE, SAMPLE_COVERAGE)
+    })
+
+    expect((await getCachedRepo('owner', 'repo'))?.sha).toBe('same-sha')
+    expect(await store.get('index.ts')).toBe('second')
   })
 
   it('does not reuse partial or failure-bearing cache records', async () => {

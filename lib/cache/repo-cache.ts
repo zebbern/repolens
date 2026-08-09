@@ -6,7 +6,6 @@ import { isCoverageComplete } from '@/lib/repository'
 import {
   clearAllRepoContent,
   deleteRepoContent,
-  deleteStaleRepoContent,
   IDBContentStore,
 } from '@/lib/code/content-store'
 import {
@@ -17,7 +16,7 @@ import {
   type CacheMutationLease,
 } from '@/lib/cache/cache-mutation-lock'
 import type { CodeIndex } from '@/lib/code/code-index'
-import { batchIndexFiles, createEmptyIndex, createEmptyIndexWithStore } from '@/lib/code/code-index'
+import { batchIndexFiles, batchIndexMetadataOnly, createEmptyIndex, createEmptyIndexWithStore } from '@/lib/code/code-index'
 import { openIndexedDB } from '@/lib/code/open-indexed-db'
 
 const DB_NAME = 'repolens-cache'
@@ -25,7 +24,32 @@ const STORE_NAME = 'repos'
 const TOURS_STORE_NAME = 'tours'
 const DB_VERSION = 2
 const MAX_REPOS = 5
-export const REPO_CACHE_SCHEMA_VERSION = 4
+export const REPO_CACHE_SCHEMA_VERSION = 5
+
+export interface CachedFileMetadata {
+  path: string
+  language?: string
+  lineCount: number
+}
+
+export type CachedContent =
+  | {
+      kind: 'inline'
+      files: Array<{ path: string; content: string; language?: string }>
+    }
+  | {
+      kind: 'idb'
+      storeKey: string
+      files: CachedFileMetadata[]
+    }
+
+export function getRepoKey(owner: string, repo: string): string {
+  return `${owner}/${repo}`
+}
+
+export function getContentStoreKey(owner: string, repo: string, treeSha: string): string {
+  return `${getRepoKey(owner, repo)}@${treeSha}`
+}
 
 export interface CachedRepo {
   schemaVersion?: number
@@ -39,8 +63,10 @@ export interface CachedRepo {
   sha: string
   /** Unix-ms timestamp for LRU eviction. */
   timestamp: number
-  /** Indexed file contents. */
-  files: Array<{ path: string; content: string; language?: string }>
+  /** Normalized source representation. Missing on disposable legacy records. */
+  content?: CachedContent
+  /** Legacy schema field retained only so old IndexedDB records can be invalidated. */
+  files?: Array<{ path: string; content: string; language?: string }>
   /** Serialized file tree for potential offline use. */
   tree: FileNode[]
   /** GitHub metadata — optional for backward compat with older cached entries. */
@@ -53,17 +79,44 @@ export function isReusableCachedRepo(entry: CachedRepo): entry is CachedRepo & {
   schemaVersion: number
   coverage: RepositoryCoverage
   complete: true
+  content: CachedContent
 } {
-  return entry.schemaVersion === REPO_CACHE_SCHEMA_VERSION
-    && entry.complete === true
-    && entry.coverage !== undefined
-    && isCoverageComplete(entry.coverage)
+  if (entry.schemaVersion !== REPO_CACHE_SCHEMA_VERSION
+    || entry.complete !== true
+    || entry.coverage === undefined
+    || !isCoverageComplete(entry.coverage)
+    || entry.key !== getRepoKey(entry.owner, entry.repo)
+    || !entry.content
+  ) return false
+
+  switch (entry.content.kind) {
+    case 'inline':
+      return Array.isArray(entry.content.files) && entry.content.files.every(file => (
+        typeof file.path === 'string'
+        && typeof file.content === 'string'
+        && (file.language === undefined || typeof file.language === 'string')
+      ))
+    case 'idb':
+      return entry.content.storeKey === getContentStoreKey(entry.owner, entry.repo, entry.sha)
+        && Array.isArray(entry.content.files)
+        && entry.content.files.every(file => (
+          typeof file.path === 'string'
+          && Number.isInteger(file.lineCount)
+          && file.lineCount >= 0
+          && (file.language === undefined || typeof file.language === 'string')
+        ))
+    default: {
+      const exhaustive: never = entry.content
+      return exhaustive
+    }
+  }
 }
 
 export type ReusableCachedRepo = CachedRepo & {
   schemaVersion: number
   coverage: RepositoryCoverage
   complete: true
+  content: CachedContent
 }
 
 /** Lightweight metadata for listing cached repos without loading file contents. */
@@ -214,6 +267,28 @@ function sameManifestIdentity(current: CachedRepo, candidate: CachedRepo): boole
     && current.complete === candidate.complete
 }
 
+function contentNamespaceForDeletion(record: CachedRepo): string | null {
+  if (record.content?.kind === 'idb') {
+    const expectedPrefix = `${getRepoKey(record.owner, record.repo)}@`
+    return record.content.storeKey.startsWith(expectedPrefix) ? record.content.storeKey : null
+  }
+  return record.schemaVersion === REPO_CACHE_SCHEMA_VERSION ? null : record.key
+}
+
+async function deleteRecordContent(record: CachedRepo, signal?: AbortSignal): Promise<void> {
+  const storeKey = contentNamespaceForDeletion(record)
+  if (storeKey) await deleteRepoContent(storeKey, signal)
+}
+
+async function invalidateCachedRecord(
+  db: IDBDatabase,
+  record: CachedRepo,
+  signal?: AbortSignal,
+): Promise<void> {
+  await deleteRecordContent(record, signal)
+  await deleteRepoManifestIfIdentity(db, record, signal)
+}
+
 /** Run an LRU eviction pass while the origin-wide mutation lease is held. */
 async function evictLRU(db: IDBDatabase, lease: CacheMutationLease): Promise<void> {
   if (!lease.crossContextSafe) return
@@ -233,7 +308,7 @@ async function evictLRU(db: IDBDatabase, lease: CacheMutationLease): Promise<voi
         const removedManifest = await deleteRepoManifestIfIdentity(db, record, lease.signal)
         throwIfCacheMutationAborted(lease)
         if (!removedManifest) continue
-        await deleteRepoContent(record.key, lease.signal)
+        await deleteRecordContent(record, lease.signal)
         throwIfCacheMutationAborted(lease)
         removed++
       } catch (error) {
@@ -269,10 +344,13 @@ export async function getCachedRepo(
       if (!lease.crossContextSafe) return null
       const db = await openDB(lease.signal)
       throwIfCacheMutationAborted(lease)
-      const entry = await getRepoRecord(db, `${owner}/${repo}`, lease.signal)
+      const entry = await getRepoRecord(db, getRepoKey(owner, repo), lease.signal)
       throwIfCacheMutationAborted(lease)
 
-      if (entry && !isReusableCachedRepo(entry)) return null
+      if (entry && !isReusableCachedRepo(entry)) {
+        await invalidateCachedRecord(db, entry, lease.signal)
+        return null
+      }
 
       // Touch timestamp so LRU eviction keeps frequently-accessed repos.
       if (entry) {
@@ -312,7 +390,8 @@ export async function withHydratedCachedRepo(
   expectedSha: string,
   options: {
     signal?: AbortSignal
-    useIDB: boolean
+    /** @deprecated Storage representation is selected by the cached discriminator. */
+    useIDB?: boolean
     coordinator?: CacheMutationCoordinator
   },
   consume: (result: HydratedCachedRepo) => void | Promise<void>,
@@ -324,29 +403,30 @@ export async function withHydratedCachedRepo(
 
       const db = await openDB(lease.signal)
       throwIfCacheMutationAborted(lease)
-      const entry = await getRepoRecord(db, `${owner}/${repo}`, lease.signal)
+      const entry = await getRepoRecord(db, getRepoKey(owner, repo), lease.signal)
       throwIfCacheMutationAborted(lease)
-      if (!entry || !isReusableCachedRepo(entry) || entry.sha !== expectedSha) return false
+      if (!entry) return false
+      if (!isReusableCachedRepo(entry)) {
+        await invalidateCachedRecord(db, entry, lease.signal)
+        return false
+      }
+      if (entry.sha !== expectedSha) return false
 
       let index: CodeIndex
-      let contentHydratedDurably = true
-      let hydrationError: unknown
-      try {
-        const baseIndex = options.useIDB
-          ? createEmptyIndexWithStore(new IDBContentStore(
-              entry.key,
-              lease.signal,
-              { kind: 'coordinated', lease },
-            ))
-          : createEmptyIndex()
-        index = batchIndexFiles(baseIndex, entry.files)
-        await index.contentStore.flush()
-        throwIfCacheMutationAborted(lease)
-      } catch (error) {
-        if (lease.signal?.aborted) throw error
-        contentHydratedDurably = false
-        hydrationError = error
-        index = batchIndexFiles(createEmptyIndex(), entry.files)
+      switch (entry.content.kind) {
+        case 'inline':
+          index = batchIndexFiles(createEmptyIndex(), entry.content.files)
+          break
+        case 'idb': {
+          const store = new IDBContentStore(entry.content.storeKey, lease.signal, { kind: 'disabled' })
+          store.registerPaths(entry.content.files.map(file => file.path))
+          index = batchIndexMetadataOnly(createEmptyIndexWithStore(store), entry.content.files)
+          break
+        }
+        default: {
+          const exhaustive: never = entry.content
+          throw new Error(`Unsupported cached content: ${String(exhaustive)}`)
+        }
       }
       index.coverage = entry.coverage
 
@@ -357,7 +437,7 @@ export async function withHydratedCachedRepo(
         console.warn(`Failed to update repository cache timestamp for ${entry.key}:`, error)
       }
       throwIfCacheMutationAborted(lease)
-      await consume({ cached: entry, index, contentHydratedDurably, hydrationError })
+      await consume({ cached: entry, index, contentHydratedDurably: true })
       return true
     }, options.coordinator)
   } catch (error) {
@@ -367,6 +447,7 @@ export async function withHydratedCachedRepo(
 }
 
 export interface CachePublicationOptions {
+  /** @deprecated Content namespaces are derived from the cached idb discriminator. */
   contentPaths?: readonly string[]
 }
 
@@ -376,13 +457,18 @@ export async function publishCachedRepo(
   owner: string,
   repo: string,
   sha: string,
-  files: Array<{ path: string; content: string; language?: string }>,
+  content: CachedContent,
   tree: FileNode[],
   coverage: RepositoryCoverage,
   meta?: { description?: string | null; stars?: number; language?: string | null },
   options: CachePublicationOptions = {},
 ): Promise<void> {
-  const key = `${owner}/${repo}`
+  void options
+  if (!isCoverageComplete(coverage)) return
+  const key = getRepoKey(owner, repo)
+  if (content.kind === 'idb' && content.storeKey !== getContentStoreKey(owner, repo, sha)) {
+    throw new Error(`Invalid content store key for ${key}@${sha}`)
+  }
   requireCrossContextCacheCoordination(lease)
   throwIfCacheMutationAborted(lease)
   const db = await openDB(lease.signal)
@@ -398,7 +484,7 @@ export async function publishCachedRepo(
     repo,
     sha,
     timestamp: Date.now(),
-    files,
+    content,
     tree,
     ...(meta && {
       description: meta.description,
@@ -420,10 +506,10 @@ export async function publishCachedRepo(
     throwIfCacheMutationAborted(lease)
     if (currentManifest && sameManifestIdentity(currentManifest, record)) {
       try {
-        if (options.contentPaths) {
-          await deleteStaleRepoContent(key, new Set(options.contentPaths), lease.signal)
-        } else {
-          await deleteRepoContent(key, lease.signal)
+        const previousNamespace = contentNamespaceForDeletion(previous)
+        const currentNamespace = content.kind === 'idb' ? content.storeKey : null
+        if (previousNamespace && previousNamespace !== currentNamespace) {
+          await deleteRepoContent(previousNamespace, lease.signal)
         }
         throwIfCacheMutationAborted(lease)
       } catch (error) {
@@ -456,7 +542,7 @@ export async function setCachedRepo(
     owner,
     repo,
     sha,
-    files,
+    { kind: 'inline', files },
     tree,
     coverage,
     meta,
@@ -472,10 +558,12 @@ export async function clearCachedRepo(
 ): Promise<void> {
   return withCacheMutationLock(options.signal, async lease => {
     requireCrossContextCacheCoordination(lease)
-    const key = `${owner}/${repo}`
-    await deleteRepoContent(key, lease.signal)
-    throwIfCacheMutationAborted(lease)
+    const key = getRepoKey(owner, repo)
     const db = await openDB(lease.signal)
+    throwIfCacheMutationAborted(lease)
+    const record = await getRepoRecord(db, key, lease.signal)
+    throwIfCacheMutationAborted(lease)
+    if (record) await deleteRecordContent(record, lease.signal)
     throwIfCacheMutationAborted(lease)
     await deleteRepoManifest(db, key, lease.signal)
     throwIfCacheMutationAborted(lease)
@@ -503,7 +591,7 @@ export async function listCachedRepos(): Promise<CachedRepoMeta[]> {
         repo: r.repo,
         sha: r.sha,
         timestamp: r.timestamp,
-        fileCount: r.files?.length ?? 0,
+        fileCount: r.content.files.length,
         description: r.description,
         stars: r.stars,
         language: r.language,

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { createEmptyIndex, indexFile } from '@/lib/code/code-index'
+import { batchIndexFiles, createEmptyIndex, indexFile } from '@/lib/code/code-index'
 import type { ScanResults } from '../types'
 import type { CodeIndex } from '../../code-index'
 import type { FullAnalysis } from '../../parser/types'
@@ -9,12 +9,8 @@ import {
   serializeFullAnalysis,
 } from '../serialization'
 
-// In jsdom, `Worker` is undefined. scanner-client.ts falls back to a sync
-// `require('./scanner')` call which can't resolve .ts files in Vitest's ESM mode.
-// We therefore test the fallback logic structurally:
-//   1. Confirm Worker is unavailable (jsdom)
-//   2. Confirm serialization round-trip used by the worker path is correct
-//   3. Test terminateScanWorker (no require involved)
+// In jsdom, `Worker` is undefined, so scanner-client exercises its real
+// async in-thread fallback.
 
 describe('scanInWorker (jsdom environment)', () => {
   it('Worker is undefined in jsdom — confirming fallback branch is taken', () => {
@@ -39,6 +35,20 @@ describe('scanInWorker (jsdom environment)', () => {
 
     expect(typeof mod.scanInWorker).toBe('function')
     expect(typeof mod.terminateScanWorker).toBe('function')
+  })
+
+  it('hydrates metadata-only source before scanning in the no-worker fallback', async () => {
+    const index = batchIndexFiles(
+      createEmptyIndex(),
+      [{ path: 'src/danger.ts', content: 'export const run = (input: string) => eval(input)', language: 'typescript' }],
+      { retainContent: false },
+    )
+    const { scanInWorker } = await import('../scanner-client')
+
+    const result = await scanInWorker(index, null)
+
+    expect(result.issues.some(issue => issue.file === 'src/danger.ts' && issue.ruleId === 'eval-usage')).toBe(true)
+    expect(result.unscannedFileCount).toBe(0)
   })
 })
 

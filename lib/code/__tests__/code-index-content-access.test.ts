@@ -128,7 +128,7 @@ describe('getFileContent', () => {
     expect(result).toBe('inline-content')
   })
 
-  it('falls back to contentStore when file.content is empty string', async () => {
+  it('treats a resident empty string as authoritative file content', async () => {
     const store = new InMemoryContentStore()
     store.put('src/a.ts', 'from-store')
 
@@ -144,9 +144,8 @@ describe('getFileContent', () => {
       contentStore: store,
     }
 
-    // Empty string is falsy, so it falls through to contentStore
     const result = await getFileContent(index, 'src/a.ts')
-    expect(result).toBe('from-store')
+    expect(result).toBe('')
   })
 
   it('works with mock IDB store (async path)', async () => {

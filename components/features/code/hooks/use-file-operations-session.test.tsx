@@ -1,6 +1,6 @@
 import { act, renderHook } from '@testing-library/react'
-import { describe, expect, it } from 'vitest'
-import { createEmptyIndex } from '@/lib/code/code-index'
+import { describe, expect, it, vi } from 'vitest'
+import { batchIndexMetadataOnly, createEmptyIndex } from '@/lib/code/code-index'
 import { useFileOperations } from './use-file-operations'
 
 describe('useFileOperations repository session isolation', () => {
@@ -23,5 +23,30 @@ describe('useFileOperations repository session isolation', () => {
 
     expect(result.current.openTabs).toEqual([])
     expect(result.current.activeTabPath).toBeNull()
+  })
+
+  it('loads indexed content whenever resident source is absent even when availability is full', async () => {
+    const session = { id: 1, signal: new AbortController().signal }
+    const loadFileContent = vi.fn().mockResolvedValue('export const loaded = true')
+    const index = batchIndexMetadataOnly(createEmptyIndex(), [
+      { path: 'src/loaded.ts', language: 'typescript', lineCount: 1 },
+    ])
+    const file = { name: 'loaded.ts', path: 'src/loaded.ts', type: 'file' as const }
+    const { result } = renderHook(() => useFileOperations({
+      repo: { owner: 'acme', name: 'repo', defaultBranch: 'main' },
+      files: [file],
+      codeIndex: index,
+      modifiedContents: new Map(),
+      loadFileContent,
+      contentAvailability: 'full',
+      repositorySession: session,
+      isRepositorySessionCurrent: candidate => candidate === session,
+    }))
+
+    await act(async () => Promise.resolve())
+    await act(async () => result.current.openFile(file))
+
+    expect(loadFileContent).toHaveBeenCalledWith('src/loaded.ts', session)
+    expect(result.current.activeTab?.content).toBe('export const loaded = true')
   })
 })

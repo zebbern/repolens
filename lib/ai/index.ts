@@ -16,6 +16,7 @@ export {
 
 export {
   buildStructuralIndex,
+  buildStructuralIndexAsync,
   extractSignature,
   getLanguagePatterns,
   getImportRegex,

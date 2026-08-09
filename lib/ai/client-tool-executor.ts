@@ -1,5 +1,5 @@
 import type { CodeIndex, IndexedFile } from '@/lib/code/code-index'
-import { createEmptyIndex, indexFile, searchIndex, getFileLines, getFileContent, getFileLinesAsync, getFileContentSync } from '@/lib/code/code-index'
+import { createEmptyIndex, indexFile, searchIndexAsync, getFileLines, getFileContent, getFileLinesAsync, getFileContentSync } from '@/lib/code/code-index'
 import { LANG_EXTENSIONS } from '@/lib/code/scanner/constants'
 import { SYMBOL_PATTERNS } from '@/lib/ai/structural-index'
 import {
@@ -354,7 +354,7 @@ async function executeSearchFiles(
 
   // Content matching: delegate to searchIndex for accurate regex/substring search
   if (results.length < limit) {
-    const searchResults = searchIndex(codeIndex, input.query, { regex: useRegex })
+    const searchResults = await searchIndexAsync(codeIndex, input.query, { regex: useRegex })
     const pathsAlreadyMatched = new Set(results.map(r => r.path))
 
     for (const sr of searchResults) {
@@ -1022,7 +1022,7 @@ async function executeGenerateTour(
 
   if (input.theme) {
     // Theme-based: search the index for relevant files
-    const searchResults = searchIndex(codeIndex, input.theme)
+    const searchResults = await searchIndexAsync(codeIndex, input.theme)
     const matched = new Set<string>()
 
     candidateFiles = []

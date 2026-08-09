@@ -17,7 +17,7 @@ import { useAPIKeys, useRepositoryData, useRepositoryActions, useRepositoryProgr
 import { toast } from "sonner"
 import { buildFileTreeString } from "@/lib/github/fetcher"
 import { downloadFile } from "@/lib/export"
-import { buildStructuralIndex } from "@/lib/ai/structural-index"
+import { buildStructuralIndexAsync } from "@/lib/ai/structural-index"
 import { getMaxIndexBytesForModel } from "@/lib/ai/providers"
 import { handleToolCall, type AddToolOutputFn } from "@/lib/ai/tool-call-handler"
 import { executeToolLocally, type ToolExecutorOptions } from "@/lib/ai/client-tool-executor"
@@ -226,17 +226,28 @@ export function ChatSidebar({ className, onCollapse }: { className?: string; onC
     return null
   }, [messages])
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     const hasText = input.trim().length > 0
     const hasImages = attachedImages.length > 0
     if ((!hasText && !hasImages) || isLoading || !hasValidKey || !selectedModel) return
 
     const currentInput = input.trim()
-    setInput("")
     const imagesToSend = [...attachedImages]
-    setAttachedImages([])
 
-    const structuralIndex = buildStructuralIndex(codeIndex, { maxIndexBytes: getMaxIndexBytesForModel(selectedModel.id) })
+    const submitSession = repositorySession
+    let structuralIndex: string
+    try {
+      structuralIndex = await buildStructuralIndexAsync(codeIndex, {
+        maxIndexBytes: getMaxIndexBytesForModel(selectedModel.id),
+      })
+    } catch (error) {
+      console.error('Failed to hydrate repository content for chat:', error)
+      toast.error('Repository content could not be loaded for chat.')
+      return
+    }
+    if (!isRepositorySessionCurrent(submitSession)) return
+    setInput("")
+    setAttachedImages([])
 
     const body = {
       provider: selectedModel.provider,

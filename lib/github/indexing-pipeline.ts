@@ -4,15 +4,15 @@ import { detectLanguage } from '@/lib/github/fetcher'
 import { fetchFileViaProxy } from '@/lib/github/client'
 import type { CodeIndex } from '@/lib/code/code-index'
 import { createEmptyIndex, createEmptyIndexWithStore, batchIndexFiles, batchIndexMetadataOnly, flattenFiles } from '@/lib/code/code-index'
-import { IDBContentStore, InMemoryContentStore, LazyContentStore } from '@/lib/code/content-store'
+import { IDBContentStore, LazyContentStore } from '@/lib/code/content-store'
 import { FetchQueue } from '@/lib/code/fetch-queue'
 import { streamUnzipFiles, isFileIndexable, isProbablyBinaryContent, MAX_FILE_SIZE } from '@/lib/github/zipball'
-import { publishCachedRepo } from '@/lib/cache/repo-cache'
+import { getContentStoreKey, publishCachedRepo, type CachedContent } from '@/lib/cache/repo-cache'
 import { requireCrossContextCacheCoordination, withCacheMutationLock } from '@/lib/cache/cache-mutation-lock'
 import { fetchWithConcurrency } from './fetch-utils'
 import { LAZY_CONTENT_THRESHOLD_KB, getIdbThresholdKB } from '@/config/constants'
 import { toast } from 'sonner'
-import { updateRepositoryCoverage } from '@/lib/repository'
+import { isCoverageComplete, updateRepositoryCoverage } from '@/lib/repository'
 
 const CONCURRENCY_LIMIT = 10
 const NOT_CACHED_WARNING = 'Repository is ready, but it was not cached for future visits.'
@@ -79,7 +79,7 @@ export async function startIndexing(
       await withCacheMutationLock(signal, async lease => {
         await emptyIndex.contentStore.flush()
         if (signal.aborted) return
-        await publishCachedRepo(lease, repoData.owner, repoData.name, treeSha, [], fileTree, coverage, {
+        await publishCachedRepo(lease, repoData.owner, repoData.name, treeSha, { kind: 'inline', files: [] }, fileTree, coverage, {
           description: repoData.description,
           stars: repoData.stars,
           language: repoData.language,
@@ -276,15 +276,16 @@ export async function startIndexing(
     errors,
   )
   let finalIndex: CodeIndex | undefined
-  let contentDurable = false
-  try {
+  if (!isCoverageComplete(coverage)) {
+    finalIndex = batchIndexFiles(createEmptyIndex(), accumulated)
+  } else try {
     await withCacheMutationLock(signal, async lease => {
       requireCrossContextCacheCoordination(lease)
       // The lock starts before the final content transaction and remains held
       // through manifest publication and all destructive maintenance.
       const contentStore = useIDB
         ? new IDBContentStore(
-            `${repoData.owner}/${repoData.name}`,
+            getContentStoreKey(repoData.owner, repoData.name, treeSha),
             signal,
             { kind: 'coordinated', lease },
           )
@@ -292,28 +293,31 @@ export async function startIndexing(
       const baseIndex = contentStore
         ? createEmptyIndexWithStore(contentStore)
         : createEmptyIndex()
-      finalIndex = batchIndexFiles(baseIndex, accumulated)
+      finalIndex = batchIndexFiles(baseIndex, accumulated, { retainContent: !contentStore })
       finalIndex.coverage = coverage
       await finalIndex.contentStore.flush()
-      contentDurable = true
       if (signal.aborted) return
 
-      await publishCachedRepo(lease, repoData.owner, repoData.name, treeSha, accumulated, fileTree, coverage, {
+      const cachedContent: CachedContent = contentStore
+        ? {
+            kind: 'idb',
+            storeKey: contentStore.storeKey,
+            files: Array.from(finalIndex.meta.values()).map(file => ({
+              path: file.path,
+              language: file.language,
+              lineCount: file.lineCount,
+            })),
+          }
+        : { kind: 'inline', files: accumulated }
+      await publishCachedRepo(lease, repoData.owner, repoData.name, treeSha, cachedContent, fileTree, coverage, {
         description: repoData.description,
         stars: repoData.stars,
         language: repoData.language,
-      }, {
-        ...(contentStore && { contentPaths: accumulated.map(file => file.path) }),
       })
     })
   } catch (error) {
     if (signal.aborted) return
-    if (!finalIndex) finalIndex = batchIndexFiles(createEmptyIndex(), accumulated)
-    if (!contentDurable) {
-      finalIndex.contentStore = new InMemoryContentStore(
-        new Map(accumulated.map(file => [file.path, file.content])),
-      )
-    }
+    finalIndex = batchIndexFiles(createEmptyIndex(), accumulated)
     warnNotCached(error)
   }
   if (signal.aborted) return

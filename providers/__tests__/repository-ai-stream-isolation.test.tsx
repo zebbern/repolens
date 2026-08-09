@@ -30,7 +30,7 @@ const harness = vi.hoisted(() => ({
   },
   transports: [] as Array<{
     api: string
-    prepareSendMessagesRequest: (args: { messages: UIMessage[] }) => { body: Record<string, unknown> }
+    prepareSendMessagesRequest: (args: { messages: UIMessage[] }) => Promise<{ body: Record<string, unknown> }>
   }>,
 }))
 
@@ -96,7 +96,7 @@ vi.mock('@/lib/github/fetcher', () => ({
 }))
 
 vi.mock('@/lib/ai/structural-index', () => ({
-  buildStructuralIndex: vi.fn(() => '{}'),
+  buildStructuralIndexAsync: vi.fn(async () => '{}'),
 }))
 
 vi.mock('@/lib/ai/providers', () => ({
@@ -192,7 +192,7 @@ describe('repository-scoped AI provider state', () => {
       .toBeLessThan(harness.chat.docs.setMessages.mock.invocationCallOrder[0])
 
     const transport = harness.transports.find(item => item.api === '/api/docs/generate')
-    const request = transport?.prepareSendMessagesRequest({ messages: [] })
+    const request = await transport?.prepareSendMessagesRequest({ messages: [] })
     expect(request?.body.targetFile).toBeNull()
     expect(request?.body.activeSkills).toEqual(['security-review'])
 
@@ -262,7 +262,7 @@ describe('repository-scoped AI provider state', () => {
       .toBeLessThan(harness.chat.changelog.setMessages.mock.invocationCallOrder[0])
 
     const transport = harness.transports.find(item => item.api === '/api/changelog/generate')
-    const request = transport?.prepareSendMessagesRequest({ messages: [] })
+    const request = await transport?.prepareSendMessagesRequest({ messages: [] })
     expect(request?.body).toMatchObject({
       fromRef: '',
       toRef: '',

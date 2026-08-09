@@ -10,22 +10,16 @@ import type { ScanWorkerRequest, ScanWorkerResponse } from './serialization'
 import { IDBContentStore } from '../content-store'
 
 self.addEventListener('message', async (event: MessageEvent<ScanWorkerRequest>) => {
-  const { id, codeIndex: serializedIndex, analysis: serializedAnalysis, changedFiles, repoKey } = event.data
+  const { id, codeIndex: serializedIndex, analysis: serializedAnalysis, changedFiles, storeKey } = event.data
 
   try {
     const codeIndex = deserializeCodeIndex(serializedIndex)
 
     // For IDB-backed repos: load content from IDB
-    if (repoKey) {
-      const store = new IDBContentStore(repoKey, undefined, { kind: 'disabled' })
-      const paths = Array.from(codeIndex.files.keys())
-      const contents = await store.getBatch(paths)
-      for (const [path, content] of contents) {
-        const file = codeIndex.files.get(path)
-        if (file) {
-          ;(file as { content: string }).content = content
-        }
-      }
+    if (storeKey) {
+      const store = new IDBContentStore(storeKey, undefined, { kind: 'disabled' })
+      store.registerPaths(codeIndex.files.keys())
+      codeIndex.contentStore = store
     }
 
     const analysis = serializedAnalysis ? deserializeFullAnalysis(serializedAnalysis) : null

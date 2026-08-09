@@ -260,17 +260,17 @@ export async function clearAllRepoContent(signal?: AbortSignal): Promise<void> {
  * (dual-write). Consumers don't read from IDB yet — that's Wave 3.
  */
 export class IDBContentStore implements ContentStore {
-  readonly repoKey: string
+  readonly storeKey: string
   private paths: Set<string> = new Set()
   private dbPromise: Promise<IDBDatabase> | null = null
   private unflushedWrites = new Set<Promise<void>>()
 
   constructor(
-    repoKey: string,
+    storeKey: string,
     private readonly signal?: AbortSignal,
     private readonly writeAccess: IDBContentWriteAccess = { kind: 'uncoordinated' },
   ) {
-    this.repoKey = repoKey
+    this.storeKey = storeKey
   }
 
   private canWrite(): boolean {
@@ -301,7 +301,7 @@ export class IDBContentStore implements ContentStore {
   }
 
   private idbKey(path: string): string {
-    return `${this.repoKey}:${path}`
+    return `${this.storeKey}:${path}`
   }
 
   async get(path: string): Promise<string | null> {
@@ -396,13 +396,18 @@ export class IDBContentStore implements ContentStore {
     return this.paths.size
   }
 
+  /** Register metadata-backed paths without writing or hydrating their source. */
+  registerPaths(paths: Iterable<string>): void {
+    for (const path of paths) this.paths.add(path)
+  }
+
   /** Clear all content for this repo from IDB. */
   async clear(): Promise<void> {
     if (this.signal?.aborted) throw abortError(this.signal)
     if (!this.canWrite()) return
     await this.flush()
     if (this.signal?.aborted) throw abortError(this.signal)
-    await deleteRepoContent(this.repoKey)
+    await deleteRepoContent(this.storeKey, this.signal)
     this.paths.clear()
   }
 

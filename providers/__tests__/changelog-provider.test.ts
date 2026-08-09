@@ -54,7 +54,7 @@ vi.mock('@/lib/github/fetcher', () => ({
 }))
 
 vi.mock('@/lib/ai/structural-index', () => ({
-  buildStructuralIndex: vi.fn(() => '{}'),
+  buildStructuralIndexAsync: vi.fn(async () => '{}'),
 }))
 
 vi.mock('@/lib/ai/providers', () => ({

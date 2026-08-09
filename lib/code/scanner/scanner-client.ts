@@ -1,5 +1,5 @@
 // Client-side wrapper — dispatches scan requests to a Web Worker.
-// Falls back to synchronous scanIssues when Workers are unavailable (SSR, tests).
+// Falls back to async hydrated scanning when Workers are unavailable (SSR, tests).
 
 import type { CodeIndex } from '../code-index'
 import { IDBContentStore } from '../content-store'
@@ -53,7 +53,7 @@ function getWorker(): Worker | null {
 
 /**
  * Run the issue scanner in a Web Worker so the main thread stays responsive.
- * Falls back to a synchronous in-thread scan when Workers are unavailable.
+ * Falls back to an async hydrated in-thread scan when Workers are unavailable.
  */
 export async function scanInWorker(
   codeIndex: CodeIndex,
@@ -63,8 +63,10 @@ export async function scanInWorker(
   const w = getWorker()
   if (!w) {
     // Fallback: run in the current thread
-    const { scanIssues } = await import('./scanner')
-    return scanIssues(codeIndex, analysis, changedFiles)
+    const { scanIssuesAsync } = await import('./scanner')
+    const result = await scanIssuesAsync(codeIndex, analysis, { changedFiles })
+    if (!result) throw new Error('Scanner fallback stopped before producing a result')
+    return result
   }
 
   const id = ++requestId
@@ -79,7 +81,7 @@ export async function scanInWorker(
         : serializeCodeIndex(codeIndex),
       analysis: analysis ? serializeFullAnalysis(analysis) : null,
       changedFiles,
-      ...(isIDB && { repoKey: (codeIndex.contentStore as IDBContentStore).repoKey }),
+      ...(isIDB && { storeKey: (codeIndex.contentStore as IDBContentStore).storeKey }),
     }
     w.postMessage(message)
   })

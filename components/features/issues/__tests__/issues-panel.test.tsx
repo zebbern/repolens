@@ -209,7 +209,7 @@ describe('IssuesPanel', () => {
     let resolve!: (value: string) => void
     const index = {
       ...mockCodeIndex,
-      files: new Map([['src/utils.ts', { content: '', path: 'src/utils.ts' }]]),
+      files: new Map([['src/utils.ts', { content: undefined, path: 'src/utils.ts' }]]),
       contentStore: { get: () => new Promise<string>(done => { resolve = done }) },
     }
     const { rerender } = render(<IssuesPanel codeIndex={index as unknown as CodeIndex} />)

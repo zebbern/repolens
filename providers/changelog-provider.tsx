@@ -15,7 +15,7 @@ import { DefaultChatTransport, lastAssistantMessageIsCompleteWithToolCalls } fro
 import type { UIMessage } from 'ai'
 import { useAPIKeys, useRepositoryActions, useRepositoryData } from '@/providers'
 import { buildFileTreeString } from '@/lib/github/fetcher'
-import { buildStructuralIndex } from '@/lib/ai/structural-index'
+import { buildStructuralIndexAsync } from '@/lib/ai/structural-index'
 import { getMaxIndexBytesForModel } from '@/lib/ai/providers'
 import { handleToolCall, type AddToolOutputFn } from '@/lib/ai/tool-call-handler'
 import { flattenFiles, type CodeIndex } from '@/lib/code/code-index'
@@ -81,14 +81,14 @@ function createChangelogTransportController() {
   let runtime: ChangelogTransportRuntime | null = null
   const transport = new DefaultChatTransport({
     api: '/api/changelog/generate',
-    prepareSendMessagesRequest: ({ messages }) => {
+    prepareSendMessagesRequest: async ({ messages }) => {
       const current = runtime
       if (!current?.selectedModel || !current.repoContext) {
         throw new Error('Model or repository not ready for changelog generation')
       }
 
       const { selectedModel, apiKeys, repoContext, codeIndex, genContext } = current
-      const structuralIndex = buildStructuralIndex(codeIndex, {
+      const structuralIndex = await buildStructuralIndexAsync(codeIndex, {
         maxIndexBytes: getMaxIndexBytesForModel(selectedModel.id),
       })
 

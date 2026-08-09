@@ -2,7 +2,7 @@
 
 import { useState, useRef, useCallback, useEffect } from 'react'
 import type { CodeIndex } from '@/lib/code/code-index'
-import { searchIndex } from '@/lib/code/code-index'
+import { searchIndexAsync, type SearchResult } from '@/lib/code/code-index'
 import type { InlineActionType, InlineActionResult, SymbolRange } from '../types'
 
 interface UseInlineActionsReturn {
@@ -29,7 +29,7 @@ interface UseInlineActionsReturn {
  */
 function formatFindUsagesResult(
   symbolName: string,
-  searchResults: ReturnType<typeof searchIndex>,
+  searchResults: SearchResult[],
 ): string {
   if (searchResults.length === 0) {
     return `No usages of \`${symbolName}\` found in the codebase.`
@@ -110,15 +110,27 @@ export function useInlineActions(codeIndex: CodeIndex): UseInlineActionsReturn {
 
       // Find Usages: client-side only
       if (action === 'find-usages') {
-        const searchResults = searchIndex(codeIndex, symbolRange.symbol.name)
-        const content = formatFindUsagesResult(symbolRange.symbol.name, searchResults)
-        setResult({
-          type: 'find-usages',
-          symbolName: symbolRange.symbol.name,
-          content,
-          isStreaming: false,
-        })
-        setIsStreaming(false)
+        setIsStreaming(true)
+        void searchIndexAsync(codeIndex, symbolRange.symbol.name)
+          .then(searchResults => {
+            const content = formatFindUsagesResult(symbolRange.symbol.name, searchResults)
+            setResult({
+              type: 'find-usages',
+              symbolName: symbolRange.symbol.name,
+              content,
+              isStreaming: false,
+            })
+          })
+          .catch(error => {
+            setResult({
+              type: 'find-usages',
+              symbolName: symbolRange.symbol.name,
+              content: '',
+              isStreaming: false,
+              error: error instanceof Error ? error.message : 'Search failed',
+            })
+          })
+          .finally(() => setIsStreaming(false))
         return
       }
 

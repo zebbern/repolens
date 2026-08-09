@@ -7,6 +7,8 @@ import {
 } from '@/lib/code/code-index'
 import { InMemoryContentStore } from '@/lib/code/content-store'
 import {
+  buildStructuralIndex,
+  buildStructuralIndexAsync,
   extractExportsAsync,
   extractImportsAsync,
   extractSignaturesAsync,
@@ -194,5 +196,33 @@ describe('extractSignaturesAsync with contentStore-only content', () => {
     const index = buildStrippedIndex([])
     const result = await extractSignaturesAsync('gone.ts', index)
     expect(result).toEqual([])
+  })
+})
+
+describe('buildStructuralIndexAsync', () => {
+  it('matches the inline structural index when source is only in the content store', async () => {
+    const inline = buildPopulatedIndex([
+      { path: 'src/utils.ts', content: TS_CONTENT, language: 'typescript' },
+      { path: 'src/app.py', content: PY_CONTENT, language: 'python' },
+    ])
+    const stored = buildStrippedIndex([
+      { path: 'src/utils.ts', content: TS_CONTENT, language: 'typescript' },
+      { path: 'src/app.py', content: PY_CONTENT, language: 'python' },
+    ])
+
+    expect(JSON.parse(await buildStructuralIndexAsync(stored))).toEqual(
+      JSON.parse(buildStructuralIndex(inline)),
+    )
+  })
+
+  it('rejects missing source instead of publishing incomplete structure', async () => {
+    const missing = buildStrippedIndex([
+      { path: 'src/missing.ts', content: TS_CONTENT, language: 'typescript' },
+    ])
+    await missing.contentStore.clear()
+
+    await expect(buildStructuralIndexAsync(missing)).rejects.toThrow(
+      'Content unavailable for indexed files: src/missing.ts',
+    )
   })
 })

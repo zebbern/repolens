@@ -42,11 +42,10 @@ vi.mock('sonner', () => ({
 }))
 
 import { getCachedRepo, withHydratedCachedRepo } from '@/lib/cache/repo-cache'
-import { batchIndexFiles, createEmptyIndex, createEmptyIndexWithStore } from '@/lib/code/code-index'
+import { batchIndexFiles, batchIndexMetadataOnly, createEmptyIndex, createEmptyIndexWithStore } from '@/lib/code/code-index'
 import { IDBContentStore, InMemoryContentStore } from '@/lib/code/content-store'
 import { fetchFileViaProxy, fetchRepoViaProxy, fetchTreeViaProxy } from '@/lib/github/client'
 import { startIndexing } from '@/lib/github/indexing-pipeline'
-import { toast } from 'sonner'
 import { RepositoryProvider, useRepository } from '../repository-provider'
 
 interface Deferred<T> {
@@ -125,21 +124,15 @@ describe('RepositoryProvider connection isolation', () => {
       const cached = await vi.mocked(getCachedRepo)(owner, name, { signal: options.signal })
       if (!cached || cached.sha !== sha) return false
       let index
-      let contentHydratedDurably = true
-      let hydrationError: unknown
-      try {
-        const base = options.useIDB
-          ? createEmptyIndexWithStore(new IDBContentStore(cached.key, options.signal))
-          : createEmptyIndex()
-        index = batchIndexFiles(base, cached.files)
-        await index.contentStore.flush()
-      } catch (error) {
-        hydrationError = error
-        contentHydratedDurably = false
-        index = batchIndexFiles(createEmptyIndex(), cached.files)
+      if (cached.content.kind === 'inline') {
+        index = batchIndexFiles(createEmptyIndex(), cached.content.files)
+      } else {
+        const store = new IDBContentStore(cached.content.storeKey, options.signal, { kind: 'disabled' })
+        store.registerPaths(cached.content.files.map(file => file.path))
+        index = batchIndexMetadataOnly(createEmptyIndexWithStore(store), cached.content.files)
       }
       index.coverage = cached.coverage
-      consume({ cached, index, contentHydratedDurably, hydrationError })
+      consume({ cached, index, contentHydratedDurably: true })
       return true
     })
     vi.mocked(startIndexing).mockResolvedValue(undefined)
@@ -214,7 +207,7 @@ describe('RepositoryProvider connection isolation', () => {
     vi.mocked(fetchRepoViaProxy).mockResolvedValue(repo('a'))
     vi.mocked(fetchTreeViaProxy).mockResolvedValue(partialTree('a'))
     vi.mocked(getCachedRepo).mockResolvedValue({
-      schemaVersion: 4,
+      schemaVersion: 5,
       complete: true,
       coverage: {
         treeStatus: 'complete',
@@ -224,7 +217,7 @@ describe('RepositoryProvider connection isolation', () => {
         mode: 'full',
       },
       key: 'acme/a', owner: 'acme', repo: 'a', sha: 'a-sha', timestamp: 1,
-      files: [{ path: 'stale.ts', content: 'stale' }],
+      content: { kind: 'inline', files: [{ path: 'stale.ts', content: 'stale' }] },
       tree: [{ name: 'stale.ts', path: 'stale.ts', type: 'file' }],
     })
 
@@ -270,9 +263,9 @@ describe('RepositoryProvider connection isolation', () => {
       mode: 'full' as const,
     }
     vi.mocked(getCachedRepo).mockResolvedValue({
-      schemaVersion: 4, complete: true, coverage: cachedCoverage,
+      schemaVersion: 5, complete: true, coverage: cachedCoverage,
       key: 'acme/a', owner: 'acme', repo: 'a', sha: 'a-sha', timestamp: 1,
-      files: [{ path: 'cached.ts', content: 'export const cached = true' }],
+      content: { kind: 'inline', files: [{ path: 'cached.ts', content: 'export const cached = true' }] },
       tree: [{ name: 'cached.ts', path: 'cached.ts', type: 'file' }],
     })
 
@@ -288,9 +281,14 @@ describe('RepositoryProvider connection isolation', () => {
     expect(startIndexing).not.toHaveBeenCalled()
   })
 
-  it('falls back to usable memory without a cached claim when cache-hit IDB hydration fails', async () => {
+  it('hydrates an IDB cache hit as metadata without rewriting its source', async () => {
+    globalThis.indexedDB = new IDBFactory()
+    globalThis.IDBKeyRange = IDBKeyRange
     vi.mocked(fetchRepoViaProxy).mockResolvedValue({ ...repo('a'), size: 60_000 })
     vi.mocked(fetchTreeViaProxy).mockResolvedValue(tree('a'))
+    const shared = new IDBContentStore('acme/a@a-sha')
+    shared.put('cached.ts', 'export const cached = true')
+    await shared.flush()
     const cachedCoverage = {
       treeStatus: 'complete' as const,
       supportedFiles: { discovered: 1, loaded: 1 },
@@ -299,30 +297,32 @@ describe('RepositoryProvider connection isolation', () => {
       mode: 'full' as const,
     }
     vi.mocked(getCachedRepo).mockResolvedValue({
-      schemaVersion: 4, complete: true, coverage: cachedCoverage,
+      schemaVersion: 5, complete: true, coverage: cachedCoverage,
       key: 'acme/a', owner: 'acme', repo: 'a', sha: 'a-sha', timestamp: 1,
-      files: [{ path: 'cached.ts', content: 'export const cached = true' }],
+      content: {
+        kind: 'idb',
+        storeKey: 'acme/a@a-sha',
+        files: [{ path: 'cached.ts', lineCount: 1 }],
+      },
       tree: [{ name: 'cached.ts', path: 'cached.ts', type: 'file' }],
     })
-    vi.spyOn(IDBContentStore.prototype, 'flush').mockRejectedValueOnce(
-      new DOMException('quota', 'QuotaExceededError'),
-    )
-    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const putBatch = vi.spyOn(IDBContentStore.prototype, 'putBatch')
+    const flushStore = vi.spyOn(IDBContentStore.prototype, 'flush')
 
     const { result } = renderHook(() => useRepository(), { wrapper })
     await act(async () => {
       await result.current.connectRepository('https://github.com/acme/a')
     })
 
-    expect(result.current.isCacheHit).toBe(false)
-    expect(result.current.loadingStage).toBe('ready')
-    expect(result.current.codeIndex.contentStore).toBeInstanceOf(InMemoryContentStore)
+    expect(result.current.isCacheHit).toBe(true)
+    expect(result.current.loadingStage).toBe('cached')
+    expect(result.current.codeIndex.files.get('cached.ts')?.content).toBeUndefined()
+    expect(result.current.codeIndex.contentStore).toBeInstanceOf(IDBContentStore)
     await expect(result.current.codeIndex.contentStore.get('cached.ts')).resolves.toBe(
       'export const cached = true',
     )
-    expect(toast.warning).toHaveBeenCalledWith(
-      'Repository is ready, but it was not cached for future visits.',
-    )
+    expect(putBatch).not.toHaveBeenCalled()
+    expect(flushStore).not.toHaveBeenCalled()
     expect(startIndexing).not.toHaveBeenCalled()
   })
 
@@ -331,6 +331,9 @@ describe('RepositoryProvider connection isolation', () => {
     globalThis.IDBKeyRange = IDBKeyRange
     vi.mocked(fetchRepoViaProxy).mockResolvedValue({ ...repo('a'), size: 60_000 })
     vi.mocked(fetchTreeViaProxy).mockResolvedValue(tree('a'))
+    const shared = new IDBContentStore('acme/a@a-sha')
+    shared.put('a.ts', 'published')
+    await shared.flush()
     const cachedCoverage = {
       treeStatus: 'complete' as const,
       supportedFiles: { discovered: 1, loaded: 1 },
@@ -339,9 +342,13 @@ describe('RepositoryProvider connection isolation', () => {
       mode: 'full' as const,
     }
     vi.mocked(getCachedRepo).mockResolvedValue({
-      schemaVersion: 4, complete: true, coverage: cachedCoverage,
+      schemaVersion: 5, complete: true, coverage: cachedCoverage,
       key: 'acme/a', owner: 'acme', repo: 'a', sha: 'a-sha', timestamp: 1,
-      files: [{ path: 'a.ts', content: 'published' }],
+      content: {
+        kind: 'idb',
+        storeKey: 'acme/a@a-sha',
+        files: [{ path: 'a.ts', lineCount: 1 }],
+      },
       tree: [{ name: 'a.ts', path: 'a.ts', type: 'file' }],
     })
 
@@ -353,7 +360,6 @@ describe('RepositoryProvider connection isolation', () => {
 
     expect(result.current.codeIndex.contentStore).toBeInstanceOf(InMemoryContentStore)
     expect(result.current.codeIndex.files.has('renamed.ts')).toBe(true)
-    const shared = new IDBContentStore('acme/a')
     expect(await shared.get('a.ts')).toBe('published')
     expect(await shared.get('renamed.ts')).toBeNull()
   })

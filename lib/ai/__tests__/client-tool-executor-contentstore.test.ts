@@ -1,14 +1,11 @@
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect } from 'vitest'
 import {
   createEmptyIndex,
   indexFile,
-  searchIndex,
-  getFileContent,
-  getFileContentSync,
   type CodeIndex,
   type IndexedFile,
 } from '@/lib/code/code-index'
-import { InMemoryContentStore, type ContentStore } from '@/lib/code/content-store'
+import { InMemoryContentStore } from '@/lib/code/content-store'
 import { executeToolLocally } from '../client-tool-executor'
 
 // ---------------------------------------------------------------------------
@@ -130,8 +127,8 @@ describe('executeToolLocally — readFiles with contentStore', () => {
 // ===========================================================================
 
 describe('executeToolLocally — searchFiles with contentStore', () => {
-  it('provides context lines from contentStore when file.content is populated', async () => {
-    const index = buildPopulatedIndex([
+  it('finds content and context lines when source exists only in contentStore', async () => {
+    const index = buildStrippedIndex([
       {
         path: 'src/util.ts',
         content: 'function foo() {\n  const bar = 1\n  return bar\n}\n',
@@ -143,14 +140,11 @@ describe('executeToolLocally — searchFiles with contentStore', () => {
       await executeToolLocally('searchFiles', { query: 'bar' }, index),
     )
 
-    // Should find matches in content
     const contentMatch = result.results.find((r: { matchType: string }) => r.matchType === 'content')
-    if (contentMatch) {
-      expect(contentMatch.matches.length).toBeGreaterThan(0)
-      // Context lines should be present
-      expect(contentMatch.matches[0].context).toBeDefined()
-      expect(contentMatch.matches[0].context.length).toBeGreaterThan(0)
-    }
+    expect(contentMatch).toBeDefined()
+    expect(contentMatch.matches.length).toBeGreaterThan(0)
+    expect(contentMatch.matches[0].context).toBeDefined()
+    expect(contentMatch.matches[0].context.length).toBeGreaterThan(0)
   })
 })
 

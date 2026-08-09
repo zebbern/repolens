@@ -1,5 +1,5 @@
 import type { CodeIndex, SearchResult } from './code-index'
-import { searchIndex } from './code-index'
+import { searchIndexAsync } from './code-index'
 import { serializeCodeIndex, serializeCodeIndexMeta } from './scanner/serialization'
 import { IDBContentStore } from './content-store'
 import type { SearchWorkerResponse } from './search.worker'
@@ -47,7 +47,7 @@ function ensureIndex(w: Worker, codeIndex: CodeIndex): void {
     w.postMessage({
       type: 'setIndex',
       codeIndex: serializeCodeIndexMeta(codeIndex),
-      repoKey: (codeIndex.contentStore as IDBContentStore).repoKey,
+      storeKey: (codeIndex.contentStore as IDBContentStore).storeKey,
     })
   } else {
     // InMemory repos: send full content (current behavior)
@@ -62,7 +62,7 @@ function ensureIndex(w: Worker, codeIndex: CodeIndex): void {
 
 /**
  * Search code index in a Web Worker thread.
- * Falls back to synchronous searchIndex when Workers are unavailable (SSR/tests).
+ * Falls back to async full-content search when Workers are unavailable (SSR/tests).
  */
 export function searchInWorker(
   codeIndex: CodeIndex,
@@ -70,7 +70,7 @@ export function searchInWorker(
   options: { caseSensitive?: boolean; regex?: boolean; wholeWord?: boolean } = {},
 ): Promise<SearchResult[]> {
   if (typeof window === 'undefined' || typeof Worker === 'undefined') {
-    return Promise.resolve(searchIndex(codeIndex, query, options))
+    return searchIndexAsync(codeIndex, query, options)
   }
 
   const id = ++requestId

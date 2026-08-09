@@ -77,7 +77,7 @@ vi.mock('@/lib/code/fetch-queue', () => ({
 }))
 
 vi.mock('@/lib/cache/repo-cache', () => ({
-  setCachedRepo: (...args: unknown[]) => mockSetCachedRepo(args[0], args[1], args[2]),
+  publishCachedRepo: (...args: unknown[]) => mockSetCachedRepo(args[1], args[2], args[3]),
 }))
 
 vi.mock('@/lib/github/fetch-utils', () => ({

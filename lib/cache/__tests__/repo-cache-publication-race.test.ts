@@ -1,36 +1,19 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { IDBFactory, IDBKeyRange, IDBObjectStore as FakeIDBObjectStore } from 'fake-indexeddb'
+import { IDBFactory, IDBKeyRange } from 'fake-indexeddb'
 import type { FileNode, RepositoryCoverage } from '@/types/repository'
-
-const cleanupRace = vi.hoisted(() => {
-  let enter!: () => void
-  let release!: () => void
-  const entered = new Promise<void>(resolve => { enter = resolve })
-  const released = new Promise<void>(resolve => { release = resolve })
-  return { entered, released, enter, release, calls: 0 }
-})
-
-vi.mock('@/lib/code/content-store', async importOriginal => {
-  const actual = await importOriginal<typeof import('@/lib/code/content-store')>()
-  return {
-    ...actual,
-    deleteStaleRepoContent: async (
-      repoKey: string,
-      retainedPaths: ReadonlySet<string>,
-      signal?: AbortSignal,
-    ) => {
-      cleanupRace.calls++
-      if (cleanupRace.calls === 1) {
-        cleanupRace.enter()
-        await cleanupRace.released
-      }
-      return actual.deleteStaleRepoContent(repoKey, retainedPaths, signal)
-    },
-  }
-})
-
-import { getCachedRepo, setCachedRepo } from '../repo-cache'
+import {
+  createCacheMutationCoordinator,
+  withCacheMutationLock,
+  type CacheMutationCoordinator,
+} from '../cache-mutation-lock'
+import {
+  clearAllCache,
+  getCachedRepo,
+  publishCachedRepo,
+  setCachedRepo,
+} from '../repo-cache'
 import { IDBContentStore } from '@/lib/code/content-store'
+import { FakeWebLockManager, installFakeWebLocks } from './fake-web-lock-manager'
 
 const TREE: FileNode[] = [{ name: 'index.ts', path: 'index.ts', type: 'file' }]
 const COVERAGE: RepositoryCoverage = {
@@ -41,41 +24,137 @@ const COVERAGE: RepositoryCoverage = {
   mode: 'full',
 }
 
-describe('repository cache publication generations', () => {
+function deferred(): { promise: Promise<void>; resolve: () => void } {
+  let resolve!: () => void
+  const promise = new Promise<void>(done => { resolve = done })
+  return { promise, resolve }
+}
+
+function delayingCoordinator(
+  base: CacheMutationCoordinator,
+  entered: ReturnType<typeof deferred>,
+  release: ReturnType<typeof deferred>,
+): CacheMutationCoordinator {
+  return {
+    run: (signal, callback) => base.run(signal, async lease => {
+      entered.resolve()
+      await release.promise
+      return callback(lease)
+    }),
+  }
+}
+
+describe('origin-wide repository cache publication', () => {
+  let locks: FakeWebLockManager
+  let firstClient: CacheMutationCoordinator
+  let secondClient: CacheMutationCoordinator
+
   beforeEach(() => {
     globalThis.indexedDB = new IDBFactory()
     globalThis.IDBKeyRange = IDBKeyRange
+    locks = installFakeWebLocks()
+    firstClient = createCacheMutationCoordinator(() => locks)
+    secondClient = createCacheMutationCoordinator(() => locks)
   })
 
-  it('prevents obsolete cleanup and LRU work after a newer same-repo publication', async () => {
-    const store = new IDBContentStore('owner/repo')
-    store.put('old-only.ts', 'old')
-    await store.flush()
+  it('prevents an older client publication from deleting a later publication', async () => {
     await setCachedRepo('owner', 'repo', 'sha-old', [
       { path: 'old-only.ts', content: 'old' },
-    ], TREE, COVERAGE, undefined, { contentPaths: ['old-only.ts'] })
+    ], TREE, COVERAGE)
 
-    const getAllSpy = vi.spyOn(FakeIDBObjectStore.prototype, 'getAll')
-    store.put('a-only.ts', 'a')
-    await store.flush()
-    const publishA = setCachedRepo('owner', 'repo', 'sha-a', [
-      { path: 'a-only.ts', content: 'a' },
-    ], TREE, COVERAGE, undefined, { contentPaths: ['a-only.ts'] })
-    await cleanupRace.entered
+    const firstEntered = deferred()
+    const releaseFirst = deferred()
+    const store = new IDBContentStore('owner/repo')
+    const publishA = withCacheMutationLock(undefined, async lease => {
+      store.put('a-only.ts', 'a')
+      await store.flush()
+      firstEntered.resolve()
+      await releaseFirst.promise
+      await publishCachedRepo(lease, 'owner', 'repo', 'sha-a', [
+        { path: 'a-only.ts', content: 'a' },
+      ], TREE, COVERAGE, undefined, { contentPaths: ['a-only.ts'] })
+    }, firstClient)
+    await firstEntered.promise
 
-    store.put('b-only.ts', 'b')
-    await store.flush()
-    await setCachedRepo('owner', 'repo', 'sha-b', [
-      { path: 'b-only.ts', content: 'b' },
-    ], TREE, COVERAGE, undefined, { contentPaths: ['b-only.ts'] })
-    const lruReadsAfterB = getAllSpy.mock.calls.length
+    const publishB = withCacheMutationLock(undefined, async lease => {
+      store.put('b-only.ts', 'b')
+      await store.flush()
+      await publishCachedRepo(lease, 'owner', 'repo', 'sha-b', [
+        { path: 'b-only.ts', content: 'b' },
+      ], TREE, COVERAGE, undefined, { contentPaths: ['b-only.ts'] })
+    }, secondClient)
 
-    cleanupRace.release()
-    await publishA
+    releaseFirst.resolve()
+    await Promise.all([publishA, publishB])
 
-    expect(getAllSpy).toHaveBeenCalledTimes(lruReadsAfterB)
     expect((await getCachedRepo('owner', 'repo'))?.sha).toBe('sha-b')
     expect(await store.get('b-only.ts')).toBe('b')
     expect(await store.get('a-only.ts')).toBeNull()
+  })
+
+  it('clear-all acquiring first clears both stores and a later publication survives', async () => {
+    const entered = deferred()
+    const release = deferred()
+    const clearingClient = delayingCoordinator(firstClient, entered, release)
+    const clear = clearAllCache({ coordinator: clearingClient })
+    await entered.promise
+
+    const store = new IDBContentStore('owner/repo')
+    const publish = withCacheMutationLock(undefined, async lease => {
+      store.put('new.ts', 'new')
+      await store.flush()
+      await publishCachedRepo(lease, 'owner', 'repo', 'sha-new', [
+        { path: 'new.ts', content: 'new' },
+      ], TREE, COVERAGE, undefined, { contentPaths: ['new.ts'] })
+    }, secondClient)
+
+    release.resolve()
+    await Promise.all([clear, publish])
+    expect((await getCachedRepo('owner', 'repo'))?.sha).toBe('sha-new')
+    expect(await store.get('new.ts')).toBe('new')
+  })
+
+  it('publication acquiring first completes before a later clear removes both stores', async () => {
+    const entered = deferred()
+    const release = deferred()
+    const store = new IDBContentStore('owner/repo')
+    const publish = withCacheMutationLock(undefined, async lease => {
+      store.put('new.ts', 'new')
+      await store.flush()
+      entered.resolve()
+      await release.promise
+      await publishCachedRepo(lease, 'owner', 'repo', 'sha-new', [
+        { path: 'new.ts', content: 'new' },
+      ], TREE, COVERAGE, undefined, { contentPaths: ['new.ts'] })
+    }, firstClient)
+    await entered.promise
+
+    const clear = clearAllCache({ coordinator: secondClient })
+    release.resolve()
+    await Promise.all([publish, clear])
+    expect(await getCachedRepo('owner', 'repo')).toBeNull()
+    expect(await store.get('new.ts')).toBeNull()
+  })
+
+  it('serializes a concurrent cache touch before LRU selection and revalidation', async () => {
+    let now = 0
+    vi.spyOn(Date, 'now').mockImplementation(() => ++now)
+    for (let index = 1; index <= 5; index++) {
+      await setCachedRepo('owner', `repo-${index}`, `sha-${index}`, [], TREE, COVERAGE)
+    }
+
+    const entered = deferred()
+    const release = deferred()
+    const touchingClient = delayingCoordinator(firstClient, entered, release)
+    const touch = getCachedRepo('owner', 'repo-1', { coordinator: touchingClient })
+    await entered.promise
+    const publish = setCachedRepo('owner', 'repo-6', 'sha-6', [], TREE, COVERAGE, undefined, {
+      coordinator: secondClient,
+    })
+
+    release.resolve()
+    await Promise.all([touch, publish])
+    expect(await getCachedRepo('owner', 'repo-1')).not.toBeNull()
+    expect(await getCachedRepo('owner', 'repo-2')).toBeNull()
   })
 })

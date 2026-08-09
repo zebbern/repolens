@@ -7,7 +7,8 @@ import { createEmptyIndex, createEmptyIndexWithStore, batchIndexFiles, batchInde
 import { IDBContentStore, InMemoryContentStore, LazyContentStore } from '@/lib/code/content-store'
 import { FetchQueue } from '@/lib/code/fetch-queue'
 import { streamUnzipFiles, isFileIndexable, isProbablyBinaryContent, MAX_FILE_SIZE } from '@/lib/github/zipball'
-import { setCachedRepo } from '@/lib/cache/repo-cache'
+import { publishCachedRepo } from '@/lib/cache/repo-cache'
+import { withCacheMutationLock } from '@/lib/cache/cache-mutation-lock'
 import { fetchWithConcurrency } from './fetch-utils'
 import { LAZY_CONTENT_THRESHOLD_KB, getIdbThresholdKB } from '@/config/constants'
 import { toast } from 'sonner'
@@ -75,13 +76,15 @@ export async function startIndexing(
     const emptyIndex = createEmptyIndex()
     emptyIndex.coverage = coverage
     try {
-      await emptyIndex.contentStore.flush()
-      if (signal.aborted) return
-      await setCachedRepo(repoData.owner, repoData.name, treeSha, [], fileTree, coverage, {
-        description: repoData.description,
-        stars: repoData.stars,
-        language: repoData.language,
-      }, { signal })
+      await withCacheMutationLock(signal, async lease => {
+        await emptyIndex.contentStore.flush()
+        if (signal.aborted) return
+        await publishCachedRepo(lease, repoData.owner, repoData.name, treeSha, [], fileTree, coverage, {
+          description: repoData.description,
+          stars: repoData.stars,
+          language: repoData.language,
+        })
+      })
     } catch (error) {
       if (signal.aborted) return
       warnNotCached(error)
@@ -261,11 +264,6 @@ export async function startIndexing(
 
   setLoadingStage('indexing')
 
-  // B3: Batch-index all accumulated files at once (avoids O(N²) Map copies)
-  const baseIndex = contentStore
-    ? createEmptyIndexWithStore(contentStore)
-    : createEmptyIndex()
-  const finalIndex = batchIndexFiles(baseIndex, accumulated)
   const loadedPaths = new Set(accumulated.map(file => file.path))
   const coverage = updateRepositoryCoverage(
     initialCoverage,
@@ -273,37 +271,42 @@ export async function startIndexing(
     [...loadedPaths].filter(path => discoveredPaths.has(path)).length,
     errors,
   )
-  finalIndex.coverage = coverage
-
-  let contentDurable = true
+  let finalIndex: CodeIndex | undefined
+  let contentDurable = false
   try {
-    await finalIndex.contentStore.flush()
-  } catch (error) {
-    if (signal.aborted) return
-    contentDurable = false
-    finalIndex.contentStore = new InMemoryContentStore(
-      new Map(accumulated.map(file => [file.path, file.content])),
-    )
-    warnNotCached(error)
-  }
-  if (signal.aborted) return
+    await withCacheMutationLock(signal, async lease => {
+      // The lock starts before the final content transaction and remains held
+      // through manifest publication and all destructive maintenance.
+      const baseIndex = contentStore
+        ? createEmptyIndexWithStore(contentStore)
+        : createEmptyIndex()
+      finalIndex = batchIndexFiles(baseIndex, accumulated)
+      finalIndex.coverage = coverage
+      await finalIndex.contentStore.flush()
+      contentDurable = true
+      if (signal.aborted) return
 
-  if (contentDurable) {
-    try {
-      await setCachedRepo(repoData.owner, repoData.name, treeSha, accumulated, fileTree, coverage, {
+      await publishCachedRepo(lease, repoData.owner, repoData.name, treeSha, accumulated, fileTree, coverage, {
         description: repoData.description,
         stars: repoData.stars,
         language: repoData.language,
       }, {
-        signal,
         ...(contentStore && { contentPaths: accumulated.map(file => file.path) }),
       })
-    } catch (error) {
-      if (signal.aborted) return
-      warnNotCached(error)
+    })
+  } catch (error) {
+    if (signal.aborted) return
+    if (!finalIndex) finalIndex = batchIndexFiles(createEmptyIndex(), accumulated)
+    if (!contentDurable) {
+      finalIndex.contentStore = new InMemoryContentStore(
+        new Map(accumulated.map(file => [file.path, file.content])),
+      )
     }
+    warnNotCached(error)
   }
   if (signal.aborted) return
+  if (!finalIndex) return
+  finalIndex.coverage = coverage
 
   setCodeIndex(finalIndex)
   setFailedFiles(errors)

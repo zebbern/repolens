@@ -8,6 +8,14 @@ import {
   deleteRepoContent,
   deleteStaleRepoContent,
 } from '@/lib/code/content-store'
+import {
+  assertActiveCacheMutationLease,
+  requireCrossContextCacheCoordination,
+  throwIfCacheMutationAborted,
+  withCacheMutationLock,
+  type CacheMutationCoordinator,
+  type CacheMutationLease,
+} from '@/lib/cache/cache-mutation-lock'
 
 const DB_NAME = 'repolens-cache'
 const STORE_NAME = 'repos'
@@ -15,105 +23,6 @@ const TOURS_STORE_NAME = 'tours'
 const DB_VERSION = 2
 const MAX_REPOS = 5
 export const REPO_CACHE_SCHEMA_VERSION = 4
-
-const SUPERSEDED_PUBLICATION = new DOMException('Repository cache publication was superseded', 'AbortError')
-
-interface RepoPublicationState {
-  generation: number
-  active?: { token: symbol; controller: AbortController }
-  cleanupControllers: Set<AbortController>
-}
-
-interface PublicationLease {
-  signal: AbortSignal
-  isCurrent: () => boolean
-  finish: () => void
-}
-
-interface CleanupLease {
-  signal: AbortSignal
-  isCurrent: () => boolean
-  finish: () => void
-}
-
-const repoPublicationStates = new Map<string, RepoPublicationState>()
-
-function getPublicationState(key: string): RepoPublicationState {
-  let state = repoPublicationStates.get(key)
-  if (!state) {
-    state = { generation: 0, cleanupControllers: new Set() }
-    repoPublicationStates.set(key, state)
-  }
-  return state
-}
-
-function beginPublication(key: string, callerSignal?: AbortSignal): PublicationLease {
-  const state = getPublicationState(key)
-  state.generation++
-  state.active?.controller.abort(SUPERSEDED_PUBLICATION)
-  for (const controller of state.cleanupControllers) controller.abort(SUPERSEDED_PUBLICATION)
-  state.cleanupControllers.clear()
-
-  const token = Symbol(key)
-  const controller = new AbortController()
-  const abortFromCaller = () => controller.abort(
-    callerSignal?.reason ?? new DOMException('The operation was aborted', 'AbortError'),
-  )
-  callerSignal?.addEventListener('abort', abortFromCaller, { once: true })
-  if (callerSignal?.aborted) abortFromCaller()
-  state.active = { token, controller }
-
-  return {
-    signal: controller.signal,
-    isCurrent: () => state.active?.token === token && !controller.signal.aborted,
-    finish: () => {
-      callerSignal?.removeEventListener('abort', abortFromCaller)
-      if (state.active?.token === token) state.active = undefined
-    },
-  }
-}
-
-function beginCleanup(key: string): CleanupLease | null {
-  const state = getPublicationState(key)
-  if (state.active) return null
-  const generation = state.generation
-  const controller = new AbortController()
-  state.cleanupControllers.add(controller)
-  return {
-    signal: controller.signal,
-    isCurrent: () => (
-      state.generation === generation
-      && state.active === undefined
-      && state.cleanupControllers.has(controller)
-      && !controller.signal.aborted
-    ),
-    finish: () => state.cleanupControllers.delete(controller),
-  }
-}
-
-function supersedeAllRepoWork(): void {
-  for (const state of repoPublicationStates.values()) {
-    state.generation++
-    state.active?.controller.abort(SUPERSEDED_PUBLICATION)
-    state.active = undefined
-    for (const controller of state.cleanupControllers) controller.abort(SUPERSEDED_PUBLICATION)
-    state.cleanupControllers.clear()
-  }
-}
-
-function combineAbortSignals(...signals: AbortSignal[]): { signal: AbortSignal; dispose: () => void } {
-  const controller = new AbortController()
-  const listeners = signals.map(signal => {
-    const abort = () => controller.abort(signal.reason ?? new DOMException('The operation was aborted', 'AbortError'))
-    signal.addEventListener('abort', abort, { once: true })
-    if (signal.aborted) abort()
-    return { signal, abort }
-  })
-  return {
-    signal: controller.signal,
-    dispose: () => listeners.forEach(({ signal, abort }) => signal.removeEventListener('abort', abort)),
-  }
-}
 
 export interface CachedRepo {
   schemaVersion?: number
@@ -250,35 +159,44 @@ async function deleteRepoManifest(db: IDBDatabase, key: string, signal?: AbortSi
   if (signal?.aborted) throw signal.reason
 }
 
+async function deleteRepoManifestIfIdentity(
+  db: IDBDatabase,
+  candidate: CachedRepo,
+  signal?: AbortSignal,
+): Promise<boolean> {
+  if (signal?.aborted) throw signal.reason
+  const tx = db.transaction(STORE_NAME, 'readwrite', { durability: 'strict' })
+  const done = transactionDone(tx, signal)
+  let removed = false
+  const request = tx.objectStore(STORE_NAME).get(candidate.key)
+  request.onsuccess = () => {
+    const current = request.result as CachedRepo | undefined
+    if (!current || !sameManifestIdentity(current, candidate)) return
+    tx.objectStore(STORE_NAME).delete(candidate.key)
+    removed = true
+  }
+  await done
+  if (signal?.aborted) throw signal.reason
+  return removed
+}
+
 async function touchRepoTimestamp(
   db: IDBDatabase,
   entry: CachedRepo,
-  callerSignal?: AbortSignal,
+  signal?: AbortSignal,
 ): Promise<void> {
-  const cleanup = beginCleanup(entry.key)
-  if (!cleanup) return
-  const combined = combineAbortSignals(...(callerSignal ? [callerSignal, cleanup.signal] : [cleanup.signal]))
-  try {
-    const tx = db.transaction(STORE_NAME, 'readwrite', { durability: 'strict' })
-    const done = transactionDone(tx, combined.signal)
-    const request = tx.objectStore(STORE_NAME).get(entry.key)
-    request.onsuccess = () => {
-      const current = request.result as CachedRepo | undefined
-      if (!cleanup.isCurrent() || !current || current.sha !== entry.sha) return
-      current.timestamp = Date.now()
-      tx.objectStore(STORE_NAME).put(current)
-      entry.timestamp = current.timestamp
-    }
-    await done
-    if (callerSignal?.aborted) throw callerSignal.reason
-  } catch (error) {
-    if (callerSignal?.aborted) throw error
-    if (!cleanup.isCurrent()) return
-    throw error
-  } finally {
-    combined.dispose()
-    cleanup.finish()
+  const tx = db.transaction(STORE_NAME, 'readwrite', { durability: 'strict' })
+  const done = transactionDone(tx, signal)
+  const request = tx.objectStore(STORE_NAME).get(entry.key)
+  request.onsuccess = () => {
+    const current = request.result as CachedRepo | undefined
+    if (!current || !sameManifestIdentity(current, entry)) return
+    current.timestamp = Date.now()
+    tx.objectStore(STORE_NAME).put(current)
+    entry.timestamp = current.timestamp
   }
+  await done
+  if (signal?.aborted) throw signal.reason
 }
 
 async function getAllRepoRecords(db: IDBDatabase, signal?: AbortSignal): Promise<CachedRepo[]> {
@@ -294,12 +212,23 @@ async function getAllRepoRecords(db: IDBDatabase, signal?: AbortSignal): Promise
   return records
 }
 
-/** Run an LRU eviction pass without crossing active repository publications. */
-async function evictLRU(db: IDBDatabase, publication: PublicationLease): Promise<void> {
+function sameManifestIdentity(current: CachedRepo, candidate: CachedRepo): boolean {
+  return current.key === candidate.key
+    && current.owner === candidate.owner
+    && current.repo === candidate.repo
+    && current.sha === candidate.sha
+    && current.timestamp === candidate.timestamp
+    && current.schemaVersion === candidate.schemaVersion
+    && current.complete === candidate.complete
+}
+
+/** Run an LRU eviction pass while the origin-wide mutation lease is held. */
+async function evictLRU(db: IDBDatabase, lease: CacheMutationLease): Promise<void> {
+  if (!lease.crossContextSafe) return
   try {
-    if (!publication.isCurrent()) throw publication.signal.reason
-    const records = await getAllRepoRecords(db, publication.signal)
-    if (!publication.isCurrent()) throw publication.signal.reason
+    throwIfCacheMutationAborted(lease)
+    const records = await getAllRepoRecords(db, lease.signal)
+    throwIfCacheMutationAborted(lease)
     if (records.length <= MAX_REPOS) return
 
     records.sort((a, b) => a.timestamp - b.timestamp)
@@ -307,31 +236,21 @@ async function evictLRU(db: IDBDatabase, publication: PublicationLease): Promise
     let removed = 0
     for (const record of records) {
       if (removed >= removalCount) break
-      if (!publication.isCurrent()) throw publication.signal.reason
-      const cleanup = beginCleanup(record.key)
-      if (!cleanup) continue
-      const combined = combineAbortSignals(publication.signal, cleanup.signal)
+      throwIfCacheMutationAborted(lease)
       try {
-        const current = await getRepoRecord(db, record.key, combined.signal)
-        if (!publication.isCurrent() || !cleanup.isCurrent()) continue
-        if (!current || current.sha !== record.sha) continue
-
-        await deleteRepoManifest(db, record.key, combined.signal)
-        if (!publication.isCurrent() || !cleanup.isCurrent()) continue
-        await deleteRepoContent(record.key, combined.signal)
-        if (!publication.isCurrent() || !cleanup.isCurrent()) continue
+        const removedManifest = await deleteRepoManifestIfIdentity(db, record, lease.signal)
+        throwIfCacheMutationAborted(lease)
+        if (!removedManifest) continue
+        await deleteRepoContent(record.key, lease.signal)
+        throwIfCacheMutationAborted(lease)
         removed++
       } catch (error) {
-        if (!publication.isCurrent()) throw error
-        if (!cleanup.isCurrent()) continue
+        if (lease.signal?.aborted) throw error
         console.warn(`Failed to remove evicted repository content for ${record.key}:`, error)
-      } finally {
-        combined.dispose()
-        cleanup.finish()
       }
     }
   } catch (error) {
-    if (!publication.isCurrent()) throw error
+    if (lease.signal?.aborted) throw error
     console.warn('Failed to evict old repository cache entries:', error)
   }
 }
@@ -344,7 +263,7 @@ async function evictLRU(db: IDBDatabase, publication: PublicationLease): Promise
 export async function getCachedRepo(
   owner: string,
   repo: string,
-  options: { signal?: AbortSignal } = {},
+  options: { signal?: AbortSignal; coordinator?: CacheMutationCoordinator } = {},
 ): Promise<ReusableCachedRepo | null> {
   const throwIfAborted = () => {
     if (options.signal?.aborted) {
@@ -353,30 +272,104 @@ export async function getCachedRepo(
   }
 
   try {
-    throwIfAborted()
-    const db = await openDB(options.signal)
-    throwIfAborted()
-    const entry = await getRepoRecord(db, `${owner}/${repo}`, options.signal)
-    throwIfAborted()
+    return await withCacheMutationLock(options.signal, async lease => {
+      throwIfCacheMutationAborted(lease)
+      const db = await openDB(lease.signal)
+      throwIfCacheMutationAborted(lease)
+      const entry = await getRepoRecord(db, `${owner}/${repo}`, lease.signal)
+      throwIfCacheMutationAborted(lease)
 
-    if (entry && !isReusableCachedRepo(entry)) return null
+      if (entry && !isReusableCachedRepo(entry)) return null
 
-    // Touch timestamp so LRU eviction keeps frequently-accessed repos
-    if (entry) {
-      try {
-        await touchRepoTimestamp(db, entry, options.signal)
-      } catch (error) {
-        if (options.signal?.aborted) throw error
-        console.warn(`Failed to update repository cache timestamp for ${entry.key}:`, error)
+      // Touch timestamp so LRU eviction keeps frequently-accessed repos.
+      if (entry) {
+        try {
+          await touchRepoTimestamp(db, entry, lease.signal)
+        } catch (error) {
+          if (lease.signal?.aborted) throw error
+          console.warn(`Failed to update repository cache timestamp for ${entry.key}:`, error)
+        }
+        throwIfCacheMutationAborted(lease)
       }
-      throwIfAborted()
-    }
 
-    return entry
+      return entry
+    }, options.coordinator)
   } catch (error) {
+    throwIfAborted()
     if (options.signal?.aborted) throw error
     return null
   }
+}
+
+export interface CachePublicationOptions {
+  contentPaths?: readonly string[]
+}
+
+/** Publish a manifest and perform maintenance while an origin-wide mutation lease is held. */
+export async function publishCachedRepo(
+  lease: CacheMutationLease,
+  owner: string,
+  repo: string,
+  sha: string,
+  files: Array<{ path: string; content: string; language?: string }>,
+  tree: FileNode[],
+  coverage: RepositoryCoverage,
+  meta?: { description?: string | null; stars?: number; language?: string | null },
+  options: CachePublicationOptions = {},
+): Promise<void> {
+  const key = `${owner}/${repo}`
+  assertActiveCacheMutationLease(lease)
+  throwIfCacheMutationAborted(lease)
+  const db = await openDB(lease.signal)
+  throwIfCacheMutationAborted(lease)
+  const previous = await getRepoRecord(db, key, lease.signal)
+  throwIfCacheMutationAborted(lease)
+  const record: CachedRepo = {
+    schemaVersion: REPO_CACHE_SCHEMA_VERSION,
+    coverage,
+    complete: isCoverageComplete(coverage),
+    key,
+    owner,
+    repo,
+    sha,
+    timestamp: Date.now(),
+    files,
+    tree,
+    ...(meta && {
+      description: meta.description,
+      stars: meta.stars,
+      language: meta.language,
+    }),
+  }
+
+  const tx = db.transaction(STORE_NAME, 'readwrite', { durability: 'strict' })
+  const done = transactionDone(tx, lease.signal)
+  tx.objectStore(STORE_NAME).put(record)
+  await done
+  throwIfCacheMutationAborted(lease)
+
+  // Cross-context cleanup is unsafe without Web Locks. The manifest remains
+  // valid; orphaned content is preferable to deleting another tab's writes.
+  if (lease.crossContextSafe && previous && previous.sha !== sha) {
+    const currentManifest = await getRepoRecord(db, key, lease.signal)
+    throwIfCacheMutationAborted(lease)
+    if (currentManifest && sameManifestIdentity(currentManifest, record)) {
+      try {
+        if (options.contentPaths) {
+          await deleteStaleRepoContent(key, new Set(options.contentPaths), lease.signal)
+        } else {
+          await deleteRepoContent(key, lease.signal)
+        }
+        throwIfCacheMutationAborted(lease)
+      } catch (error) {
+        if (lease.signal?.aborted) throw error
+        console.warn(`Failed to remove superseded repository content for ${key}:`, error)
+      }
+    }
+  }
+
+  await evictLRU(db, lease)
+  throwIfCacheMutationAborted(lease)
 }
 
 /** Persist indexed file data for a repo, then run LRU eviction. */
@@ -388,96 +381,40 @@ export async function setCachedRepo(
   tree: FileNode[],
   coverage: RepositoryCoverage,
   meta?: { description?: string | null; stars?: number; language?: string | null },
-  options: { signal?: AbortSignal; contentPaths?: readonly string[] } = {},
+  options: CachePublicationOptions & {
+    signal?: AbortSignal
+    coordinator?: CacheMutationCoordinator
+  } = {},
 ): Promise<void> {
-  const key = `${owner}/${repo}`
-  if (options.signal?.aborted) {
-    throw options.signal.reason ?? new DOMException('The operation was aborted', 'AbortError')
-  }
-  const publication = beginPublication(key, options.signal)
-  const checkCurrent = () => {
-    if (options.signal?.aborted) {
-      throw options.signal.reason ?? new DOMException('The operation was aborted', 'AbortError')
-    }
-    return publication.isCurrent()
-  }
-
-  try {
-    if (!checkCurrent()) return
-    const db = await openDB(publication.signal)
-    if (!checkCurrent()) return
-    const previous = await getRepoRecord(db, key, publication.signal)
-    if (!checkCurrent()) return
-    const record: CachedRepo = {
-      schemaVersion: REPO_CACHE_SCHEMA_VERSION,
-      coverage,
-      complete: isCoverageComplete(coverage),
-      key,
-      owner,
-      repo,
-      sha,
-      timestamp: Date.now(),
-      files,
-      tree,
-      ...(meta && {
-        description: meta.description,
-        stars: meta.stars,
-        language: meta.language,
-      }),
-    }
-
-    const tx = db.transaction(STORE_NAME, 'readwrite', { durability: 'strict' })
-    const done = transactionDone(tx, publication.signal)
-    if (checkCurrent()) tx.objectStore(STORE_NAME).put(record)
-    await done
-    if (!checkCurrent()) return
-
-    if (previous && previous.sha !== sha) {
-      const currentManifest = await getRepoRecord(db, key, publication.signal)
-      if (!checkCurrent()) return
-      if (!currentManifest || currentManifest.sha !== sha) return
-      try {
-        if (options.contentPaths) {
-          await deleteStaleRepoContent(key, new Set(options.contentPaths), publication.signal)
-        } else {
-          await deleteRepoContent(key, publication.signal)
-        }
-        if (!checkCurrent()) return
-      } catch (error) {
-        if (!checkCurrent()) return
-        console.warn(`Failed to remove superseded repository content for ${key}:`, error)
-      }
-    }
-
-    if (!checkCurrent()) return
-    await evictLRU(db, publication)
-    if (!checkCurrent()) return
-  } catch (error) {
-    if (options.signal?.aborted) throw error
-    if (!publication.isCurrent()) return
-    throw error
-  } finally {
-    publication.finish()
-  }
+  return withCacheMutationLock(options.signal, lease => publishCachedRepo(
+    lease,
+    owner,
+    repo,
+    sha,
+    files,
+    tree,
+    coverage,
+    meta,
+    options,
+  ), options.coordinator)
 }
 
 /** Remove a single repo from the cache. */
 export async function clearCachedRepo(
   owner: string,
   repo: string,
+  options: { signal?: AbortSignal; coordinator?: CacheMutationCoordinator } = {},
 ): Promise<void> {
-  const key = `${owner}/${repo}`
-  const removal = beginPublication(key)
-  try {
-    await deleteRepoContent(key, removal.signal)
-    if (!removal.isCurrent()) throw removal.signal.reason
-    const db = await openDB(removal.signal)
-    if (!removal.isCurrent()) throw removal.signal.reason
-    await deleteRepoManifest(db, key, removal.signal)
-    if (!removal.isCurrent()) throw removal.signal.reason
-  } finally {
-    removal.finish()
-  }
+  return withCacheMutationLock(options.signal, async lease => {
+    requireCrossContextCacheCoordination(lease)
+    const key = `${owner}/${repo}`
+    await deleteRepoContent(key, lease.signal)
+    throwIfCacheMutationAborted(lease)
+    const db = await openDB(lease.signal)
+    throwIfCacheMutationAborted(lease)
+    await deleteRepoManifest(db, key, lease.signal)
+    throwIfCacheMutationAborted(lease)
+  }, options.coordinator)
 }
 
 /** List lightweight metadata for all cached repos, sorted by most-recent first. */
@@ -513,12 +450,19 @@ export async function listCachedRepos(): Promise<CachedRepoMeta[]> {
 }
 
 /** Clear all cached repos. */
-export async function clearAllCache(): Promise<void> {
-  supersedeAllRepoWork()
-  await clearAllRepoContent()
-  const db = await openDB()
-  const tx = db.transaction(STORE_NAME, 'readwrite', { durability: 'strict' })
-  const done = transactionDone(tx)
-  tx.objectStore(STORE_NAME).clear()
-  await done
+export async function clearAllCache(
+  options: { signal?: AbortSignal; coordinator?: CacheMutationCoordinator } = {},
+): Promise<void> {
+  return withCacheMutationLock(options.signal, async lease => {
+    requireCrossContextCacheCoordination(lease)
+    await clearAllRepoContent(lease.signal)
+    throwIfCacheMutationAborted(lease)
+    const db = await openDB(lease.signal)
+    throwIfCacheMutationAborted(lease)
+    const tx = db.transaction(STORE_NAME, 'readwrite', { durability: 'strict' })
+    const done = transactionDone(tx, lease.signal)
+    tx.objectStore(STORE_NAME).clear()
+    await done
+    throwIfCacheMutationAborted(lease)
+  }, options.coordinator)
 }

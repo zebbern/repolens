@@ -10,9 +10,10 @@ import { fetchRepoViaProxy, fetchTreeViaProxy, fetchFileViaProxy } from "@/lib/g
 import type { CodeIndex } from "@/lib/code/code-index"
 import { createEmptyIndex, createEmptyIndexWithStore, batchIndexFiles, invalidateLinesCache } from '@/lib/code/code-index'
 import { buildTreeFromFiles, type FileRename } from '@/lib/code/rename-files'
-import { IDBContentStore, InMemoryContentStore, LazyContentStore } from '@/lib/code/content-store'
+import { IDBContentStore, LazyContentStore } from '@/lib/code/content-store'
 import type { FetchQueue } from '@/lib/code/fetch-queue'
 import { getCachedRepo } from "@/lib/cache/repo-cache"
+import { withCacheMutationLock } from '@/lib/cache/cache-mutation-lock'
 import { toast } from 'sonner'
 import { analyzeCodebase, type FullAnalysis } from "@/lib/code/import-parser"
 import { startIndexing as runIndexingPipeline } from "@/lib/github/indexing-pipeline"
@@ -322,23 +323,25 @@ export function RepositoryProvider({ children }: { children: ReactNode }) {
       if (tree.status === 'complete' && cached && cached.sha === tree.sha) {
         // Cache hit — hydrate code index from cached data
         const useIDB = repoData.size != null && repoData.size >= getIdbThresholdKB()
-        const baseIndex = useIDB
-          ? createEmptyIndexWithStore(new IDBContentStore(`${owner}/${repoName}`, controller.signal))
-          : createEmptyIndex()
-        const index = batchIndexFiles(baseIndex, cached.files)
+        let index: CodeIndex | undefined
         let contentHydratedDurably = true
         try {
-          await index.contentStore.flush()
+          await withCacheMutationLock(controller.signal, async () => {
+            const baseIndex = useIDB
+              ? createEmptyIndexWithStore(new IDBContentStore(`${owner}/${repoName}`, controller.signal))
+              : createEmptyIndex()
+            index = batchIndexFiles(baseIndex, cached.files)
+            await index.contentStore.flush()
+          })
         } catch (error) {
           if (!isCurrentConnection(epoch, controller)) return false
           contentHydratedDurably = false
           console.warn('Failed to hydrate cached repository content in IndexedDB:', error)
-          index.contentStore = new InMemoryContentStore(
-            new Map(cached.files.map(file => [file.path, file.content])),
-          )
+          index = batchIndexFiles(createEmptyIndex(), cached.files)
           toast.warning('Repository is ready, but it was not cached for future visits.')
         }
         if (!isCurrentConnection(epoch, controller)) return false
+        if (!index) return false
         index.coverage = cached.coverage
         codeIndexRef.current = index
         setFiles(cached.tree)

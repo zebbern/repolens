@@ -14,6 +14,11 @@ import {
 } from '../repo-cache'
 import { IDBContentStore } from '@/lib/code/content-store'
 import type { FileNode, RepositoryCoverage } from '@/types/repository'
+import { installFakeWebLocks } from './fake-web-lock-manager'
+import {
+  CacheCoordinationUnavailableError,
+  createCacheMutationCoordinator,
+} from '../cache-mutation-lock'
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -49,6 +54,7 @@ describe('repo-cache (IndexedDB)', () => {
     // fake-indexeddb provides a proper IDBFactory that works reliably in Node.
     globalThis.indexedDB = new IDBFactory()
     globalThis.IDBKeyRange = IDBKeyRange
+    installFakeWebLocks()
   })
 
   it('does not publish an aborted same-repository cache replacement', async () => {
@@ -329,5 +335,38 @@ describe('repo-cache (IndexedDB)', () => {
     ).rejects.toBeInstanceOf(TypeError)
 
     globalThis.indexedDB = original
+  })
+
+  it('skips destructive maintenance when only module-local coordination is available', async () => {
+    const store = new IDBContentStore('owner/repo')
+    store.put('old.ts', 'old')
+    await store.flush()
+    await setCachedRepo('owner', 'repo', 'sha-old', SAMPLE_FILES, SAMPLE_TREE, SAMPLE_COVERAGE)
+
+    const fallback = createCacheMutationCoordinator(() => null)
+    store.put('new.ts', 'new')
+    await store.flush()
+    await setCachedRepo('owner', 'repo', 'sha-new', SAMPLE_FILES, SAMPLE_TREE, SAMPLE_COVERAGE, undefined, {
+      coordinator: fallback,
+      contentPaths: ['new.ts'],
+    })
+
+    expect(await store.get('old.ts')).toBe('old')
+    expect((await getCachedRepo('owner', 'repo'))?.sha).toBe('sha-new')
+
+    for (let index = 1; index <= 6; index++) {
+      await setCachedRepo('fallback', `repo-${index}`, `sha-${index}`, [], SAMPLE_TREE, SAMPLE_COVERAGE, undefined, {
+        coordinator: fallback,
+      })
+    }
+    expect(await getCachedRepo('fallback', 'repo-1')).not.toBeNull()
+  })
+
+  it('surfaces explicit cleanup failure without cross-context coordination', async () => {
+    const fallback = createCacheMutationCoordinator(() => null)
+    await expect(clearCachedRepo('owner', 'repo', { coordinator: fallback }))
+      .rejects.toBeInstanceOf(CacheCoordinationUnavailableError)
+    await expect(clearAllCache({ coordinator: fallback }))
+      .rejects.toBeInstanceOf(CacheCoordinationUnavailableError)
   })
 })

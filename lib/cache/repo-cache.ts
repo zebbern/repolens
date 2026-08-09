@@ -89,25 +89,32 @@ export function isReusableCachedRepo(entry: CachedRepo): entry is CachedRepo & {
     || !entry.content
   ) return false
 
-  switch (entry.content.kind) {
+  const runtimeContent: unknown = entry.content
+  if (typeof runtimeContent !== 'object' || runtimeContent === null) return false
+  const runtimeKind = Reflect.get(runtimeContent, 'kind')
+  if (runtimeKind !== 'inline' && runtimeKind !== 'idb') return false
+  const content = runtimeContent as CachedContent
+
+  switch (content.kind) {
     case 'inline':
-      return Array.isArray(entry.content.files) && entry.content.files.every(file => (
+      return Array.isArray(content.files) && content.files.every(file => (
         typeof file.path === 'string'
         && typeof file.content === 'string'
         && (file.language === undefined || typeof file.language === 'string')
       ))
     case 'idb':
-      return entry.content.storeKey === getContentStoreKey(entry.owner, entry.repo, entry.sha)
-        && Array.isArray(entry.content.files)
-        && entry.content.files.every(file => (
+      return content.storeKey === getContentStoreKey(entry.owner, entry.repo, entry.sha)
+        && Array.isArray(content.files)
+        && content.files.every(file => (
           typeof file.path === 'string'
           && Number.isInteger(file.lineCount)
           && file.lineCount >= 0
           && (file.language === undefined || typeof file.language === 'string')
         ))
     default: {
-      const exhaustive: never = entry.content
-      return exhaustive
+      const exhaustive: never = content
+      void exhaustive
+      return false
     }
   }
 }
@@ -573,19 +580,24 @@ export async function clearCachedRepo(
 /** List lightweight metadata for all cached repos, sorted by most-recent first. */
 export async function listCachedRepos(): Promise<CachedRepoMeta[]> {
   try {
-    const db = await openDB()
-    const records: CachedRepo[] = await new Promise((resolve) => {
-      const tx = db.transaction(STORE_NAME, 'readonly')
-      const store = tx.objectStore(STORE_NAME)
-      const request = store.getAll()
+    return await withCacheMutationLock(undefined, async lease => {
+      if (!lease.crossContextSafe) return []
+      const db = await openDB(lease.signal)
+      const records: CachedRepo[] = await new Promise((resolve) => {
+        const tx = db.transaction(STORE_NAME, 'readonly')
+        const store = tx.objectStore(STORE_NAME)
+        const request = store.getAll()
 
-      request.onsuccess = () => resolve(request.result ?? [])
-      request.onerror = () => resolve([])
-    })
+        request.onsuccess = () => resolve(request.result ?? [])
+        request.onerror = () => resolve([])
+      })
+      const reusable: ReusableCachedRepo[] = []
+      for (const record of records) {
+        if (isReusableCachedRepo(record)) reusable.push(record)
+        else await invalidateCachedRecord(db, record, lease.signal)
+      }
 
-    return records
-      .filter(isReusableCachedRepo)
-      .map((r) => ({
+      return reusable.map((r) => ({
         key: r.key,
         owner: r.owner,
         repo: r.repo,
@@ -597,6 +609,7 @@ export async function listCachedRepos(): Promise<CachedRepoMeta[]> {
         language: r.language,
       }))
       .sort((a, b) => b.timestamp - a.timestamp)
+    })
   } catch {
     return []
   }

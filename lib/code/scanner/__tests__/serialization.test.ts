@@ -3,6 +3,7 @@ import { createEmptyIndex, indexFile } from '@/lib/code/code-index'
 import {
   serializeCodeIndex,
   deserializeCodeIndex,
+  serializeCodeIndexMeta,
   serializeScanResults,
   deserializeScanResults,
   serializeFullAnalysis,
@@ -114,6 +115,20 @@ describe('serializeCodeIndex / deserializeCodeIndex', () => {
     expect(restored.files.size).toBe(0)
     expect(restored.totalFiles).toBe(0)
     expect(restored.totalLines).toBe(0)
+  })
+
+  it('preserves genuine empty source while leaving metadata-only source absent', () => {
+    const original = buildTestIndex()
+    original.files.get('src/app.ts')!.content = ''
+    delete original.files.get('src/utils.ts')!.content
+
+    const full = deserializeCodeIndex(serializeCodeIndex(original))
+    expect(full.files.get('src/app.ts')).toHaveProperty('content', '')
+    expect(full.files.get('src/utils.ts')).not.toHaveProperty('content')
+
+    const metadataOnly = deserializeCodeIndex(serializeCodeIndexMeta(original))
+    expect(metadataOnly.files.get('src/app.ts')).not.toHaveProperty('content')
+    expect(metadataOnly.files.get('src/utils.ts')).not.toHaveProperty('content')
   })
 })
 

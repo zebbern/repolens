@@ -292,8 +292,8 @@ export function extractExports(file: IndexedFile): string[] {
     const reExportRegex = /export\s*\{([^}]+)\}/g
     reExportRegex.lastIndex = 0
     let m: RegExpExecArray | null
-    const content = file.content ?? ''
-    while ((m = reExportRegex.exec(content)) !== null) {
+    const content = file.content
+    while (typeof content === 'string' && (m = reExportRegex.exec(content)) !== null) {
       const names = m[1].split(',').map(s => s.trim().split(/\s+as\s+/).pop()?.trim()).filter(Boolean)
       for (const name of names) {
         if (name) exports.push(name)
@@ -313,8 +313,8 @@ export function extractImports(file: IndexedFile): string[] {
   if (importRegex) {
     importRegex.lastIndex = 0
     let m: RegExpExecArray | null
-    const content = file.content ?? ''
-    while ((m = importRegex.exec(content)) !== null) {
+    const content = file.content
+    while (typeof content === 'string' && (m = importRegex.exec(content)) !== null) {
       // Some language regexes have multiple capture groups (e.g. Python)
       const importName = m[1] || m[2]
       if (importName) imports.push(importName.trim())
@@ -373,7 +373,7 @@ export async function extractExportsAsync(path: string, index: CodeIndex): Promi
 
   if (language === 'typescript' || language === 'tsx' || language === 'javascript' || language === 'jsx') {
     const content = await getFileContent(index, path)
-    if (content) {
+    if (content !== null) {
       const reExportRegex = /export\s*\{([^}]+)\}/g
       reExportRegex.lastIndex = 0
       let m: RegExpExecArray | null
@@ -397,7 +397,7 @@ export async function extractImportsAsync(path: string, index: CodeIndex): Promi
 
   if (importRegex) {
     const content = await getFileContent(index, path)
-    if (content) {
+    if (content !== null) {
       importRegex.lastIndex = 0
       let m: RegExpExecArray | null
       while ((m = importRegex.exec(content)) !== null) {

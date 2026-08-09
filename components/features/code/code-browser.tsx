@@ -220,7 +220,10 @@ export function CodeBrowser({ navigateToFile, navigateToLine, onNavigateComplete
   // --- Inline Actions ---
   const lineCount = activeTab?.content ? activeTab.content.split('\n').length : 0
   const symbolRanges = useSymbolRanges(outlineSymbols, lineCount)
-  const { result: inlineResult, triggerAction, dismissAction } = useInlineActions(codeIndex)
+  const { result: inlineResult, triggerAction, dismissAction } = useInlineActions(codeIndex, {
+    repositorySession,
+    isRepositorySessionCurrent,
+  })
   const { selectedModel, apiKeys, getValidProviders } = useAPIKeys()
   const hasApiKey = getValidProviders().length > 0 && selectedModel !== null
   const [hoveredSymbolRange, setHoveredSymbolRange] = useState<SymbolRange | null>(null)

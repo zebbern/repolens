@@ -63,6 +63,7 @@ function buildStrippedIndex(
 function createMockIDBStore(entries: Map<string, string>): ContentStore {
   const paths = new Set(entries.keys())
   return {
+    bulkReadMode: 'complete',
     get: vi.fn(async (path: string) => entries.get(path) ?? null),
     getSync: vi.fn((_path: string) => null), // IDB always returns null for sync
     getBatch: vi.fn(async (paths: string[]) => {
@@ -293,7 +294,7 @@ describe('contentStore on CodeIndex', () => {
 })
 
 // ===========================================================================
-// searchIndex skips files with undefined/empty content
+// searchIndex skips absent content and accepts genuine empty content
 // ===========================================================================
 
 describe('searchIndex with content stripping', () => {
@@ -315,7 +316,7 @@ describe('searchIndex with content stripping', () => {
     expect(results[0].file).toBe('src/has-content.ts')
   })
 
-  it('skips files where content is empty string', () => {
+  it('accepts an empty file as searched source with no matches', () => {
     const index = createEmptyIndex()
     index.files.set('src/empty.ts', {
       path: 'src/empty.ts',

@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { IDBFactory, IDBKeyRange } from 'fake-indexeddb'
 
 // Mock the tree-sitter parser module before importing anything that pulls in the
 // scanner. `tree-sitter-scanner.ts` imports it with this exact specifier, so the
@@ -12,8 +13,9 @@ vi.mock('@/lib/parsers/tree-sitter', () => ({
 
 // Side-effect import: registers the worker's `message` listener on `self`.
 import '@/lib/code/scanner/scanner.worker'
-import { createEmptyIndex, indexFile } from '@/lib/code/code-index'
-import { serializeCodeIndex } from '../serialization'
+import { batchIndexFiles, createEmptyIndex, createEmptyIndexWithStore, indexFile } from '@/lib/code/code-index'
+import { IDBContentStore } from '@/lib/code/content-store'
+import { serializeCodeIndex, serializeCodeIndexMeta } from '../serialization'
 import type { ScanWorkerRequest, ScanWorkerResponse } from '../serialization'
 import { initTreeSitter, getLanguageForFile, parseFile, queryTree } from '@/lib/parsers/tree-sitter'
 
@@ -27,6 +29,8 @@ const PY_SOURCE = 'import os\nos.system(x)\n'
 let originalPostMessage: PropertyDescriptor | undefined
 
 beforeEach(() => {
+  globalThis.indexedDB = new IDBFactory()
+  globalThis.IDBKeyRange = IDBKeyRange
   // test/setup.ts runs vi.restoreAllMocks() after every test, so every
   // implementation has to be re-established here rather than in the factory.
   mockedInitTreeSitter.mockResolvedValue(undefined)
@@ -136,5 +140,27 @@ describe('scanner.worker', () => {
     expect(
       res.results.issues.filter(i => i.file === '__tests__/legacy_scan.py')
     ).toHaveLength(0)
+  })
+
+  it('hydrates absent IDB source and counts a genuine empty file as scanned', async () => {
+    const store = new IDBContentStore('owner/repo@tree')
+    const index = batchIndexFiles(createEmptyIndexWithStore(store), [
+      { path: 'src/danger.ts', content: 'eval(userInput)\n', language: 'typescript' },
+      { path: 'src/empty.ts', content: '', language: 'typescript' },
+    ], { retainContent: false })
+    await store.flush()
+
+    const response = await runWorker({
+      id: 7,
+      codeIndex: serializeCodeIndexMeta(index),
+      analysis: null,
+      storeKey: store.storeKey,
+    })
+
+    expect(response.type).toBe('result')
+    if (response.type !== 'result') return
+    expect(response.results.issues.some(issue => issue.ruleId === 'eval-usage')).toBe(true)
+    expect(response.results.scannedFiles).toBe(2)
+    expect(response.results.unscannedFileCount).toBe(0)
   })
 })

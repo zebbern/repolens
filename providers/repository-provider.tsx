@@ -631,7 +631,7 @@ export function RepositoryProvider({ children }: { children: ReactNode }) {
         resolvedPaths.add(filePath)
 
         const fileContent = contentMap.get(filePath)
-        if (!fileContent) return
+        if (fileContent === undefined) return
 
         if (fileContent.length > MAX_SINGLE_FILE_BYTES) {
           skipped.push(filePath)

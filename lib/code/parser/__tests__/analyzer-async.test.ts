@@ -1,6 +1,8 @@
-import { analyzeCodebaseAsync } from '../analyzer'
-import { createEmptyIndex, type CodeIndex } from '../../code-index'
+import { analyzeCodebase, analyzeCodebaseAsync } from '../analyzer'
+import { batchIndexMetadataOnly, createEmptyIndex, createEmptyIndexWithStore, type CodeIndex } from '../../code-index'
 import type { ExtractedType, ExtractedClass } from '../types'
+import { LazyContentStore, type ContentStore } from '../../content-store'
+import { FetchQueue } from '../../fetch-queue'
 
 // ---------------------------------------------------------------------------
 // Mock tree-sitter–based extraction (used by analyzeCodebaseAsync)
@@ -50,6 +52,59 @@ beforeEach(() => {
 // =========================================================================
 
 describe('analyzeCodebaseAsync', () => {
+  it('does not bulk-fetch an on-demand repository', async () => {
+    const fetchFile = vi.fn(async (path: string) => `export const fetched = '${path}'`)
+    const store = new LazyContentStore('owner/repo', new FetchQueue({ fetchFn: fetchFile }))
+    store.registerPaths(['src/a.ts', 'src/b.ts'])
+    const index = batchIndexMetadataOnly(createEmptyIndexWithStore(store), [
+      { path: 'src/a.ts', language: 'typescript', lineCount: 1 },
+      { path: 'src/b.ts', language: 'typescript', lineCount: 1 },
+    ])
+
+    await expect(analyzeCodebase(index)).rejects.toThrow('Content unavailable')
+    expect(fetchFile).not.toHaveBeenCalled()
+  })
+
+  it('produces the same dependency graph when source exists only in ContentStore', async () => {
+    const contents = {
+      'src/app.ts': { content: "import { helper } from './helper'\nexport const app = helper" },
+      'src/helper.ts': { content: 'export const helper = true' },
+    }
+    const inline = makeCodeIndex(contents)
+    const stored = makeCodeIndex(contents)
+    const source = new Map<string, string>()
+    for (const [path, value] of Object.entries(contents)) {
+      source.set(path, value.content)
+      delete stored.files.get(path)!.content
+    }
+    stored.contentStore = {
+      bulkReadMode: 'complete',
+      get: async path => source.get(path) ?? null,
+      getSync: () => null,
+      getBatch: async paths => new Map(paths.flatMap(path => {
+        const value = source.get(path)
+        return value === undefined ? [] : [[path, value]]
+      })),
+      put: () => {},
+      putBatch: () => {},
+      has: path => source.has(path),
+      delete: () => {},
+      flush: async () => {},
+      clear: async () => {},
+      size: source.size,
+    } satisfies ContentStore
+
+    const inlineResult = await analyzeCodebaseAsync(inline)
+    const storedResult = await analyzeCodebaseAsync(stored)
+
+    expect(storedResult.graph.edges.get('src/app.ts')).toEqual(
+      inlineResult.graph.edges.get('src/app.ts'),
+    )
+    expect(storedResult.files.get('src/app.ts')?.imports).toEqual(
+      inlineResult.files.get('src/app.ts')?.imports,
+    )
+  })
+
   it('returns a FullAnalysis with files, graph, and topology', async () => {
     const idx = makeCodeIndex({
       'src/main.ts': { content: 'export function main() {}' },

@@ -174,7 +174,7 @@ describe('searchMore', () => {
     expect(remainingPaths).toEqual(['a.ts'])
   })
 
-  it('treats empty-string content as unsearched', async () => {
+  it('counts a genuine empty file as searched', async () => {
     const store = new InMemoryContentStore()
     store.put('empty.ts', '')
 
@@ -184,8 +184,8 @@ describe('searchMore', () => {
       'anything',
     )
 
-    expect(searchedPaths).toHaveLength(0)
-    expect(remainingPaths).toContain('empty.ts')
+    expect(searchedPaths).toEqual(['empty.ts'])
+    expect(remainingPaths).toHaveLength(0)
   })
 
   it('respects search options', async () => {

@@ -199,7 +199,7 @@ function runRegexRules(ctx: ScanContext): RegexRulesResult {
     buildCompiledRuleIndex(presentExtensions)
 
   for (const [path, file] of filesToScan) {
-    if (!file.content) continue
+    if (typeof file.content !== 'string') continue
     if (SKIP_VENDORED.test(path)) continue
 
     const ext = '.' + (path.split('.').pop() || '').toLowerCase()
@@ -622,11 +622,11 @@ export interface ScanOptions {
   changedFiles?: string[]
 }
 
-/** Count files in the index that have no content loaded (empty string or undefined). */
+/** Count files in the index whose source is absent. Genuine empty files are loaded. */
 function countUnscannedFiles(codeIndex: CodeIndex): number {
   let count = 0
   for (const file of codeIndex.files.values()) {
-    if (!file.content) count++
+    if (typeof file.content !== 'string') count++
   }
   return count
 }

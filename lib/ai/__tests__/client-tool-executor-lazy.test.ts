@@ -1,6 +1,8 @@
 import { describe, it, expect, vi } from 'vitest'
-import { createEmptyIndex, batchIndexMetadataOnly, indexFile } from '@/lib/code/code-index'
-import { executeToolLocally, type ToolExecutorOptions } from '../client-tool-executor'
+import { createEmptyIndex, createEmptyIndexWithStore, batchIndexMetadataOnly, indexFile } from '@/lib/code/code-index'
+import { LazyContentStore } from '@/lib/code/content-store'
+import { FetchQueue } from '@/lib/code/fetch-queue'
+import { executeToolLocally } from '../client-tool-executor'
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -20,6 +22,19 @@ function buildLazyIndex() {
     { path: 'src/lazy-b.ts', language: 'typescript', lineCount: 20 },
   ])
   return index
+}
+
+function buildTrueLazyIndex(contents: Record<string, string>) {
+  const fetchFile = vi.fn(async (path: string) => contents[path] ?? '')
+  const store = new LazyContentStore('owner/repo', new FetchQueue({ fetchFn: fetchFile }))
+  const paths = Object.keys(contents)
+  store.registerPaths(paths)
+  const index = batchIndexMetadataOnly(createEmptyIndexWithStore(store), paths.map(path => ({
+    path,
+    language: 'typescript',
+    lineCount: 1,
+  })))
+  return { fetchFile, index }
 }
 
 /** Creates a fetchFileContent callback that returns controlled content. */
@@ -146,6 +161,61 @@ describe('executeToolLocally — searchFiles unchanged behavior', () => {
 
     expect(result.matchCount).toBeGreaterThan(0)
     expect(result.unsearchedFiles).toBeUndefined()
+  })
+})
+
+describe('executeToolLocally — truthful on-demand bulk consumers', () => {
+  it('findSymbol reports resident-only coverage without fetching every file', async () => {
+    const { fetchFile, index } = buildTrueLazyIndex({
+      'src/a.ts': 'export function target() {}',
+      'src/b.ts': 'export function other() {}',
+    })
+
+    const result = JSON.parse(await executeToolLocally('findSymbol', { name: 'target' }, index))
+
+    expect(fetchFile).not.toHaveBeenCalled()
+    expect(result.matchCount).toBe(0)
+    expect(result.contentCoverage).toMatchObject({ searchedFiles: 0, totalFiles: 2, unavailableFiles: 2 })
+  })
+
+  it('analyzeImports fetches only the requested target and reports unavailable reverse coverage', async () => {
+    const { fetchFile, index } = buildTrueLazyIndex({
+      'src/target.ts': "import { dep } from './dep'",
+      'src/dep.ts': 'export const dep = true',
+    })
+
+    const result = JSON.parse(await executeToolLocally('analyzeImports', { path: 'src/target.ts' }, index))
+
+    expect(fetchFile).toHaveBeenCalledTimes(1)
+    expect(fetchFile).toHaveBeenCalledWith('src/target.ts')
+    expect(result.imports).toEqual(['./dep'])
+    expect(result.contentCoverage).toMatchObject({ searchedFiles: 0, totalFiles: 1, unavailableFiles: 1 })
+  })
+
+  it('generateDiagram returns an explicit unavailable error without bulk fetching', async () => {
+    const { fetchFile, index } = buildTrueLazyIndex({
+      'src/a.ts': "import { b } from './b'",
+      'src/b.ts': 'export const b = true',
+    })
+
+    const result = JSON.parse(await executeToolLocally('generateDiagram', { type: 'topology' }, index))
+
+    expect(fetchFile).not.toHaveBeenCalled()
+    expect(result.error).toContain('Content unavailable')
+    expect(result.contentCoverage).toMatchObject({ unavailableFiles: 2 })
+  })
+
+  it('generateTour returns an explicit unavailable error without bulk fetching', async () => {
+    const { fetchFile, index } = buildTrueLazyIndex({
+      'src/a.ts': 'export const a = true',
+      'src/b.ts': 'export const b = true',
+    })
+
+    const result = JSON.parse(await executeToolLocally('generateTour', { repoKey: 'owner/repo', maxStops: 2 }, index))
+
+    expect(fetchFile).not.toHaveBeenCalled()
+    expect(result.error).toContain('Content unavailable')
+    expect(result.contentCoverage).toMatchObject({ unavailableFiles: 2 })
   })
 })
 

@@ -10,6 +10,7 @@ import {
   getRepoKey,
   getCachedRepo,
   isReusableCachedRepo,
+  listCachedRepos,
   publishCachedRepo,
   withHydratedCachedRepo,
   type CachedRepo,
@@ -40,6 +41,29 @@ async function readRawManifest(key: string): Promise<unknown> {
       const request = db.transaction('repos', 'readonly').objectStore('repos').get(key)
       request.onsuccess = () => resolve(request.result)
       request.onerror = () => reject(request.error)
+    })
+  } finally {
+    db.close()
+  }
+}
+
+async function writeRawManifest(value: unknown): Promise<void> {
+  const db = await new Promise<IDBDatabase>((resolve, reject) => {
+    const request = indexedDB.open('repolens-cache', 2)
+    request.onupgradeneeded = () => {
+      if (!request.result.objectStoreNames.contains('repos')) {
+        request.result.createObjectStore('repos', { keyPath: 'key' })
+      }
+    }
+    request.onsuccess = () => resolve(request.result)
+    request.onerror = () => reject(request.error)
+  })
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const transaction = db.transaction('repos', 'readwrite')
+      transaction.objectStore('repos').put(value)
+      transaction.oncomplete = () => resolve()
+      transaction.onabort = () => reject(transaction.error)
     })
   } finally {
     db.close()
@@ -77,6 +101,47 @@ describe('normalized repository cache content', () => {
       ...base,
       content: { kind: 'idb', storeKey: 'wrong', files: [{ path: 'index.ts', lineCount: 1 }] },
     } as CachedRepo)).toBe(false)
+    expect(isReusableCachedRepo({
+      ...base,
+      content: { kind: 'future-format', files: [] },
+    } as unknown as CachedRepo)).toBe(false)
+  })
+
+  it('invalidates an unknown runtime discriminator instead of listing or reusing it', async () => {
+    await writeRawManifest({
+      schemaVersion: REPO_CACHE_SCHEMA_VERSION,
+      coverage: COVERAGE,
+      complete: true,
+      key: 'acme/bogus',
+      owner: 'acme',
+      repo: 'bogus',
+      sha: 'tree-123',
+      timestamp: 1,
+      tree: TREE,
+      content: { kind: 'future-format', files: [] },
+    })
+
+    expect(await listCachedRepos()).toEqual([])
+    expect(await readRawManifest('acme/bogus')).toBeUndefined()
+    expect(await getCachedRepo('acme', 'bogus')).toBeNull()
+  })
+
+  it('invalidates a current-schema manifest with a missing content payload', async () => {
+    await writeRawManifest({
+      schemaVersion: REPO_CACHE_SCHEMA_VERSION,
+      coverage: COVERAGE,
+      complete: true,
+      key: 'acme/missing',
+      owner: 'acme',
+      repo: 'missing',
+      sha: 'tree-123',
+      timestamp: 1,
+      tree: TREE,
+    })
+
+    expect(await listCachedRepos()).toEqual([])
+    expect(await readRawManifest('acme/missing')).toBeUndefined()
+    expect(await getCachedRepo('acme', 'missing')).toBeNull()
   })
 
   it('rehydrates an idb manifest as metadata without duplicating source in the manifest or file map', async () => {

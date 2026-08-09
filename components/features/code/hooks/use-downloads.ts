@@ -94,7 +94,7 @@ export function useDownloads({
         return
       }
     }
-    if (!content) return
+    if (content === null) return
     const blob = new Blob([content], { type: 'text/plain' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')

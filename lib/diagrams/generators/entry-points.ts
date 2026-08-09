@@ -115,7 +115,7 @@ export async function generateEntryPoints(analysis: FullAnalysis, codeIndex: Cod
 
     for (const [path] of analysis.files) {
       const content = await getFileContent(codeIndex, path)
-      if (!content) continue
+      if (content === null) continue
       let m: RegExpExecArray | null
       routePattern.lastIndex = 0
       while ((m = routePattern.exec(content)) !== null) {
@@ -153,7 +153,7 @@ export async function generateEntryPoints(analysis: FullAnalysis, codeIndex: Cod
 
     for (const [path] of analysis.files) {
       const content = await getFileContent(codeIndex, path)
-      if (!content) continue
+      if (content === null) continue
       let m: RegExpExecArray | null
       pyRoutePattern.lastIndex = 0
       while ((m = pyRoutePattern.exec(content)) !== null) {

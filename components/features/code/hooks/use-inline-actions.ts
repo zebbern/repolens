@@ -3,6 +3,7 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
 import type { CodeIndex } from '@/lib/code/code-index'
 import { searchIndexAsync, type SearchResult } from '@/lib/code/code-index'
+import type { RepositorySession } from '@/providers/repository-provider'
 import type { InlineActionType, InlineActionResult, SymbolRange } from '../types'
 
 interface UseInlineActionsReturn {
@@ -22,6 +23,11 @@ interface UseInlineActionsReturn {
   ) => void
   dismissAction: () => void
   abort: () => void
+}
+
+interface InlineActionSessionGuard {
+  repositorySession: RepositorySession | null
+  isRepositorySessionCurrent: (session: RepositorySession | null) => boolean
 }
 
 /**
@@ -55,15 +61,22 @@ function formatFindUsagesResult(
  * - For 'find-usages': searches the CodeIndex client-side (no AI call)
  * - For 'explain', 'refactor', 'complexity': streams AI response from /api/inline-actions
  */
-export function useInlineActions(codeIndex: CodeIndex): UseInlineActionsReturn {
+export function useInlineActions(
+  codeIndex: CodeIndex,
+  sessionGuard?: InlineActionSessionGuard,
+): UseInlineActionsReturn {
   const [activeSymbol, setActiveSymbol] = useState<SymbolRange | null>(null)
   const [activeAction, setActiveAction] = useState<InlineActionType | null>(null)
   const [result, setResult] = useState<InlineActionResult | null>(null)
   const [isStreaming, setIsStreaming] = useState(false)
+  const [stateSession, setStateSession] = useState<RepositorySession | null>(sessionGuard?.repositorySession ?? null)
   const abortControllerRef = useRef<AbortController | null>(null)
+  const actionGenerationRef = useRef(0)
+  const mountedRef = useRef(true)
 
   // Abort any in-flight stream
   const abort = useCallback(() => {
+    actionGenerationRef.current += 1
     if (abortControllerRef.current) {
       abortControllerRef.current.abort()
       abortControllerRef.current = null
@@ -79,12 +92,20 @@ export function useInlineActions(codeIndex: CodeIndex): UseInlineActionsReturn {
     setResult(null)
   }, [abort])
 
+  // Invalidate work from the previous repository session.
+  useEffect(() => {
+    actionGenerationRef.current += 1
+    abortControllerRef.current?.abort()
+    abortControllerRef.current = null
+  }, [sessionGuard?.repositorySession])
+
   // Clean up on unmount
   useEffect(() => {
     return () => {
-      if (abortControllerRef.current) {
-        abortControllerRef.current.abort()
-      }
+      mountedRef.current = false
+      actionGenerationRef.current += 1
+      abortControllerRef.current?.abort()
+      abortControllerRef.current = null
     }
   }, [])
 
@@ -99,6 +120,16 @@ export function useInlineActions(codeIndex: CodeIndex): UseInlineActionsReturn {
       provider: string,
       model: string,
     ) => {
+      const actionGeneration = actionGenerationRef.current + 1
+      actionGenerationRef.current = actionGeneration
+      const actionSession = sessionGuard?.repositorySession ?? null
+      setStateSession(actionSession)
+      const canCommit = () => (
+        mountedRef.current
+        && actionGenerationRef.current === actionGeneration
+        && (!sessionGuard || sessionGuard.isRepositorySessionCurrent(actionSession))
+      )
+
       // Abort any previous stream
       if (abortControllerRef.current) {
         abortControllerRef.current.abort()
@@ -113,6 +144,7 @@ export function useInlineActions(codeIndex: CodeIndex): UseInlineActionsReturn {
         setIsStreaming(true)
         void searchIndexAsync(codeIndex, symbolRange.symbol.name)
           .then(searchResults => {
+            if (!canCommit()) return
             const content = formatFindUsagesResult(symbolRange.symbol.name, searchResults)
             setResult({
               type: 'find-usages',
@@ -122,6 +154,7 @@ export function useInlineActions(codeIndex: CodeIndex): UseInlineActionsReturn {
             })
           })
           .catch(error => {
+            if (!canCommit()) return
             setResult({
               type: 'find-usages',
               symbolName: symbolRange.symbol.name,
@@ -130,7 +163,9 @@ export function useInlineActions(codeIndex: CodeIndex): UseInlineActionsReturn {
               error: error instanceof Error ? error.message : 'Search failed',
             })
           })
-          .finally(() => setIsStreaming(false))
+          .finally(() => {
+            if (canCommit()) setIsStreaming(false)
+          })
         return
       }
 
@@ -171,8 +206,10 @@ export function useInlineActions(codeIndex: CodeIndex): UseInlineActionsReturn {
         signal: controller.signal,
       })
         .then(async (response) => {
+          if (!canCommit()) return
           if (!response.ok) {
             const errorData = await response.json().catch(() => null)
+            if (!canCommit()) return
             const errorMsg = errorData?.error?.message ?? `Request failed (${response.status})`
             setResult((prev) =>
               prev ? { ...prev, content: '', isStreaming: false, error: errorMsg } : null,
@@ -195,6 +232,7 @@ export function useInlineActions(codeIndex: CodeIndex): UseInlineActionsReturn {
 
           while (true) {
             const { done, value } = await reader.read()
+            if (!canCommit()) return
             if (done) break
 
             accumulated += decoder.decode(value, { stream: true })
@@ -206,10 +244,9 @@ export function useInlineActions(codeIndex: CodeIndex): UseInlineActionsReturn {
           setResult((prev) =>
             prev ? { ...prev, content: accumulated, isStreaming: false } : null,
           )
-          setIsStreaming(false)
-          abortControllerRef.current = null
         })
         .catch((error: unknown) => {
+          if (!canCommit()) return
           if (error instanceof Error && error.name === 'AbortError') {
             // User-initiated abort — don't treat as error
             return
@@ -218,18 +255,24 @@ export function useInlineActions(codeIndex: CodeIndex): UseInlineActionsReturn {
           setResult((prev) =>
             prev ? { ...prev, isStreaming: false, error: errorMsg } : null,
           )
+        })
+        .finally(() => {
+          if (!canCommit()) return
           setIsStreaming(false)
-          abortControllerRef.current = null
+          if (abortControllerRef.current === controller) abortControllerRef.current = null
         })
     },
-    [codeIndex],
+    [codeIndex, sessionGuard],
   )
 
+  const stateBelongsToCurrentSession = !sessionGuard
+    || sessionGuard.isRepositorySessionCurrent(stateSession)
+
   return {
-    activeSymbol,
-    activeAction,
-    result,
-    isStreaming,
+    activeSymbol: stateBelongsToCurrentSession ? activeSymbol : null,
+    activeAction: stateBelongsToCurrentSession ? activeAction : null,
+    result: stateBelongsToCurrentSession ? result : null,
+    isStreaming: stateBelongsToCurrentSession && isStreaming,
     triggerAction,
     dismissAction,
     abort,

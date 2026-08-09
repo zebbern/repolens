@@ -24,6 +24,9 @@ export interface CodeIndexMeta {
  * IDBContentStore (Wave 2): async, IndexedDB-backed.
  */
 export interface ContentStore {
+  /** Whether bulk reads can resolve every durable path or resident source only. */
+  readonly bulkReadMode: 'complete' | 'resident-only'
+
   /** Get file content by path. Always resolves for in-memory store. */
   get(path: string): Promise<string | null>
 
@@ -63,6 +66,7 @@ export interface ContentStore {
  * Zero overhead over the current approach. All operations are synchronous.
  */
 export class InMemoryContentStore implements ContentStore {
+  readonly bulkReadMode = 'complete' as const
   private store: Map<string, string>
 
   constructor(initial?: Map<string, string>) {
@@ -260,6 +264,7 @@ export async function clearAllRepoContent(signal?: AbortSignal): Promise<void> {
  * (dual-write). Consumers don't read from IDB yet — that's Wave 3.
  */
 export class IDBContentStore implements ContentStore {
+  readonly bulkReadMode = 'complete' as const
   readonly storeKey: string
   private paths: Set<string> = new Set()
   private dbPromise: Promise<IDBDatabase> | null = null
@@ -427,6 +432,7 @@ export class IDBContentStore implements ContentStore {
  * - `getSync` always returns null (async-only store)
  */
 export class LazyContentStore implements ContentStore {
+  readonly bulkReadMode = 'resident-only' as const
   readonly repoKey: string
   private readonly contentStore = new InMemoryContentStore()
   private readonly fetchQueue: FetchQueue

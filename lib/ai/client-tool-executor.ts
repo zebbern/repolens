@@ -1,5 +1,5 @@
 import type { CodeIndex, IndexedFile } from '@/lib/code/code-index'
-import { createEmptyIndex, indexFile, searchIndexAsync, getFileLines, getFileContent, getFileLinesAsync, getFileContentSync } from '@/lib/code/code-index'
+import { createEmptyIndex, indexFile, searchIndexAsync, getFileContent, getFileContentSync, resolveFileContents } from '@/lib/code/code-index'
 import { LANG_EXTENSIONS } from '@/lib/code/scanner/constants'
 import { SYMBOL_PATTERNS } from '@/lib/ai/structural-index'
 import {
@@ -188,6 +188,19 @@ function getContentSync(codeIndex: CodeIndex, path: string): string | undefined 
   return getFileContentSync(codeIndex, path) ?? undefined
 }
 
+function contentCoverage(
+  totalFiles: number,
+  searchedFiles: number,
+): { searchedFiles: number; totalFiles: number; unavailableFiles: number; note: string } {
+  const unavailableFiles = totalFiles - searchedFiles
+  return {
+    searchedFiles,
+    totalFiles,
+    unavailableFiles,
+    note: `Content-dependent analysis covered ${searchedFiles}/${totalFiles} files; ${unavailableFiles} files were unavailable without bulk-fetching on-demand source.`,
+  }
+}
+
 async function getContentAsync(codeIndex: CodeIndex, path: string): Promise<string | undefined> {
   return (await getFileContent(codeIndex, path)) ?? undefined
 }
@@ -238,12 +251,12 @@ async function executeReadFile(
   let content = await getContentAsync(codeIndex, usedPath)
 
   // On-demand fetch for lazy repos when content is not available
-  if (!content && fetchContent) {
+  if (content === undefined && fetchContent) {
     const fetched = await fetchContent([usedPath])
     content = fetched.get(usedPath)
   }
 
-  if (!content) {
+  if (content === undefined) {
     return { error: `File content not available for: ${usedPath}. Content has not been loaded yet.` }
   }
 
@@ -279,7 +292,7 @@ async function executeReadFiles(
   // Resolve all paths and identify which need fetching (batch, no N+1)
   const resolved = input.paths.map(p => ({ original: p, resolved: resolvePath(codeIndex, p) }))
   const needFetch = resolved
-    .filter(r => r.resolved && !getContentSync(codeIndex, r.resolved))
+    .filter(r => r.resolved && getContentSync(codeIndex, r.resolved) === undefined)
     .map(r => r.resolved!)
 
   let fetched = new Map<string, string>()
@@ -292,8 +305,8 @@ async function executeReadFiles(
       return { error: `File not found: ${original}. Use searchFiles or check the file tree.` }
     }
     let content = await getContentAsync(codeIndex, rp)
-    if (!content) content = fetched.get(rp)
-    if (!content) {
+    if (content === undefined) content = fetched.get(rp)
+    if (content === undefined) {
       return { error: `File content not available for: ${rp}. Content has not been loaded yet.` }
     }
 
@@ -371,7 +384,8 @@ async function executeSearchFiles(
       for (const match of sr.matches.slice(0, 5)) {
         const contextLines: string[] = []
         const lineIdx = match.line - 1 // 0-based index into file lines
-        const fileLines = file.content ? getFileLines(file) : (await getFileLinesAsync(codeIndex, sr.file) ?? [''])
+        const source = await getFileContent(codeIndex, sr.file)
+        const fileLines = source === null ? [] : source.split('\n')
 
         for (let offset = -3; offset <= 3; offset++) {
           const idx = lineIdx + offset
@@ -466,9 +480,13 @@ async function executeFindSymbol(
     kind: KIND_MAP[p.kind] ?? p.kind,
   }))
   const nameL = input.name.toLowerCase()
+  const paths = Array.from(codeIndex.files.keys())
+  const resolved = await resolveFileContents(codeIndex, paths)
 
-  for (const [filePath, file] of codeIndex.files) {
-    const lines = file.content ? getFileLines(file) : (await getFileLinesAsync(codeIndex, filePath) ?? [''])
+  for (const [filePath] of codeIndex.files) {
+    const source = resolved.contents.get(filePath)
+    if (typeof source !== 'string') continue
+    const lines = source.split('\n')
     for (let i = 0; i < lines.length; i++) {
       for (const pat of patterns) {
         if (input.kind && input.kind !== 'any' && pat.kind !== input.kind) continue
@@ -500,6 +518,9 @@ async function executeFindSymbol(
       note: `Symbol search covered ${codeIndex.files.size}/${metaSize} files with loaded content.`,
     }
   }
+  if (resolved.missingPaths.length > 0) {
+    output.contentCoverage = contentCoverage(paths.length, resolved.contents.size)
+  }
 
   return output
 }
@@ -511,7 +532,9 @@ async function executeGetFileStats(
   const file = findFile(codeIndex, input.path)
   if (!file) return { error: `File not found: ${input.path}` }
 
-  const lines = file.content ? getFileLines(file) : (await getFileLinesAsync(codeIndex, file.path) ?? [''])
+  const content = await getFileContent(codeIndex, file.path)
+  if (content === null) return { error: `File content not available for: ${file.path}` }
+  const lines = content.split('\n')
   const ext = file.path.split('.').pop() || ''
   const importLines = lines.filter(l => l.match(/^import\s/))
   const exportLines = lines.filter(l => l.match(/^export\s/))
@@ -649,14 +672,13 @@ async function executeAnalyzeImports(
   const resolvedPath = file.path
 
   // --- Outgoing imports from the target file ---
-  const fileContent = file.content ?? (await getFileContent(codeIndex, resolvedPath))
+  const fileContent = await getFileContent(codeIndex, resolvedPath)
+  if (fileContent === null) return { error: `File content not available for: ${resolvedPath}` }
   // Non-greedy .*? matches IMPORT_REGEX in structural-index.ts
   const importRegex = /import\s+.*?from\s+['"]([^'"]+)['"]/g
   const imports: string[] = []
   let m: RegExpExecArray | null
-  if (fileContent) {
-    while ((m = importRegex.exec(fileContent)) !== null) imports.push(m[1])
-  }
+  while ((m = importRegex.exec(fileContent)) !== null) imports.push(m[1])
 
   // --- Reverse lookup: which files import the target ---
   const paths = allPaths(codeIndex)
@@ -675,13 +697,13 @@ async function executeAnalyzeImports(
 
   // Batch-fetch content for all files to avoid N+1 async calls in the loop
   const otherPaths = [...codeIndex.files.keys()].filter(p => p !== resolvedPath)
-  const contentMap = await codeIndex.contentStore.getBatch(otherPaths)
+  const resolvedOthers = await resolveFileContents(codeIndex, otherPaths)
 
-  for (const [filePath, otherFile] of codeIndex.files) {
+  for (const [filePath] of codeIndex.files) {
     if (filePath === resolvedPath) continue
 
-    const otherContent = otherFile.content ?? contentMap.get(filePath)
-    if (!otherContent) continue
+    const otherContent = resolvedOthers.contents.get(filePath)
+    if (typeof otherContent !== 'string') continue
 
     let isImporter = false
     const ext = filePath.split('.').pop()?.toLowerCase() || ''
@@ -735,7 +757,14 @@ async function executeAnalyzeImports(
     }
   }
 
-  return { path: resolvedPath, imports, importedBy: importedBy.slice(0, 30) }
+  return {
+    path: resolvedPath,
+    imports,
+    importedBy: importedBy.slice(0, 30),
+    ...(resolvedOthers.missingPaths.length > 0
+      ? { contentCoverage: contentCoverage(otherPaths.length, resolvedOthers.contents.size) }
+      : {}),
+  }
 }
 
 async function executeScanIssues(
@@ -747,7 +776,7 @@ async function executeScanIssues(
   if (!file) return { error: `File not found: ${input.path}` }
 
   const content = file.content ?? (await getFileContent(codeIndex, file.path))
-  if (!content) return { error: `File content not available for: ${file.path}` }
+  if (content === null) return { error: `File content not available for: ${file.path}` }
 
   // Build a single-file CodeIndex and run the real scanner
   let miniIndex = createEmptyIndex()
@@ -810,13 +839,19 @@ async function executeGenerateDiagram(
 
     // Batch-fetch content for all files
     const filePaths = [...codeIndex.files.keys()]
-    const contentMap = await codeIndex.contentStore.getBatch(filePaths)
+    const resolved = await resolveFileContents(codeIndex, filePaths)
+    if (resolved.missingPaths.length > 0) {
+      return {
+        error: `Content unavailable for ${resolved.missingPaths.length} indexed files`,
+        contentCoverage: contentCoverage(filePaths.length, resolved.contents.size),
+      }
+    }
 
-    for (const [filePath, file] of codeIndex.files) {
+    for (const [filePath] of codeIndex.files) {
       const dir = filePath.split('/').slice(0, -1).join('/') || '(root)'
       nodes.add(dir)
-      const content = file.content ?? contentMap.get(filePath)
-      if (!content) continue
+      const content = resolved.contents.get(filePath)
+      if (typeof content !== 'string') continue
       const importRegex = /import\s+.*from\s+['"](@\/[^'"]+|\.\.?\/[^'"]+)['"]/g
       let m
       while ((m = importRegex.exec(content)) !== null) {
@@ -939,7 +974,7 @@ function findSignificantRange(
 /**
  * Score a file for architectural significance. Higher is more significant.
  */
-function significanceScore(path: string, file: { lineCount: number; content?: string }): number {
+function significanceScore(path: string, file: { lineCount: number; content: string }): number {
   let score = 0
   const fileName = path.split('/').pop() || ''
 
@@ -951,7 +986,7 @@ function significanceScore(path: string, file: { lineCount: number; content?: st
   }
 
   // Files with many exports are likely important modules
-  const exportCount = ((file.content ?? '').match(/^export\s/gm) || []).length
+  const exportCount = (file.content.match(/^export\s/gm) || []).length
   score += Math.min(exportCount, 10)
 
   // Prefer files that aren't tests
@@ -1017,19 +1052,32 @@ async function executeGenerateTour(
     return { error: 'No files in code index' }
   }
 
+  const resolved = await resolveFileContents(codeIndex, Array.from(codeIndex.files.keys()))
+  if (resolved.missingPaths.length > 0) {
+    return {
+      error: `Content unavailable for ${resolved.missingPaths.length} indexed files`,
+      contentCoverage: contentCoverage(codeIndex.files.size, resolved.contents.size),
+    }
+  }
+  const hydratedFiles = new Map<string, IndexedFile & { content: string }>(Array.from(codeIndex.files, ([path, file]) => [
+    path,
+    { ...file, content: resolved.contents.get(path)! },
+  ]))
+  const hydratedIndex = { ...codeIndex, files: hydratedFiles }
+
   // Select files based on theme or architectural significance
-  let candidateFiles: Array<{ path: string; file: IndexedFile }>
+  let candidateFiles: Array<{ path: string; file: IndexedFile & { content: string } }>
 
   if (input.theme) {
     // Theme-based: search the index for relevant files
-    const searchResults = await searchIndexAsync(codeIndex, input.theme)
+    const searchResults = await searchIndexAsync(hydratedIndex, input.theme)
     const matched = new Set<string>()
 
     candidateFiles = []
     for (const sr of searchResults) {
       if (matched.has(sr.file)) continue
       matched.add(sr.file)
-      const file = codeIndex.files.get(sr.file)
+      const file = hydratedFiles.get(sr.file)
       if (file) {
         candidateFiles.push({ path: sr.file, file })
       }
@@ -1037,7 +1085,7 @@ async function executeGenerateTour(
 
     // If theme search yields too few results, supplement with significant files
     if (candidateFiles.length < maxStops) {
-      for (const [path, file] of codeIndex.files) {
+      for (const [path, file] of hydratedFiles) {
         if (matched.has(path)) continue
         if (candidateFiles.length >= maxStops * 2) break
         candidateFiles.push({ path, file })
@@ -1045,7 +1093,7 @@ async function executeGenerateTour(
     }
   } else {
     // General tour: rank all files by architectural significance
-    candidateFiles = Array.from(codeIndex.files.entries()).map(([path, file]) => ({
+    candidateFiles = Array.from(hydratedFiles.entries()).map(([path, file]) => ({
       path,
       file,
     }))
@@ -1068,14 +1116,9 @@ async function executeGenerateTour(
   // Take top candidates
   const selected = candidateFiles.slice(0, maxStops)
 
-  // Pre-fetch content for all selected candidates
-  const selectedPaths = selected.map(c => c.path)
-  const contentMap = await codeIndex.contentStore.getBatch(selectedPaths)
-
   // Build tour stops
   const stops: TourStop[] = selected.map(({ path, file }) => {
-    const content = file.content ?? contentMap.get(path)
-    const lines = content ? content.split('\n') : ['']
+    const lines = file.content.split('\n')
     const { startLine, endLine, title } = findSignificantRange(lines)
     const annotation = generateAnnotation(path, lines, title)
 

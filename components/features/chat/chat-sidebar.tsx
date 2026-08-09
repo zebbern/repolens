@@ -40,6 +40,16 @@ export function ChatSidebar({ className, onCollapse }: { className?: string; onC
   const [input, setInput] = useState("")
   const [attachedImages, setAttachedImages] = useState<FileUIPart[]>([])
   const [activeSkills, setActiveSkills] = useState<Set<string>>(new Set())
+  const [isPreparingSubmission, setIsPreparingSubmission] = useState(false)
+  const inputRevisionRef = useRef(0)
+  const submissionGenerationRef = useRef(0)
+  const submissionHydratingRef = useRef(false)
+  const mountedRef = useRef(true)
+
+  const handleInputChange = useCallback((value: string) => {
+    inputRevisionRef.current += 1
+    setInput(value)
+  }, [])
 
   const handleImageAttach = useCallback((newImages: FileUIPart[]) => {
     setAttachedImages(prev => [...prev, ...newImages])
@@ -200,11 +210,16 @@ export function ChatSidebar({ className, onCollapse }: { className?: string; onC
     sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithToolCalls,
   })
 
-  const isLoading = status === 'streaming' || status === 'submitted'
+  const isChatLoading = status === 'streaming' || status === 'submitted'
+  const isLoading = isChatLoading || isPreparingSubmission
 
   const previousRepoKeyRef = useRef(repoKey)
+  const previousRepositorySessionRef = useRef(repositorySession)
   useEffect(() => {
     if (previousRepoKeyRef.current !== repoKey) {
+      submissionGenerationRef.current += 1
+      submissionHydratingRef.current = false
+      setIsPreparingSubmission(false)
       stop()
       setMessages([])
       setInput('')
@@ -213,6 +228,21 @@ export function ChatSidebar({ className, onCollapse }: { className?: string; onC
     }
     previousRepoKeyRef.current = repoKey
   }, [repoKey, setMessages, stop])
+
+  useEffect(() => {
+    if (previousRepositorySessionRef.current !== repositorySession) {
+      submissionGenerationRef.current += 1
+      submissionHydratingRef.current = false
+      setIsPreparingSubmission(false)
+    }
+    previousRepositorySessionRef.current = repositorySession
+  }, [repositorySession])
+
+  useEffect(() => () => {
+    mountedRef.current = false
+    submissionGenerationRef.current += 1
+    submissionHydratingRef.current = false
+  }, [])
 
   // Extract cumulative token usage from the last assistant message metadata
   const tokenUsage = useMemo(() => {
@@ -229,25 +259,42 @@ export function ChatSidebar({ className, onCollapse }: { className?: string; onC
   const handleSubmit = async () => {
     const hasText = input.trim().length > 0
     const hasImages = attachedImages.length > 0
-    if ((!hasText && !hasImages) || isLoading || !hasValidKey || !selectedModel) return
+    if ((!hasText && !hasImages) || isChatLoading || submissionHydratingRef.current || !hasValidKey || !selectedModel) return
 
     const currentInput = input.trim()
     const imagesToSend = [...attachedImages]
+    const inputRevision = inputRevisionRef.current
 
     const submitSession = repositorySession
+    const submissionGeneration = submissionGenerationRef.current + 1
+    submissionGenerationRef.current = submissionGeneration
+    submissionHydratingRef.current = true
+    setIsPreparingSubmission(true)
+    const canCommit = () => (
+      mountedRef.current
+      && submissionGenerationRef.current === submissionGeneration
+      && isRepositorySessionCurrent(submitSession)
+    )
     let structuralIndex: string
     try {
       structuralIndex = await buildStructuralIndexAsync(codeIndex, {
         maxIndexBytes: getMaxIndexBytesForModel(selectedModel.id),
       })
     } catch (error) {
-      console.error('Failed to hydrate repository content for chat:', error)
-      toast.error('Repository content could not be loaded for chat.')
+      if (canCommit()) {
+        console.error('Failed to hydrate repository content for chat:', error)
+        toast.error('Repository content could not be loaded for chat.')
+      }
       return
+    } finally {
+      if (mountedRef.current && submissionGenerationRef.current === submissionGeneration) {
+        submissionHydratingRef.current = false
+        setIsPreparingSubmission(false)
+      }
     }
-    if (!isRepositorySessionCurrent(submitSession)) return
-    setInput("")
-    setAttachedImages([])
+    if (!canCommit()) return
+    if (inputRevisionRef.current === inputRevision) setInput("")
+    setAttachedImages(current => current.filter(image => !imagesToSend.includes(image)))
 
     const body = {
       provider: selectedModel.provider,
@@ -394,7 +441,7 @@ export function ChatSidebar({ className, onCollapse }: { className?: string; onC
       <div className="p-3">
         <ChatInput
           value={input}
-          onChange={setInput}
+          onChange={handleInputChange}
           onSubmit={handleSubmit}
           isLoading={isLoading}
           onStop={stop}

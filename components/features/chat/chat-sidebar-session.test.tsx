@@ -93,6 +93,7 @@ vi.mock('./chat-input', () => ({
     attachedImages,
     onImageAttach,
     skillPicker,
+    isLoading,
   }: {
     value: string
     onChange: (value: string) => void
@@ -100,6 +101,7 @@ vi.mock('./chat-input', () => ({
     attachedImages: FileUIPart[]
     onImageAttach: (images: FileUIPart[]) => void
     skillPicker: React.ReactNode
+    isLoading: boolean
   }) => (
     <div>
       <input aria-label="chat-draft" value={value} onChange={event => onChange(event.target.value)} />
@@ -108,7 +110,7 @@ vi.mock('./chat-input', () => ({
         type: 'file', mediaType: 'image/png', filename: 'repo-a.png', url: 'data:image/png;base64,AA==',
       }])}>attach</button>
       {skillPicker}
-      <button type="button" onClick={onSubmit}>send</button>
+      <button type="button" onClick={onSubmit} disabled={isLoading}>send</button>
     </div>
   ),
 }))
@@ -133,15 +135,24 @@ vi.mock('@/lib/ai/providers', () => ({ getMaxIndexBytesForModel: vi.fn(() => 50_
 vi.mock('@/lib/ai/tool-call-handler', () => ({ handleToolCall: vi.fn() }))
 vi.mock('@/lib/ai/client-tool-executor', () => ({ executeToolLocally: vi.fn() }))
 vi.mock('@/lib/export', () => ({ downloadFile: vi.fn() }))
-vi.mock('sonner', () => ({ toast: { success: vi.fn() } }))
+vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
 
 import { ChatSidebar } from './chat-sidebar'
 import { handleToolCall } from '@/lib/ai/tool-call-handler'
+import { buildStructuralIndexAsync } from '@/lib/ai/structural-index'
+import { toast } from 'sonner'
 
 function deferred() {
   let resolve!: () => void
   const promise = new Promise<void>(res => { resolve = res })
   return { promise, resolve }
+}
+
+function deferredValue<T>() {
+  let resolve!: (value: T) => void
+  let reject!: (error: unknown) => void
+  const promise = new Promise<T>((res, rej) => { resolve = res; reject = rej })
+  return { promise, resolve, reject }
 }
 
 describe('ChatSidebar repository session isolation', () => {
@@ -213,5 +224,53 @@ describe('ChatSidebar repository session isolation', () => {
       await toolCompletion
     })
     expect(harness.chat.addToolOutput).not.toHaveBeenCalled()
+  })
+
+  it('deduplicates submission hydration and preserves draft edits and new attachments', async () => {
+    harness.status.current = 'ready'
+    const hydration = deferredValue<string>()
+    vi.mocked(buildStructuralIndexAsync).mockReturnValue(hydration.promise)
+    render(<ChatSidebar />)
+
+    fireEvent.change(screen.getByLabelText('chat-draft'), { target: { value: 'submitted draft' } })
+    fireEvent.click(screen.getByRole('button', { name: 'attach' }))
+    fireEvent.click(screen.getByRole('button', { name: 'send' }))
+    fireEvent.click(screen.getByRole('button', { name: 'send' }))
+    expect(buildStructuralIndexAsync).toHaveBeenCalledOnce()
+
+    fireEvent.change(screen.getByLabelText('chat-draft'), { target: { value: 'newer draft' } })
+    fireEvent.click(screen.getByRole('button', { name: 'attach' }))
+    expect(screen.getByText('attachments:2')).toBeInTheDocument()
+    await act(async () => { hydration.resolve('{"files":[]}'); await hydration.promise })
+
+    await waitFor(() => expect(harness.chat.sendMessage).toHaveBeenCalledOnce())
+    expect(harness.chat.sendMessage.mock.calls[0][0]).toMatchObject({ text: 'submitted draft' })
+    expect(harness.chat.sendMessage.mock.calls[0][0].files).toHaveLength(1)
+    expect(screen.getByLabelText('chat-draft')).toHaveValue('newer draft')
+    expect(screen.getByText('attachments:1')).toBeInTheDocument()
+  })
+
+  it('does not surface a stale hydration failure after switching repositories', async () => {
+    harness.status.current = 'ready'
+    const hydration = deferredValue<string>()
+    vi.mocked(buildStructuralIndexAsync).mockReturnValue(hydration.promise)
+    const { rerender } = render(<ChatSidebar />)
+    fireEvent.change(screen.getByLabelText('chat-draft'), { target: { value: 'Question about A' } })
+    fireEvent.click(screen.getByRole('button', { name: 'send' }))
+
+    harness.repository.current = {
+      repo: { owner: 'acme', name: 'b', fullName: 'acme/b', description: 'Repository B' },
+      files: [{ name: 'b.ts', path: 'b.ts', type: 'file' }],
+      codeIndex: { files: new Map() },
+      repositorySession: { id: 2, signal: new AbortController().signal },
+    }
+    await act(async () => rerender(<ChatSidebar />))
+    await act(async () => {
+      hydration.reject(new Error('stale hydration failure'))
+      await hydration.promise.catch(() => undefined)
+    })
+
+    expect(harness.chat.sendMessage).not.toHaveBeenCalled()
+    expect(toast.error).not.toHaveBeenCalled()
   })
 })

@@ -209,6 +209,70 @@ describe('useInlineActions', () => {
     expect(result.current.activeAction).toBeNull()
   })
 
+  it('does not commit a delayed find-usages result after dismissal', async () => {
+    let resolveSearch!: (results: SearchResult[]) => void
+    mockSearchIndex.mockReturnValue(new Promise(resolve => { resolveSearch = resolve }))
+    const { result } = renderHook(() => useInlineActions(codeIndex))
+
+    act(() => { trigger(result.current, 'find-usages') })
+    act(() => { result.current.dismissAction() })
+    await act(async () => {
+      resolveSearch([{ file: 'stale.ts', language: 'typescript', matches: [] }])
+      await Promise.resolve()
+    })
+
+    expect(result.current.result).toBeNull()
+    expect(result.current.activeAction).toBeNull()
+    expect(result.current.isStreaming).toBe(false)
+  })
+
+  it('does not let an older delayed action overwrite a newer action', async () => {
+    let resolveFirst!: (results: SearchResult[]) => void
+    let resolveSecond!: (results: SearchResult[]) => void
+    mockSearchIndex
+      .mockReturnValueOnce(new Promise(resolve => { resolveFirst = resolve }))
+      .mockReturnValueOnce(new Promise(resolve => { resolveSecond = resolve }))
+    const { result } = renderHook(() => useInlineActions(codeIndex))
+
+    act(() => { trigger(result.current, 'find-usages', { symbolRange: makeSymbolRange({ symbol: makeSymbol({ name: 'oldSymbol', line: 1 }) }) }) })
+    act(() => { trigger(result.current, 'find-usages', { symbolRange: makeSymbolRange({ symbol: makeSymbol({ name: 'newSymbol', line: 1 }) }) }) })
+    await act(async () => {
+      resolveSecond([])
+      await Promise.resolve()
+    })
+    await act(async () => {
+      resolveFirst([{ file: 'old.ts', language: 'typescript', matches: [] }])
+      await Promise.resolve()
+    })
+
+    expect(result.current.result?.symbolName).toBe('newSymbol')
+    expect(result.current.result?.content).toContain('newSymbol')
+  })
+
+  it('does not commit a delayed action after the repository session changes', async () => {
+    let resolveSearch!: (results: SearchResult[]) => void
+    mockSearchIndex.mockReturnValue(new Promise(resolve => { resolveSearch = resolve }))
+    const sessionA = { id: 1, signal: new AbortController().signal }
+    const sessionB = { id: 2, signal: new AbortController().signal }
+    let currentSession = sessionA
+    const isRepositorySessionCurrent = (session: typeof sessionA | null) => session === currentSession
+    const { result, rerender } = renderHook(
+      ({ session }) => useInlineActions(codeIndex, { repositorySession: session, isRepositorySessionCurrent }),
+      { initialProps: { session: sessionA } },
+    )
+
+    act(() => { trigger(result.current, 'find-usages') })
+    currentSession = sessionB
+    rerender({ session: sessionB })
+    await act(async () => {
+      resolveSearch([{ file: 'stale.ts', language: 'typescript', matches: [] }])
+      await Promise.resolve()
+    })
+
+    expect(result.current.result).toBeNull()
+    expect(result.current.isStreaming).toBe(false)
+  })
+
   // --- abort previous on new trigger ---
 
   it('aborts previous fetch when a new AI action is triggered', () => {

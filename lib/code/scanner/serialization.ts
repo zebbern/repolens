@@ -81,13 +81,14 @@ export function serializeCodeIndex(index: CodeIndex): SerializedCodeIndex {
   }
 }
 
-/** Serialize CodeIndex with empty content — for workers that load content from IDB. */
+/** Serialize CodeIndex without source — for workers that load content from IDB. */
 export function serializeCodeIndexMeta(index: CodeIndex): SerializedCodeIndex {
   return {
-    files: Array.from(index.files.entries()).map(([path, file]) => [
-      path,
-      { ...file, content: '' },
-    ]),
+    files: Array.from(index.files.entries()).map(([path, file]) => {
+      const metadata = { ...file }
+      delete metadata.content
+      return [path, metadata]
+    }),
     totalFiles: index.totalFiles,
     totalLines: index.totalLines,
     isIndexing: index.isIndexing,

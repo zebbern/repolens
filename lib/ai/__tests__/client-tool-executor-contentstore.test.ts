@@ -82,6 +82,18 @@ describe('executeToolLocally — readFile with contentStore', () => {
     expect(result.content).toBe('const app = true')
   })
 
+  it('returns a genuine empty file instead of reporting unavailable content', async () => {
+    const result = JSON.parse(await executeToolLocally(
+      'readFile',
+      { path: 'src/empty.ts' },
+      buildStrippedIndex([{ path: 'src/empty.ts', content: '', language: 'typescript' }]),
+    ))
+
+    expect(result).not.toHaveProperty('error')
+    expect(result.content).toBe('')
+    expect(result.lineCount).toBe(1)
+  })
+
   it('returns error when content is in neither file.content nor contentStore', async () => {
     const index: CodeIndex = {
       files: new Map([['src/empty.ts', { path: 'src/empty.ts', name: 'empty.ts', content: undefined, lineCount: 0 }]]),
@@ -119,6 +131,18 @@ describe('executeToolLocally — readFiles with contentStore', () => {
     expect(result.files).toHaveLength(2)
     expect(result.files[0].content).toBe('const a = 1')
     expect(result.files[1].content).toBe('const b = 2')
+  })
+
+  it('includes genuine empty files in a batch read', async () => {
+    const result = JSON.parse(await executeToolLocally(
+      'readFiles',
+      { paths: ['src/empty.ts'] },
+      buildStrippedIndex([{ path: 'src/empty.ts', content: '', language: 'typescript' }]),
+    ))
+
+    expect(result.files).toEqual([{
+      path: 'src/empty.ts', content: '', lineCount: 1, totalLines: 1,
+    }])
   })
 })
 
@@ -170,6 +194,19 @@ describe('executeToolLocally — scanIssues with contentStore', () => {
     // Should not error out — content was retrieved from contentStore
     expect(result).not.toHaveProperty('error')
   })
+
+  it('accepts a genuine empty file as available source', async () => {
+    const index = buildStrippedIndex([
+      { path: 'src/empty.ts', content: '', language: 'typescript' },
+    ])
+
+    const result = JSON.parse(
+      await executeToolLocally('scanIssues', { path: 'src/empty.ts' }, index),
+    )
+
+    expect(result).not.toHaveProperty('error')
+    expect(result.issueCount).toBe(0)
+  })
 })
 
 // ===========================================================================
@@ -188,7 +225,29 @@ describe('significanceScore (via generateTour)', () => {
       await executeToolLocally('generateTour', { repoKey: 'test/repo' }, index),
     )
 
-    // Should not error — significanceScore handles undefined content with (file.content ?? '')
+    // Should not error — tour generation hydrates source before scoring.
     expect(result).not.toHaveProperty('error')
+  })
+
+  it('ranks content-store-only files identically to inline source', async () => {
+    const entries = [
+      { path: 'src/plain.ts', content: 'const plain = true', language: 'typescript' },
+      {
+        path: 'src/exports.ts',
+        content: 'export const one = 1\nexport const two = 2\nexport const three = 3',
+        language: 'typescript',
+      },
+    ]
+    const inline = JSON.parse(await executeToolLocally(
+      'generateTour', { repoKey: 'test/repo', maxStops: 2 }, buildPopulatedIndex(entries),
+    ))
+    const stored = JSON.parse(await executeToolLocally(
+      'generateTour', { repoKey: 'test/repo', maxStops: 2 }, buildStrippedIndex(entries),
+    ))
+
+    expect(stored.tour.stops.map((stop: { filePath: string }) => stop.filePath)).toEqual(
+      inline.tour.stops.map((stop: { filePath: string }) => stop.filePath),
+    )
+    expect(stored.tour.stops[0].filePath).toBe('src/exports.ts')
   })
 })

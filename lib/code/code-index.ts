@@ -103,38 +103,58 @@ export interface HydratedCodeIndex {
   missingPaths: string[]
 }
 
+export interface ResolvedFileContents {
+  contents: Map<string, string>
+  missingPaths: string[]
+  residentOnly: boolean
+}
+
+/** Resolve a selected set without turning an on-demand store into a bulk network fetch. */
+export async function resolveFileContents(
+  index: CodeIndex,
+  paths: readonly string[],
+): Promise<ResolvedFileContents> {
+  const uniquePaths = Array.from(new Set(paths))
+  const missingInline = uniquePaths.filter(path => typeof index.files.get(path)?.content !== 'string')
+  const stored = await index.contentStore.getBatch(missingInline)
+  const contents = new Map<string, string>()
+  const missingPaths: string[] = []
+
+  for (const path of uniquePaths) {
+    let source = index.files.get(path)?.content
+    if (typeof source !== 'string') source = stored.get(path)
+    if (typeof source !== 'string' && index.contentStore.bulkReadMode === 'complete') {
+      source = await index.contentStore.get(path) ?? undefined
+    }
+    if (typeof source === 'string') contents.set(path, source)
+    else missingPaths.push(path)
+  }
+
+  return {
+    contents,
+    missingPaths,
+    residentOnly: index.contentStore.bulkReadMode === 'resident-only',
+  }
+}
+
 /** Resolve resident and external source into an isolated in-memory index. */
 export async function hydrateCodeIndexContent(
   index: CodeIndex,
 ): Promise<HydratedCodeIndex> {
-  const missingFromFiles = Array.from(index.files)
-    .filter(([, file]) => typeof file.content !== 'string')
-    .map(([path]) => path)
-  const stored = await index.contentStore.getBatch(missingFromFiles)
-  const content = new Map<string, string>()
+  const resolved = await resolveFileContents(index, Array.from(index.files.keys()))
   const files = new Map(index.files)
-  const missingPaths: string[] = []
-
-  for (const [path, file] of index.files) {
-    let source = file.content
-    if (typeof source !== 'string') {
-      source = stored.get(path) ?? await index.contentStore.get(path) ?? undefined
-    }
-    if (typeof source !== 'string') {
-      missingPaths.push(path)
-      continue
-    }
-    content.set(path, source)
-    files.set(path, { ...file, content: source })
+  for (const [path, source] of resolved.contents) {
+    const file = files.get(path)
+    if (file) files.set(path, { ...file, content: source })
   }
 
   return {
     index: {
       ...index,
       files,
-      contentStore: new InMemoryContentStore(content),
+      contentStore: new InMemoryContentStore(resolved.contents),
     },
-    missingPaths,
+    missingPaths: resolved.missingPaths,
   }
 }
 
@@ -430,13 +450,13 @@ export async function searchIndexAsync(
 /** Result of a partial search over a lazy-loaded index. */
 export interface PartialSearchResult {
   results: SearchResult[]
-  /** Paths that had no content (content === '') and were skipped. */
+  /** Paths with absent content that were skipped. Genuine empty files are searched. */
   unsearchedPaths: string[]
 }
 
 /**
- * Search indexed files, separating results from unsearched (empty-content) files.
- * Use this for lazy-loaded repos where some files have content='' (metadata only).
+ * Search indexed files, separating results from metadata-only files.
+ * Use this for lazy-loaded repos where some files have absent content.
  * The original `searchIndex` is unchanged and still available for full indexes.
  */
 export function searchIndexPartial(
@@ -520,7 +540,7 @@ export async function searchMore(
 
   for (const path of batch) {
     const content = contents.get(path)
-    if (content == null || content === '') {
+    if (content == null) {
       stillMissing.push(path)
       continue
     }

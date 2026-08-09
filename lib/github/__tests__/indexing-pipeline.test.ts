@@ -10,18 +10,33 @@ const mockDetectLanguage = vi.fn((name: string) => {
   const ext = name.split('.').pop()?.toLowerCase()
   return ext === 'ts' ? 'TypeScript' : ext === 'md' ? 'Markdown' : 'Unknown'
 })
-const mockBatchIndexFiles = vi.fn((_base, files) => ({
+const mockMemoryStore = {
+  putBatch: vi.fn(),
+  flush: vi.fn().mockResolvedValue(undefined),
+}
+const mockIDBStore = {
+  put: vi.fn(),
+  putBatch: vi.fn(),
+  flush: vi.fn().mockResolvedValue(undefined),
+}
+const mockBatchIndexFiles = vi.fn((base, files) => {
+  base.contentStore.putBatch(files)
+  return {
   files: new Map(files.map((f: { path: string; content: string }) => [f.path, { path: f.path, name: f.path.split('/').pop(), content: f.content }])),
   totalFiles: files.length,
   totalLines: 0,
-}))
+  contentStore: base.contentStore,
+  }
+})
 const mockCreateEmptyIndex = vi.fn(() => ({
   files: new Map(),
   totalFiles: 0,
   totalLines: 0,
+  contentStore: mockMemoryStore,
 }))
 const mockFlattenFiles = vi.fn((tree) => tree)
 const mockSetCachedRepo = vi.fn().mockResolvedValue(undefined)
+const mockToastWarning = vi.fn()
 
 vi.mock('@/lib/github/zipball', () => ({
   MAX_FILE_SIZE: 500_000,
@@ -43,16 +58,17 @@ vi.mock('@/lib/github/client', () => ({
 
 vi.mock('@/lib/code/code-index', () => ({
   createEmptyIndex: () => mockCreateEmptyIndex(),
-  createEmptyIndexWithStore: () => mockCreateEmptyIndex(),
+  createEmptyIndexWithStore: (store: unknown) => ({ ...mockCreateEmptyIndex(), contentStore: store }),
   batchIndexFiles: (...args: unknown[]) => mockBatchIndexFiles(args[0], args[1]),
   batchIndexMetadataOnly: vi.fn(),
   flattenFiles: (...args: unknown[]) => mockFlattenFiles(args[0]),
 }))
 
 vi.mock('@/lib/code/content-store', () => ({
-  IDBContentStore: vi.fn(() => ({
-    put: vi.fn(),
-  })),
+  IDBContentStore: vi.fn(function IDBContentStore() { return mockIDBStore }),
+  InMemoryContentStore: vi.fn(function InMemoryContentStore() {
+    return { ...mockMemoryStore, fallback: true }
+  }),
   LazyContentStore: vi.fn(),
 }))
 
@@ -73,7 +89,7 @@ vi.mock('@/lib/github/fetch-utils', () => ({
 }))
 
 vi.mock('sonner', () => ({
-  toast: { error: vi.fn() },
+  toast: { error: vi.fn(), warning: (...args: unknown[]) => mockToastWarning(...args) },
 }))
 
 import { startIndexing } from '@/lib/github/indexing-pipeline'
@@ -125,6 +141,9 @@ describe('startIndexing — streaming pipeline', () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
+    mockMemoryStore.flush.mockResolvedValue(undefined)
+    mockIDBStore.flush.mockResolvedValue(undefined)
+    mockSetCachedRepo.mockResolvedValue(undefined)
     // Default: streamUnzipFiles succeeds and calls onFile for each file
     mockStreamUnzipFiles.mockImplementation(
       async (_response: Response, onFile: (path: string, content: string) => void) => {
@@ -209,6 +228,58 @@ describe('startIndexing — streaming pipeline', () => {
 
     const stages = callbacks.setLoadingStage.mock.calls.map((c: unknown[]) => c[0])
     expect(stages[stages.length - 1]).toBe('ready')
+  })
+
+  it('writes the final IDB batch once, flushes it, then publishes the manifest before ready', async () => {
+    const callbacks = createCallbacks()
+    const repoData = createRepoData({ size: 60_000 })
+    const fileTree = createFileTree([{ path: 'src/index.ts', name: 'index.ts' }])
+
+    await startIndexing(repoData, fileTree, 'tree-sha', signal, callbacks)
+
+    expect(mockIDBStore.put).not.toHaveBeenCalled()
+    expect(mockIDBStore.putBatch).toHaveBeenCalledOnce()
+    expect(mockIDBStore.flush).toHaveBeenCalledOnce()
+    expect(mockIDBStore.flush.mock.invocationCallOrder[0]).toBeLessThan(
+      mockSetCachedRepo.mock.invocationCallOrder[0],
+    )
+    expect(mockSetCachedRepo.mock.invocationCallOrder[0]).toBeLessThan(
+      callbacks.setLoadingStage.mock.invocationCallOrder.at(-1)!,
+    )
+  })
+
+  it('keeps the resident index in memory, warns, and skips the manifest when IDB flush fails', async () => {
+    mockIDBStore.flush.mockRejectedValueOnce(new DOMException('quota', 'QuotaExceededError'))
+    const callbacks = createCallbacks()
+    const repoData = createRepoData({ size: 60_000 })
+    const fileTree = createFileTree([{ path: 'src/index.ts', name: 'index.ts' }])
+
+    await startIndexing(repoData, fileTree, 'tree-sha', signal, callbacks)
+
+    expect(mockSetCachedRepo).not.toHaveBeenCalled()
+    expect(mockToastWarning).toHaveBeenCalledWith(
+      'Repository is ready, but it was not cached for future visits.',
+    )
+    expect(callbacks.setCodeIndex).toHaveBeenCalledWith(expect.objectContaining({
+      contentStore: expect.objectContaining({ fallback: true }),
+      totalFiles: 2,
+    }))
+    expect(callbacks.setLoadingStage).toHaveBeenLastCalledWith('ready')
+  })
+
+  it('keeps the resident index usable and warns when manifest publication fails', async () => {
+    mockSetCachedRepo.mockRejectedValueOnce(new DOMException('manifest failed', 'UnknownError'))
+    const callbacks = createCallbacks()
+    const repoData = createRepoData()
+    const fileTree = createFileTree([{ path: 'src/index.ts', name: 'index.ts' }])
+
+    await startIndexing(repoData, fileTree, 'tree-sha', signal, callbacks)
+
+    expect(callbacks.setCodeIndex).toHaveBeenCalledWith(expect.objectContaining({ totalFiles: 2 }))
+    expect(mockToastWarning).toHaveBeenCalledWith(
+      'Repository is ready, but it was not cached for future visits.',
+    )
+    expect(callbacks.setLoadingStage).toHaveBeenLastCalledWith('ready')
   })
 
   it('preserves discovered supported count and records ZIP omissions as failures', async () => {

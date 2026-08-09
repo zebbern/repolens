@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react"
 import { Clock, Star, GitBranch, X, FileCode } from "lucide-react"
+import { toast } from 'sonner'
 import { cn } from "@/lib/utils"
 import { listCachedRepos, clearCachedRepo, type CachedRepoMeta } from "@/lib/cache/repo-cache"
 
@@ -37,8 +38,13 @@ export function RecentRepos({ onConnectWithUrl }: RecentReposProps) {
   const handleRemove = useCallback(
     async (e: React.MouseEvent, owner: string, repo: string) => {
       e.stopPropagation()
-      await clearCachedRepo(owner, repo)
-      setRepos((prev) => prev.filter((r) => r.key !== `${owner}/${repo}`))
+      try {
+        await clearCachedRepo(owner, repo)
+        setRepos((prev) => prev.filter((r) => r.key !== `${owner}/${repo}`))
+      } catch (error) {
+        console.error(`Failed to remove cached repository ${owner}/${repo}:`, error)
+        toast.error(`Could not remove ${owner}/${repo} from cached repositories.`)
+      }
     },
     [],
   )

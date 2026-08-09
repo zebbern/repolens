@@ -1,7 +1,18 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { InMemoryContentStore, IDBContentStore, LazyContentStore } from '../content-store'
+import {
+  InMemoryContentStore,
+  IDBContentStore,
+  LazyContentStore,
+  clearAllRepoContent,
+  deleteRepoContent,
+} from '../content-store'
 import { FetchQueue, type FetchQueueOptions } from '../fetch-queue'
-import { IDBFactory, IDBKeyRange } from 'fake-indexeddb'
+import {
+  IDBDatabase as FakeIDBDatabase,
+  IDBFactory,
+  IDBKeyRange,
+  IDBObjectStore as FakeIDBObjectStore,
+} from 'fake-indexeddb'
 import {
   createEmptyIndex,
   createEmptyIndexWithStore,
@@ -128,6 +139,17 @@ describe('InMemoryContentStore', () => {
     store.delete('one.ts')
     expect(store.size).toBe(1)
   })
+
+  it('flush() is an immediate durability barrier and clear() removes all content', async () => {
+    const store = new InMemoryContentStore()
+    store.put('one.ts', '1')
+    store.put('two.ts', '2')
+
+    await expect(store.flush()).resolves.toBeUndefined()
+    await expect(store.clear()).resolves.toBeUndefined()
+
+    expect(store.size).toBe(0)
+  })
 })
 
 describe('IDBContentStore publication cancellation', () => {
@@ -141,7 +163,7 @@ describe('IDBContentStore publication cancellation', () => {
     const stale = new IDBContentStore('acme/repo', controller.signal)
     stale.put('stale.ts', 'stale')
     controller.abort()
-    await new Promise(resolve => setTimeout(resolve, 0))
+    await expect(stale.flush()).rejects.toMatchObject({ name: 'AbortError' })
 
     const current = new IDBContentStore('acme/repo')
     expect(await current.get('stale.ts')).toBeNull()
@@ -288,8 +310,7 @@ describe('IDBContentStore', () => {
     const store = new IDBContentStore('owner/repo')
     store.put('src/index.ts', 'export default 42;')
 
-    // Allow fire-and-forget write to settle
-    await new Promise((r) => setTimeout(r, 10))
+    await store.flush()
 
     const result = await store.get('src/index.ts')
     expect(result).toBe('export default 42;')
@@ -309,7 +330,7 @@ describe('IDBContentStore', () => {
       { path: 'b.ts', content: 'bbb' },
     ])
 
-    await new Promise((r) => setTimeout(r, 10))
+    await store.flush()
 
     const result = await store.getBatch(['a.ts', 'b.ts', 'missing.ts'])
     expect(result.size).toBe(2)
@@ -331,7 +352,7 @@ describe('IDBContentStore', () => {
       { path: 'y.ts', content: 'y-content' },
     ])
 
-    await new Promise((r) => setTimeout(r, 10))
+    await store.flush()
 
     expect(await store.get('x.ts')).toBe('x-content')
     expect(await store.get('y.ts')).toBe('y-content')
@@ -355,8 +376,7 @@ describe('IDBContentStore', () => {
     expect(store.has('temp.ts')).toBe(false)
     expect(store.size).toBe(0)
 
-    // Allow delete to settle, then verify IDB
-    await new Promise((r) => setTimeout(r, 10))
+    await store.flush()
     expect(await store.get('temp.ts')).toBeNull()
   })
 
@@ -411,10 +431,97 @@ describe('IDBContentStore', () => {
     storeA.put('file.ts', 'alice-content')
     storeB.put('file.ts', 'bob-content')
 
-    await new Promise((r) => setTimeout(r, 10))
+    await Promise.all([storeA.flush(), storeB.flush()])
 
     expect(await storeA.get('file.ts')).toBe('alice-content')
     expect(await storeB.get('file.ts')).toBe('bob-content')
+  })
+
+  it('flush() aggregates every outstanding transaction', async () => {
+    const store = new IDBContentStore('owner/repo')
+    store.put('a.ts', 'a')
+    store.put('b.ts', 'b')
+    store.delete('a.ts')
+    store.put('c.ts', 'c')
+
+    await store.flush()
+
+    expect(await store.getBatch(['a.ts', 'b.ts', 'c.ts'])).toEqual(new Map([
+      ['b.ts', 'b'],
+      ['c.ts', 'c'],
+    ]))
+  })
+
+  it('flush() snapshots its boundary while retaining later failures for the next flush', async () => {
+    const originalTransaction = FakeIDBDatabase.prototype.transaction
+    let readwriteTransactions = 0
+    vi.spyOn(FakeIDBDatabase.prototype, 'transaction').mockImplementation(function (
+      this: InstanceType<typeof FakeIDBDatabase>,
+      ...args
+    ) {
+      const tx = originalTransaction.apply(this, args)
+      if (args[1] === 'readwrite' && ++readwriteTransactions === 2) {
+        queueMicrotask(() => tx.abort())
+      }
+      return tx
+    })
+
+    const store = new IDBContentStore('owner/repo')
+    store.put('before.ts', 'before')
+    const firstFlush = store.flush()
+    store.put('after.ts', 'after')
+
+    await expect(firstFlush).resolves.toBeUndefined()
+    await expect(store.flush()).rejects.toMatchObject({ name: 'AbortError' })
+    expect(await store.get('before.ts')).toBe('before')
+    expect(await store.get('after.ts')).toBeNull()
+  })
+
+  it('flush() rejects a synchronous quota failure instead of losing it', async () => {
+    vi.spyOn(FakeIDBObjectStore.prototype, 'put').mockImplementationOnce(() => {
+      throw new DOMException('Storage quota exceeded', 'QuotaExceededError')
+    })
+    const store = new IDBContentStore('owner/repo')
+
+    store.put('too-large.ts', 'content')
+
+    await expect(store.flush()).rejects.toMatchObject({ name: 'QuotaExceededError' })
+  })
+})
+
+describe('repository content cleanup', () => {
+  beforeEach(() => {
+    globalThis.indexedDB = new IDBFactory()
+    globalThis.IDBKeyRange = IDBKeyRange
+  })
+
+  it('deleteRepoContent() cursor-deletes only the requested repo prefix', async () => {
+    const target = new IDBContentStore('owner/repo')
+    const sibling = new IDBContentStore('owner/repository')
+    target.putBatch([
+      { path: 'src/a.ts', content: 'a' },
+      { path: 'src/b.ts', content: 'b' },
+    ])
+    sibling.put('src/a.ts', 'sibling')
+    await Promise.all([target.flush(), sibling.flush()])
+
+    await deleteRepoContent('owner/repo')
+
+    expect(await target.getBatch(['src/a.ts', 'src/b.ts'])).toEqual(new Map())
+    expect(await sibling.get('src/a.ts')).toBe('sibling')
+  })
+
+  it('clearAllRepoContent() removes every repository content record', async () => {
+    const first = new IDBContentStore('one/repo')
+    const second = new IDBContentStore('two/repo')
+    first.put('a.ts', 'a')
+    second.put('b.ts', 'b')
+    await Promise.all([first.flush(), second.flush()])
+
+    await clearAllRepoContent()
+
+    expect(await first.get('a.ts')).toBeNull()
+    expect(await second.get('b.ts')).toBeNull()
   })
 })
 

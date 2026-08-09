@@ -45,6 +45,12 @@ export interface ContentStore {
   /** Remove content for a path. */
   delete(path: string): void
 
+  /** Wait for every mutation issued before this call to commit. */
+  flush(): Promise<void>
+
+  /** Remove all content owned by this store. */
+  clear(): Promise<void>
+
   /** Number of stored files. */
   readonly size: number
 }
@@ -95,6 +101,15 @@ export class InMemoryContentStore implements ContentStore {
     this.store.delete(path)
   }
 
+  flush(): Promise<void> {
+    return Promise.resolve()
+  }
+
+  clear(): Promise<void> {
+    this.store.clear()
+    return Promise.resolve()
+  }
+
   getAllSync(): Map<string, string> {
     return new Map(this.store)
   }
@@ -109,6 +124,124 @@ const IDB_CONTENT_DB = 'repolens-content'
 const IDB_CONTENT_STORE = 'files'
 const IDB_CONTENT_VERSION = 1
 
+function abortError(signal?: AbortSignal): unknown {
+  return signal?.reason ?? new DOMException('The operation was aborted', 'AbortError')
+}
+
+function openContentDB(signal?: AbortSignal): Promise<IDBDatabase> {
+  if (signal?.aborted) return Promise.reject(abortError(signal))
+
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(IDB_CONTENT_DB, IDB_CONTENT_VERSION)
+    request.onupgradeneeded = () => {
+      const db = request.result
+      if (!db.objectStoreNames.contains(IDB_CONTENT_STORE)) {
+        db.createObjectStore(IDB_CONTENT_STORE)
+      }
+    }
+    request.onsuccess = () => {
+      if (signal?.aborted) {
+        request.result.close()
+        reject(abortError(signal))
+      } else {
+        resolve(request.result)
+      }
+    }
+    request.onerror = () => reject(request.error ?? new DOMException('Failed to open content database', 'UnknownError'))
+  })
+}
+
+function runContentTransaction(
+  db: IDBDatabase,
+  run: (store: IDBObjectStore) => void,
+  signal?: AbortSignal,
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(IDB_CONTENT_STORE, 'readwrite', { durability: 'strict' })
+    let synchronousError: unknown
+    let settled = false
+    const settle = (result: 'resolve' | 'reject', error?: unknown) => {
+      if (settled) return
+      settled = true
+      signal?.removeEventListener('abort', abort)
+      if (result === 'resolve') resolve()
+      else reject(error)
+    }
+    const abort = () => {
+      try {
+        tx.abort()
+      } catch {
+        // The transaction already committed or aborted.
+      }
+    }
+
+    signal?.addEventListener('abort', abort, { once: true })
+    tx.oncomplete = () => settle('resolve')
+    tx.onerror = () => {
+      // A request error normally aborts the transaction. onabort carries the
+      // final transaction error, including quota and commit failures.
+    }
+    tx.onabort = () => settle(
+      'reject',
+      synchronousError ?? tx.error ?? (signal?.aborted ? abortError(signal) : new DOMException('Transaction aborted', 'AbortError')),
+    )
+
+    if (signal?.aborted) {
+      abort()
+      return
+    }
+
+    try {
+      run(tx.objectStore(IDB_CONTENT_STORE))
+    } catch (error) {
+      synchronousError = error
+      abort()
+      settle('reject', error)
+    }
+  })
+}
+
+async function deleteRepoContentByCursor(
+  repoKey: string,
+  retainedPaths?: ReadonlySet<string>,
+): Promise<void> {
+  const db = await openContentDB()
+  const prefix = `${repoKey}:`
+  const range = IDBKeyRange.bound(prefix, `${prefix}\uffff`)
+  await runContentTransaction(db, store => {
+    const request = store.openCursor(range)
+    request.onsuccess = () => {
+      const cursor = request.result
+      if (!cursor) return
+      const key = String(cursor.key)
+      const path = key.slice(prefix.length)
+      if (!retainedPaths?.has(path)) cursor.delete()
+      cursor.continue()
+    }
+  })
+}
+
+/** Delete every content record belonging to one repository. */
+export function deleteRepoContent(repoKey: string): Promise<void> {
+  return deleteRepoContentByCursor(repoKey)
+}
+
+/** Delete obsolete records while preserving a replacement's current paths. */
+export function deleteStaleRepoContent(
+  repoKey: string,
+  retainedPaths: ReadonlySet<string>,
+): Promise<void> {
+  return deleteRepoContentByCursor(repoKey, retainedPaths)
+}
+
+/** Delete content records for every repository. */
+export async function clearAllRepoContent(): Promise<void> {
+  const db = await openContentDB()
+  await runContentTransaction(db, store => {
+    store.clear()
+  })
+}
+
 /**
  * IndexedDB-backed content store for medium+ repos.
  * Stores per-file content in IDB to reduce heap memory.
@@ -122,40 +255,26 @@ export class IDBContentStore implements ContentStore {
   readonly repoKey: string
   private paths: Set<string> = new Set()
   private dbPromise: Promise<IDBDatabase> | null = null
+  private unflushedWrites = new Set<Promise<void>>()
 
   constructor(repoKey: string, private readonly signal?: AbortSignal) {
     this.repoKey = repoKey
   }
 
   private openDB(): Promise<IDBDatabase> {
-    if (this.signal?.aborted) return Promise.reject(new DOMException('Aborted', 'AbortError'))
+    if (this.signal?.aborted) return Promise.reject(abortError(this.signal))
     if (!this.dbPromise) {
-      this.dbPromise = new Promise((resolve, reject) => {
-        const request = indexedDB.open(IDB_CONTENT_DB, IDB_CONTENT_VERSION)
-        request.onupgradeneeded = () => {
-          const db = request.result
-          if (!db.objectStoreNames.contains(IDB_CONTENT_STORE)) {
-            db.createObjectStore(IDB_CONTENT_STORE)
-          }
-        }
-        request.onsuccess = () => resolve(request.result)
-        request.onerror = () => reject(request.error)
-      })
+      this.dbPromise = openContentDB(this.signal)
     }
     return this.dbPromise
   }
 
   private write(run: (store: IDBObjectStore) => void): void {
-    if (this.signal?.aborted) return
-    this.openDB().then(db => {
-      if (this.signal?.aborted) return
-      const tx = db.transaction(IDB_CONTENT_STORE, 'readwrite')
-      const abort = () => { try { tx.abort() } catch { /* already complete */ } }
-      this.signal?.addEventListener('abort', abort, { once: true })
-      tx.oncomplete = tx.onerror = tx.onabort = () => this.signal?.removeEventListener('abort', abort)
-      if (this.signal?.aborted) abort()
-      else run(tx.objectStore(IDB_CONTENT_STORE))
-    }).catch(() => { /* non-critical */ })
+    const write = this.openDB().then(db => runContentTransaction(db, run, this.signal))
+    this.unflushedWrites.add(write)
+    // Mutations stay synchronous, so attach a handler immediately. flush()
+    // still observes the original rejected promise from the tracked set.
+    void write.catch(() => {})
   }
 
   private idbKey(path: string): string {
@@ -234,6 +353,16 @@ export class IDBContentStore implements ContentStore {
     this.write(store => store.delete(this.idbKey(path)))
   }
 
+  async flush(): Promise<void> {
+    const writes = [...this.unflushedWrites]
+    if (writes.length === 0) return
+
+    const results = await Promise.allSettled(writes)
+    for (const write of writes) this.unflushedWrites.delete(write)
+    const failure = results.find((result): result is PromiseRejectedResult => result.status === 'rejected')
+    if (failure) throw failure.reason
+  }
+
   getAllSync(): Map<string, string> {
     throw new Error(
       'IDBContentStore does not support synchronous getAllSync(). Use getBatch() instead.'
@@ -246,21 +375,11 @@ export class IDBContentStore implements ContentStore {
 
   /** Clear all content for this repo from IDB. */
   async clear(): Promise<void> {
-    try {
-      const db = await this.openDB()
-      const tx = db.transaction(IDB_CONTENT_STORE, 'readwrite')
-      const store = tx.objectStore(IDB_CONTENT_STORE)
-      for (const path of this.paths) {
-        store.delete(this.idbKey(path))
-      }
-      this.paths.clear()
-      await new Promise<void>((resolve) => {
-        tx.oncomplete = () => resolve()
-        tx.onerror = () => resolve()
-      })
-    } catch {
-      /* non-critical */
-    }
+    if (this.signal?.aborted) throw abortError(this.signal)
+    await this.flush()
+    if (this.signal?.aborted) throw abortError(this.signal)
+    await deleteRepoContent(this.repoKey)
+    this.paths.clear()
   }
 
   /** Reset cached DB connection (for testing). */
@@ -343,6 +462,10 @@ export class LazyContentStore implements ContentStore {
     this.idbStore.delete(path)
     this.loadedPaths.delete(path)
     this.metadataPaths.delete(path)
+  }
+
+  flush(): Promise<void> {
+    return this.idbStore.flush()
   }
 
   get size(): number {

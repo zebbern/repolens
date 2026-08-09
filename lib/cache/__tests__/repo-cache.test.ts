@@ -1,5 +1,10 @@
-import { describe, it, expect, beforeEach } from 'vitest'
-import { IDBFactory, IDBKeyRange } from 'fake-indexeddb'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
+import {
+  IDBDatabase as FakeIDBDatabase,
+  IDBFactory,
+  IDBKeyRange,
+  IDBObjectStore as FakeIDBObjectStore,
+} from 'fake-indexeddb'
 import {
   getCachedRepo,
   setCachedRepo,
@@ -7,6 +12,7 @@ import {
   clearAllCache,
   isReusableCachedRepo,
 } from '../repo-cache'
+import { IDBContentStore } from '@/lib/code/content-store'
 import type { FileNode, RepositoryCoverage } from '@/types/repository'
 
 // ---------------------------------------------------------------------------
@@ -101,6 +107,31 @@ describe('repo-cache (IndexedDB)', () => {
     expect(beta).not.toBeNull()
   })
 
+  it('clearCachedRepo removes only the matching repository content', async () => {
+    const alpha = new IDBContentStore('owner/alpha')
+    const beta = new IDBContentStore('owner/beta')
+    alpha.put('src/index.ts', 'alpha')
+    beta.put('src/index.ts', 'beta')
+    await Promise.all([alpha.flush(), beta.flush()])
+    await setCachedRepo('owner', 'alpha', 'sha1', SAMPLE_FILES, SAMPLE_TREE, SAMPLE_COVERAGE)
+    await setCachedRepo('owner', 'beta', 'sha2', SAMPLE_FILES, SAMPLE_TREE, SAMPLE_COVERAGE)
+
+    await clearCachedRepo('owner', 'alpha')
+
+    expect(await alpha.get('src/index.ts')).toBeNull()
+    expect(await beta.get('src/index.ts')).toBe('beta')
+  })
+
+  it('clearCachedRepo rejects when explicit content cleanup fails', async () => {
+    const original = globalThis.indexedDB
+    // @ts-expect-error -- exercises the user-visible cleanup failure contract.
+    globalThis.indexedDB = undefined
+
+    await expect(clearCachedRepo('owner', 'repo')).rejects.toBeInstanceOf(TypeError)
+
+    globalThis.indexedDB = original
+  })
+
   // -----------------------------------------------------------------------
   // clearAllCache
   // -----------------------------------------------------------------------
@@ -115,6 +146,19 @@ describe('repo-cache (IndexedDB)', () => {
     expect(await getCachedRepo('owner', 'a')).toBeNull()
     expect(await getCachedRepo('owner', 'b')).toBeNull()
     expect(await getCachedRepo('owner', 'c')).toBeNull()
+  })
+
+  it('clearAllCache removes content records across repositories', async () => {
+    const first = new IDBContentStore('owner/a')
+    const second = new IDBContentStore('owner/b')
+    first.put('a.ts', 'a')
+    second.put('b.ts', 'b')
+    await Promise.all([first.flush(), second.flush()])
+
+    await clearAllCache()
+
+    expect(await first.get('a.ts')).toBeNull()
+    expect(await second.get('b.ts')).toBeNull()
   })
 
   // -----------------------------------------------------------------------
@@ -139,6 +183,40 @@ describe('repo-cache (IndexedDB)', () => {
     }
   })
 
+  it('LRU eviction removes evicted repository content but preserves retained repos', async () => {
+    const stores: IDBContentStore[] = []
+    for (let i = 1; i <= 6; i++) {
+      const store = new IDBContentStore(`owner/repo-${i}`)
+      store.put('index.ts', `repo-${i}`)
+      await store.flush()
+      stores.push(store)
+      await setCachedRepo('owner', `repo-${i}`, `sha-${i}`, SAMPLE_FILES, SAMPLE_TREE, SAMPLE_COVERAGE, undefined, {
+        contentPaths: ['index.ts'],
+      })
+    }
+
+    expect(await stores[0].get('index.ts')).toBeNull()
+    expect(await stores[1].get('index.ts')).toBe('repo-2')
+  })
+
+  it('observes background LRU content cleanup failures without failing publication', async () => {
+    for (let i = 1; i <= 5; i++) {
+      await setCachedRepo('owner', `repo-${i}`, `sha-${i}`, SAMPLE_FILES, SAMPLE_TREE, SAMPLE_COVERAGE)
+    }
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    vi.spyOn(FakeIDBObjectStore.prototype, 'openCursor').mockImplementationOnce(() => {
+      throw new DOMException('cleanup failed', 'UnknownError')
+    })
+
+    await expect(
+      setCachedRepo('owner', 'repo-6', 'sha-6', SAMPLE_FILES, SAMPLE_TREE, SAMPLE_COVERAGE),
+    ).resolves.toBeUndefined()
+    expect(warn).toHaveBeenCalledWith(
+      'Failed to remove evicted repository content for owner/repo-1:',
+      expect.objectContaining({ name: 'UnknownError' }),
+    )
+  })
+
   // -----------------------------------------------------------------------
   // SHA comparison (cache freshness)
   // -----------------------------------------------------------------------
@@ -154,6 +232,43 @@ describe('repo-cache (IndexedDB)', () => {
     // Cache miss scenario: new SHA from server would differ
     const serverSha = 'def456'
     expect(cached!.sha !== serverSha).toBe(true)
+  })
+
+  it('publishes a replacement manifest before deleting only superseded content', async () => {
+    const store = new IDBContentStore('owner/repo')
+    store.putBatch([
+      { path: 'old.ts', content: 'old' },
+      { path: 'keep.ts', content: 'old keep' },
+    ])
+    await store.flush()
+    await setCachedRepo('owner', 'repo', 'sha-old', SAMPLE_FILES, SAMPLE_TREE, SAMPLE_COVERAGE, undefined, {
+      contentPaths: ['old.ts', 'keep.ts'],
+    })
+
+    store.putBatch([
+      { path: 'keep.ts', content: 'new keep' },
+      { path: 'new.ts', content: 'new' },
+    ])
+    await store.flush()
+    const writes: string[] = []
+    const originalTransaction = FakeIDBDatabase.prototype.transaction
+    vi.spyOn(FakeIDBDatabase.prototype, 'transaction').mockImplementation(function (
+      this: InstanceType<typeof FakeIDBDatabase>,
+      ...args
+    ) {
+      if (args[1] === 'readwrite') writes.push(this.name)
+      return originalTransaction.apply(this, args)
+    })
+
+    await setCachedRepo('owner', 'repo', 'sha-new', SAMPLE_FILES, SAMPLE_TREE, SAMPLE_COVERAGE, undefined, {
+      contentPaths: ['keep.ts', 'new.ts'],
+    })
+
+    expect(writes.slice(0, 2)).toEqual(['repolens-cache', 'repolens-content'])
+    expect((await getCachedRepo('owner', 'repo'))?.sha).toBe('sha-new')
+    expect(await store.get('old.ts')).toBeNull()
+    expect(await store.get('keep.ts')).toBe('new keep')
+    expect(await store.get('new.ts')).toBe('new')
   })
 
   it('does not reuse partial or failure-bearing cache records', async () => {
@@ -204,14 +319,14 @@ describe('repo-cache (IndexedDB)', () => {
     globalThis.indexedDB = original
   })
 
-  it('setCachedRepo does not throw when indexedDB is unavailable', async () => {
+  it('setCachedRepo rejects when indexedDB is unavailable', async () => {
     const original = globalThis.indexedDB
     // @ts-expect-error — intentionally removing indexedDB for test
     globalThis.indexedDB = undefined
 
     await expect(
       setCachedRepo('owner', 'repo', 'sha', SAMPLE_FILES, SAMPLE_TREE, SAMPLE_COVERAGE),
-    ).resolves.not.toThrow()
+    ).rejects.toBeInstanceOf(TypeError)
 
     globalThis.indexedDB = original
   })

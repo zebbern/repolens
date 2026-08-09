@@ -79,6 +79,8 @@ function createMockIDBStore(entries: Map<string, string>): ContentStore {
     }),
     has: vi.fn((path: string) => paths.has(path)),
     delete: vi.fn((path: string) => { entries.delete(path); paths.delete(path) }),
+    flush: vi.fn().mockResolvedValue(undefined),
+    clear: vi.fn(async () => { entries.clear(); paths.clear() }),
     get size() { return paths.size },
   }
 }

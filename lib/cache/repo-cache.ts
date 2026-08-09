@@ -3,6 +3,11 @@
 
 import type { FileNode, RepositoryCoverage } from '@/types/repository'
 import { isCoverageComplete } from '@/lib/repository'
+import {
+  clearAllRepoContent,
+  deleteRepoContent,
+  deleteStaleRepoContent,
+} from '@/lib/code/content-store'
 
 const DB_NAME = 'repolens-cache'
 const STORE_NAME = 'repos'
@@ -87,34 +92,75 @@ function openDB(): Promise<IDBDatabase> {
   })
 }
 
+function transactionDone(tx: IDBTransaction, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const abort = () => {
+      try {
+        tx.abort()
+      } catch {
+        // The transaction already completed.
+      }
+    }
+    signal?.addEventListener('abort', abort, { once: true })
+    tx.oncomplete = () => {
+      signal?.removeEventListener('abort', abort)
+      resolve()
+    }
+    tx.onerror = () => {
+      // onabort carries the final transaction error.
+    }
+    tx.onabort = () => {
+      signal?.removeEventListener('abort', abort)
+      reject(tx.error ?? signal?.reason ?? new DOMException('Transaction aborted', 'AbortError'))
+    }
+    if (signal?.aborted) abort()
+  })
+}
+
+async function getRepoRecord(db: IDBDatabase, key: string): Promise<CachedRepo | null> {
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_NAME, 'readonly')
+    const request = tx.objectStore(STORE_NAME).get(key)
+    request.onsuccess = () => resolve(request.result ?? null)
+    request.onerror = () => reject(request.error ?? new DOMException('Failed to read repository cache', 'UnknownError'))
+  })
+}
+
+async function deleteRepoManifest(db: IDBDatabase, key: string): Promise<void> {
+  const tx = db.transaction(STORE_NAME, 'readwrite', { durability: 'strict' })
+  const done = transactionDone(tx)
+  tx.objectStore(STORE_NAME).delete(key)
+  await done
+}
+
 /** Run an LRU eviction pass: keep only the MAX_REPOS most-recent entries. */
 async function evictLRU(db: IDBDatabase): Promise<void> {
-  return new Promise((resolve) => {
-    const tx = db.transaction(STORE_NAME, 'readwrite')
+  try {
+    const records = await new Promise<CachedRepo[]>((resolve, reject) => {
+      const tx = db.transaction(STORE_NAME, 'readonly')
+      const request = tx.objectStore(STORE_NAME).getAll()
+      request.onsuccess = () => resolve(request.result ?? [])
+      request.onerror = () => reject(request.error ?? new DOMException('Failed to read cache entries', 'UnknownError'))
+    })
+    if (records.length <= MAX_REPOS) return
+
+    records.sort((a, b) => a.timestamp - b.timestamp)
+    const toRemove = records.slice(0, records.length - MAX_REPOS)
+    const tx = db.transaction(STORE_NAME, 'readwrite', { durability: 'strict' })
+    const done = transactionDone(tx)
     const store = tx.objectStore(STORE_NAME)
-    const allReq = store.getAll()
+    for (const record of toRemove) store.delete(record.key)
+    await done
 
-    allReq.onsuccess = () => {
-      const records: CachedRepo[] = allReq.result ?? []
-      if (records.length <= MAX_REPOS) {
-        resolve()
-        return
+    const cleanups = await Promise.allSettled(toRemove.map(record => deleteRepoContent(record.key)))
+    cleanups.forEach((result, index) => {
+      if (result.status === 'rejected') {
+        console.warn(`Failed to remove evicted repository content for ${toRemove[index].key}:`, result.reason)
       }
-
-      // Sort ascending by timestamp — oldest first
-      records.sort((a, b) => a.timestamp - b.timestamp)
-      const toRemove = records.slice(0, records.length - MAX_REPOS)
-
-      for (const record of toRemove) {
-        store.delete(record.key)
-      }
-
-      tx.oncomplete = () => resolve()
-      tx.onerror = () => resolve()
-    }
-
-    allReq.onerror = () => resolve()
-  })
+    })
+  } catch (error) {
+    console.warn('Failed to evict old repository cache entries:', error)
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -152,8 +198,14 @@ export async function getCachedRepo(
     // Touch timestamp so LRU eviction keeps frequently-accessed repos
     if (entry) {
       entry.timestamp = Date.now()
-      const tx = db.transaction(STORE_NAME, 'readwrite')
-      tx.objectStore(STORE_NAME).put(entry)
+      try {
+        const tx = db.transaction(STORE_NAME, 'readwrite', { durability: 'strict' })
+        const done = transactionDone(tx)
+        tx.objectStore(STORE_NAME).put(entry)
+        await done
+      } catch (error) {
+        console.warn(`Failed to update repository cache timestamp for ${entry.key}:`, error)
+      }
     }
 
     return entry
@@ -172,52 +224,54 @@ export async function setCachedRepo(
   tree: FileNode[],
   coverage: RepositoryCoverage,
   meta?: { description?: string | null; stars?: number; language?: string | null },
-  options: { signal?: AbortSignal } = {},
+  options: { signal?: AbortSignal; contentPaths?: readonly string[] } = {},
 ): Promise<void> {
   const throwIfAborted = () => {
     if (options.signal?.aborted) throw options.signal.reason ?? new DOMException('The operation was aborted', 'AbortError')
   }
-  try {
-    throwIfAborted()
-    const db = await openDB()
-    throwIfAborted()
-    const key = `${owner}/${repo}`
-    const record: CachedRepo = {
-      schemaVersion: REPO_CACHE_SCHEMA_VERSION,
-      coverage,
-      complete: isCoverageComplete(coverage),
-      key,
-      owner,
-      repo,
-      sha,
-      timestamp: Date.now(),
-      files,
-      tree,
-      ...(meta && {
-        description: meta.description,
-        stars: meta.stars,
-        language: meta.language,
-      }),
-    }
-
-    await new Promise<void>((resolve, reject) => {
-      const tx = db.transaction(STORE_NAME, 'readwrite')
-      const abort = () => { try { tx.abort() } catch { /* already complete */ } }
-      options.signal?.addEventListener('abort', abort, { once: true })
-      const store = tx.objectStore(STORE_NAME)
-      if (options.signal?.aborted) abort()
-      else store.put(record)
-
-      tx.oncomplete = () => { options.signal?.removeEventListener('abort', abort); resolve() }
-      tx.onerror = tx.onabort = () => { options.signal?.removeEventListener('abort', abort); reject(tx.error ?? new DOMException('The operation was aborted', 'AbortError')) }
-    })
-
-    throwIfAborted()
-    await evictLRU(db)
-  } catch (error) {
-    if (options.signal?.aborted) throw error
-    // Cache write failure is non-critical — silently ignore.
+  throwIfAborted()
+  const db = await openDB()
+  throwIfAborted()
+  const key = `${owner}/${repo}`
+  const previous = await getRepoRecord(db, key)
+  throwIfAborted()
+  const record: CachedRepo = {
+    schemaVersion: REPO_CACHE_SCHEMA_VERSION,
+    coverage,
+    complete: isCoverageComplete(coverage),
+    key,
+    owner,
+    repo,
+    sha,
+    timestamp: Date.now(),
+    files,
+    tree,
+    ...(meta && {
+      description: meta.description,
+      stars: meta.stars,
+      language: meta.language,
+    }),
   }
+
+  const tx = db.transaction(STORE_NAME, 'readwrite', { durability: 'strict' })
+  const done = transactionDone(tx, options.signal)
+  if (!options.signal?.aborted) tx.objectStore(STORE_NAME).put(record)
+  await done
+
+  throwIfAborted()
+  if (previous && previous.sha !== sha) {
+    try {
+      if (options.contentPaths) {
+        await deleteStaleRepoContent(key, new Set(options.contentPaths))
+      } else {
+        await deleteRepoContent(key)
+      }
+    } catch (error) {
+      console.warn(`Failed to remove superseded repository content for ${key}:`, error)
+    }
+  }
+
+  await evictLRU(db)
 }
 
 /** Remove a single repo from the cache. */
@@ -225,17 +279,10 @@ export async function clearCachedRepo(
   owner: string,
   repo: string,
 ): Promise<void> {
-  try {
-    const db = await openDB()
-    await new Promise<void>((resolve) => {
-      const tx = db.transaction(STORE_NAME, 'readwrite')
-      tx.objectStore(STORE_NAME).delete(`${owner}/${repo}`)
-      tx.oncomplete = () => resolve()
-      tx.onerror = () => resolve()
-    })
-  } catch {
-    // Silently ignore.
-  }
+  const key = `${owner}/${repo}`
+  await deleteRepoContent(key)
+  const db = await openDB()
+  await deleteRepoManifest(db, key)
 }
 
 /** List lightweight metadata for all cached repos, sorted by most-recent first. */
@@ -272,15 +319,10 @@ export async function listCachedRepos(): Promise<CachedRepoMeta[]> {
 
 /** Clear all cached repos. */
 export async function clearAllCache(): Promise<void> {
-  try {
-    const db = await openDB()
-    await new Promise<void>((resolve) => {
-      const tx = db.transaction(STORE_NAME, 'readwrite')
-      tx.objectStore(STORE_NAME).clear()
-      tx.oncomplete = () => resolve()
-      tx.onerror = () => resolve()
-    })
-  } catch {
-    // Silently ignore.
-  }
+  await clearAllRepoContent()
+  const db = await openDB()
+  const tx = db.transaction(STORE_NAME, 'readwrite', { durability: 'strict' })
+  const done = transactionDone(tx)
+  tx.objectStore(STORE_NAME).clear()
+  await done
 }

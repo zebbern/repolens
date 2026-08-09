@@ -4,7 +4,7 @@ import { detectLanguage } from '@/lib/github/fetcher'
 import { fetchFileViaProxy } from '@/lib/github/client'
 import type { CodeIndex } from '@/lib/code/code-index'
 import { createEmptyIndex, createEmptyIndexWithStore, batchIndexFiles, batchIndexMetadataOnly, flattenFiles } from '@/lib/code/code-index'
-import { IDBContentStore, LazyContentStore } from '@/lib/code/content-store'
+import { IDBContentStore, InMemoryContentStore, LazyContentStore } from '@/lib/code/content-store'
 import { FetchQueue } from '@/lib/code/fetch-queue'
 import { streamUnzipFiles, isFileIndexable, isProbablyBinaryContent, MAX_FILE_SIZE } from '@/lib/github/zipball'
 import { setCachedRepo } from '@/lib/cache/repo-cache'
@@ -14,6 +14,7 @@ import { toast } from 'sonner'
 import { updateRepositoryCoverage } from '@/lib/repository'
 
 const CONCURRENCY_LIMIT = 10
+const NOT_CACHED_WARNING = 'Repository is ready, but it was not cached for future visits.'
 
 /** Subset of LoadingStage relevant during indexing. */
 type IndexingStage = 'tree-ready' | 'downloading' | 'extracting' | 'indexing' | 'lazy-indexing' | 'ready'
@@ -30,6 +31,11 @@ interface IndexingCallbacks {
   setCodeIndex: (index: CodeIndex) => void
   setFailedFiles: (files: Array<{ path: string; error: string }>) => void
   setCoverage?: (coverage: RepositoryCoverage) => void
+}
+
+function warnNotCached(error: unknown): void {
+  console.warn('Repository cache publication failed:', error)
+  toast.warning(NOT_CACHED_WARNING)
 }
 
 /**
@@ -68,16 +74,24 @@ export async function startIndexing(
     const coverage = updateRepositoryCoverage(initialCoverage, 0, 0, [])
     const emptyIndex = createEmptyIndex()
     emptyIndex.coverage = coverage
+    try {
+      await emptyIndex.contentStore.flush()
+      if (signal.aborted) return
+      await setCachedRepo(repoData.owner, repoData.name, treeSha, [], fileTree, coverage, {
+        description: repoData.description,
+        stars: repoData.stars,
+        language: repoData.language,
+      }, { signal })
+    } catch (error) {
+      if (signal.aborted) return
+      warnNotCached(error)
+    }
+    if (signal.aborted) return
     setCodeIndex(emptyIndex)
     setFailedFiles([])
     setCoverage?.(coverage)
     setIndexingProgress({ current: 0, total: 0, isComplete: true })
     setLoadingStage('ready')
-    void setCachedRepo(repoData.owner, repoData.name, treeSha, [], fileTree, coverage, {
-      description: repoData.description,
-      stars: repoData.stars,
-      language: repoData.language,
-    }, { signal }).catch(() => { /* aborted/stale cache publication is a no-op */ })
     return
   }
 
@@ -114,6 +128,8 @@ export async function startIndexing(
     const coverage = updateRepositoryCoverage(initialCoverage, discoveredPaths.size, 0, [])
     finalIndex.coverage = coverage
 
+    await lazyStore.flush()
+    if (signal.aborted) return
     setCodeIndex(finalIndex)
     setCoverage?.(coverage)
     setIndexingProgress({ current: indexableFiles.length, total: indexableFiles.length, isComplete: true })
@@ -166,11 +182,6 @@ export async function startIndexing(
           discoveredPaths.add(path)
           accumulated.push({ path, content, language: detectLanguage(filename) })
 
-          // Write to IDB as files arrive (fire-and-forget)
-          if (contentStore) {
-            contentStore.put(path, content)
-          }
-
           // Progress update per file
           setIndexingProgress(prev => ({
             ...prev,
@@ -201,9 +212,6 @@ export async function startIndexing(
       accumulated.length = 0 // Clear any partial results
       discoveredPaths.clear()
       for (const path of treeDiscoveredPaths) discoveredPaths.add(path)
-      if (contentStore) {
-        contentStore.clear().catch(() => {})
-      }
     }
   }
 
@@ -267,6 +275,36 @@ export async function startIndexing(
   )
   finalIndex.coverage = coverage
 
+  let contentDurable = true
+  try {
+    await finalIndex.contentStore.flush()
+  } catch (error) {
+    if (signal.aborted) return
+    contentDurable = false
+    finalIndex.contentStore = new InMemoryContentStore(
+      new Map(accumulated.map(file => [file.path, file.content])),
+    )
+    warnNotCached(error)
+  }
+  if (signal.aborted) return
+
+  if (contentDurable) {
+    try {
+      await setCachedRepo(repoData.owner, repoData.name, treeSha, accumulated, fileTree, coverage, {
+        description: repoData.description,
+        stars: repoData.stars,
+        language: repoData.language,
+      }, {
+        signal,
+        ...(contentStore && { contentPaths: accumulated.map(file => file.path) }),
+      })
+    } catch (error) {
+      if (signal.aborted) return
+      warnNotCached(error)
+    }
+  }
+  if (signal.aborted) return
+
   setCodeIndex(finalIndex)
   setFailedFiles(errors)
   setCoverage?.(coverage)
@@ -276,14 +314,6 @@ export async function startIndexing(
     isComplete: true,
   })
   setLoadingStage('ready')
-
-  // B2: Persist to IndexedDB cache
-  setCachedRepo(repoData.owner, repoData.name, treeSha, accumulated, fileTree, coverage, {
-    description: repoData.description,
-    stars: repoData.stars,
-    language: repoData.language,
-  }, { signal })
-    .catch(() => { /* aborted/stale cache publication is a no-op */ })
 
   // B6: Notify user of failed files
   if (errors.length > 0) {

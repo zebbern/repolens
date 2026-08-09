@@ -5,13 +5,14 @@ const baseURL = `http://127.0.0.1:${port}`;
 
 export default defineConfig({
   testDir: './e2e',
-  fullyParallel: true,
+  fullyParallel: false,
   forbidOnly: !!process.env.CI,
   retries: 0,
   workers: 1,
   reporter: [['html', { open: 'never' }], ['list']],
   use: {
     baseURL,
+    serviceWorkers: 'block',
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
   },
@@ -28,9 +29,9 @@ export default defineConfig({
     },
   ],
   webServer: {
-    command: `pnpm start --port ${port}`,
+    command: `pnpm start --hostname 127.0.0.1 --port ${port}`,
     url: baseURL,
-    reuseExistingServer: !process.env.CI,
+    reuseExistingServer: false,
     timeout: 120000,
   },
 });

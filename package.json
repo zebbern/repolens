@@ -19,7 +19,8 @@
     "test:coverage": "vitest run --coverage",
     "test:ui": "vitest --ui",
     "test:e2e": "playwright test --project=chromium",
-    "test:e2e:live": "playwright test --project=chromium-live"
+    "test:e2e:live": "playwright test --project=chromium-live",
+    "release:check": "pnpm lint && pnpm typecheck && pnpm test:unit && pnpm build && pnpm test:e2e && pnpm test:e2e:live"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.68",

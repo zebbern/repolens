@@ -60,8 +60,11 @@ export function IssuesPanel({ codeIndex, onNavigateToFile }: IssuesPanelProps) {
   const [results, setResults] = useState<ScanResults | null>(null)
   const [scanLoading, setScanLoading] = useState(false)
   const [scanError, setScanError] = useState<string | null>(null)
+  const previousRepositorySessionRef = useRef(repositorySession)
 
   useEffect(() => {
+    if (previousRepositorySessionRef.current === repositorySession) return
+    previousRepositorySessionRef.current = repositorySession
     let cancelled = false
     queueMicrotask(() => {
       if (cancelled) return

@@ -66,7 +66,7 @@ export function CodeEditorContent({
   const editorRef = useRef<HTMLDivElement>(null)
 
   // Loading state while indexing
-  if (!isIndexingComplete && indexingTotal > 0) {
+  if (contentAvailability === 'full' && !isIndexingComplete && indexingTotal > 0) {
     return (
       <div className="flex h-full items-center justify-center">
         <div className="flex flex-col items-center gap-6 w-full max-w-xs">

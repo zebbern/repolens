@@ -22,14 +22,14 @@ function validChatOptions(overrides: Record<string, unknown> = {}) {
 describe('callOptionsSchema — activeSkills in chat mode', () => {
   it('accepts chat mode with valid activeSkills', () => {
     const result = callOptionsSchema.safeParse(
-      validChatOptions({ activeSkills: ['security-audit', 'architecture-review'] }),
+      validChatOptions({ activeSkills: ['security-audit', 'pr-review'] }),
     )
     expect(result.success).toBe(true)
     if (result.success) {
       expect(result.data.mode).toBe('chat')
       expect('activeSkills' in result.data && result.data.activeSkills).toEqual([
         'security-audit',
-        'architecture-review',
+        'pr-review',
       ])
     }
   })

@@ -4,8 +4,8 @@ import { SKILL_ID_SCHEMA } from '@/lib/ai/skills/types'
 const providerSchema = z.enum(['openai', 'google', 'anthropic', 'openrouter'])
 
 const repoContextSchema = z.object({
-  name: z.string(),
-  description: z.string(),
+  name: z.string().trim().min(1).max(256),
+  description: z.string().max(2_000),
   structure: z.string().max(200_000),
 })
 
@@ -31,7 +31,7 @@ const docsOptionsSchema = z.object({
   docType: z.enum(['architecture', 'setup', 'api-reference', 'file-explanation', 'onboarding', 'custom']),
   repoContext: repoContextSchema,
   structuralIndex: z.string().max(500_000).optional(),
-  targetFile: z.string().nullish(),
+  targetFile: z.string().max(4_096).nullish(),
   maxSteps: z.number().int().min(10).max(80).optional(),
   activeSkills: z.array(SKILL_ID_SCHEMA).max(10).optional(),
 })
@@ -42,8 +42,8 @@ const changelogOptionsSchema = z.object({
   changelogType: z.enum(['conventional', 'release-notes', 'keep-a-changelog', 'custom']),
   repoContext: repoContextSchema,
   structuralIndex: z.string().max(500_000).optional(),
-  fromRef: z.string().min(1),
-  toRef: z.string().min(1),
+  fromRef: z.string().trim().min(1).max(256),
+  toRef: z.string().trim().min(1).max(256),
   commitData: z.string().max(500_000),
   maxSteps: z.number().int().min(10).max(80).optional(),
   activeSkills: z.array(SKILL_ID_SCHEMA).max(10).optional(),
@@ -57,8 +57,8 @@ const prReviewOptionsSchema = z.object({
   prNumber: z.number().int().min(1),
   prTitle: z.string().max(500),
   prBody: z.string().max(100_000).nullish(),
-  baseSha: z.string().min(1),
-  headSha: z.string().min(1),
+  baseSha: z.string().regex(/^[0-9a-f]{7,64}$/i),
+  headSha: z.string().regex(/^[0-9a-f]{7,64}$/i),
   diffSummary: z.string().max(500_000),
   maxSteps: z.number().int().min(10).max(100).optional(),
   activeSkills: z.array(SKILL_ID_SCHEMA).max(10).optional(),

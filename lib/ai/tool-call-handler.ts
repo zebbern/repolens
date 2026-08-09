@@ -10,6 +10,7 @@ import {
 } from '@/lib/github/client'
 import { coverageNotice } from '@/lib/repository'
 import type { RepositoryCoverage } from '@/types/repository'
+import { parseToolResultData, serializeUntrustedContext } from './agent/prompt-context'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -62,6 +63,13 @@ function repositoryErrorText(message: string, coverage: RepositoryCoverage | und
   return output.coverageWarning ? JSON.stringify(output) : message
 }
 
+function wrapToolResult(result: unknown): string {
+  return serializeUntrustedContext([{
+    kind: 'tool-result',
+    data: parseToolResultData(result),
+  }])
+}
+
 // ---------------------------------------------------------------------------
 // Shared handler
 // ---------------------------------------------------------------------------
@@ -93,10 +101,10 @@ export async function handleToolCall(
         state: 'output-error' as const,
         tool: toolCall.toolName as never,
         toolCallId: toolCall.toolCallId,
-        errorText: repositoryErrorText(
+        errorText: wrapToolResult(repositoryErrorText(
           'Repository context is required for git history. Connect a GitHub repository first.',
           repositoryCoverage,
-        ),
+        )),
       })
       return
     }
@@ -160,17 +168,17 @@ export async function handleToolCall(
       addToolOutput({
         tool: toolCall.toolName as never,
         toolCallId: toolCall.toolCallId,
-        output: JSON.stringify(output),
+        output: wrapToolResult(output),
       })
     } catch (err) {
       addToolOutput({
         state: 'output-error' as const,
         tool: toolCall.toolName as never,
         toolCallId: toolCall.toolCallId,
-        errorText: repositoryErrorText(
+        errorText: wrapToolResult(repositoryErrorText(
           err instanceof Error ? err.message : 'Failed to fetch git history',
           repositoryCoverage,
-        ),
+        )),
       })
     }
     return
@@ -214,7 +222,7 @@ export async function handleToolCall(
           addToolOutput({
             tool: toolCall.toolName as never,
             toolCallId: toolCall.toolCallId,
-            output: JSON.stringify(output),
+            output: wrapToolResult(output),
           })
           return
         }
@@ -227,7 +235,7 @@ export async function handleToolCall(
       // AI SDK expects a literal tool name type, but dynamic tool names require this cast
       tool: toolCall.toolName as never,
       toolCallId: toolCall.toolCallId,
-      output: result,
+      output: wrapToolResult(result),
     })
   } catch (err) {
     addToolOutput({
@@ -235,10 +243,10 @@ export async function handleToolCall(
       // AI SDK expects a literal tool name type, but dynamic tool names require this cast
       tool: toolCall.toolName as never,
       toolCallId: toolCall.toolCallId,
-      errorText: repositoryErrorText(
+      errorText: wrapToolResult(repositoryErrorText(
         err instanceof Error ? err.message : 'Tool execution failed',
         repositoryCoverage,
-      ),
+      )),
     })
   }
 }

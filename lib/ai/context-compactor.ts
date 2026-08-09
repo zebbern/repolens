@@ -1,4 +1,8 @@
 import type { ModelMessage, ToolModelMessage } from 'ai'
+import {
+  parseUntrustedContext,
+  serializeUntrustedContext,
+} from './agent/prompt-context'
 
 import {
   extractSignature,
@@ -238,6 +242,21 @@ function compactToolMessage(msg: ToolModelMessage, limitMultiplier: number): Too
 
       const output = part.output as { type: string; value: unknown }
 
+      const untrustedBlocks = output.type === 'text'
+        ? parseUntrustedContext(output.value)
+        : undefined
+      if (
+        untrustedBlocks?.length === 1
+        && untrustedBlocks[0].kind === 'tool-result'
+      ) {
+        return compactUntrustedToolResult(
+          part,
+          untrustedBlocks[0].data,
+          toolName,
+          limitMultiplier,
+        )
+      }
+
       // Structural summarization for file-read tools
       if (toolName && FILE_READ_TOOLS.has(toolName)) {
         return compactFileReadResult(part, output, toolName)
@@ -246,6 +265,38 @@ function compactToolMessage(msg: ToolModelMessage, limitMultiplier: number): Too
       // Default truncation for all other tools
       return truncateToolOutput(part, output, toolName, limitMultiplier)
     }) as ToolModelMessage['content'],
+  }
+}
+
+/** Compact data inside the trust envelope, then restore one complete envelope. */
+function compactUntrustedToolResult(
+  part: unknown,
+  data: unknown,
+  toolName: string | undefined,
+  limitMultiplier: number,
+): unknown {
+  const innerOutput = { type: 'json', value: data }
+  const compacted = toolName && FILE_READ_TOOLS.has(toolName)
+    ? compactFileReadResult(part, innerOutput, toolName)
+    : truncateToolOutput(part, innerOutput, toolName, limitMultiplier)
+  if (compacted === part) return part
+
+  const compactedOutput = (compacted as {
+    output?: { type?: unknown; value?: unknown }
+  }).output
+  if (
+    !compactedOutput
+    || (compactedOutput.type !== 'text' && compactedOutput.type !== 'json')
+  ) return part
+
+  return {
+    ...(part as Record<string, unknown>),
+    output: {
+      type: 'text' as const,
+      value: serializeUntrustedContext([
+        { kind: 'tool-result', data: compactedOutput.value },
+      ]),
+    },
   }
 }
 

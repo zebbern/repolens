@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { createEmptyIndex, indexFile } from '@/lib/code/code-index'
+import { PARTIAL_COVERAGE_NOTICE } from '@/lib/repository'
 import {
   buildStructuralIndex,
   extractExports,
@@ -96,7 +97,7 @@ describe('buildStructuralIndex', () => {
     expect(parsed).toEqual([expect.objectContaining({
       path: '[repository-coverage]',
       repositoryCoverage: empty.coverage,
-      coverageNotice: expect.stringContaining('Do not imply repository-wide completeness'),
+      coverageNotice: PARTIAL_COVERAGE_NOTICE,
     })])
   })
 
@@ -143,7 +144,7 @@ describe('buildStructuralIndex', () => {
     }
     const parsed = JSON.parse(buildStructuralIndex(index)) as Array<Record<string, unknown>>
     expect(parsed[0]).toMatchObject({ path: '[repository-coverage]' })
-    expect(parsed[0].coverageNotice).toContain('Do not imply repository-wide completeness')
+    expect(parsed[0].coverageNotice).toBe(PARTIAL_COVERAGE_NOTICE)
   })
 })
 

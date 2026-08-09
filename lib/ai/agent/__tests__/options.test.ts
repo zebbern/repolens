@@ -271,4 +271,72 @@ describe('callOptionsSchema — shared validation', () => {
     })
     expect(result.success).toBe(false)
   })
+
+  it('trims repository names and enforces repository metadata bounds', () => {
+    const exact = callOptionsSchema.safeParse({
+      ...BASE,
+      mode: 'chat',
+      repoContext: { name: ` ${'n'.repeat(256)} `, description: 'd'.repeat(2_000), structure: '' },
+    })
+    expect(exact.success).toBe(true)
+    if (exact.success && exact.data.repoContext) expect(exact.data.repoContext.name).toHaveLength(256)
+    expect(callOptionsSchema.safeParse({
+      ...BASE,
+      mode: 'chat',
+      repoContext: { name: ' ', description: '', structure: '' },
+    }).success).toBe(false)
+    expect(callOptionsSchema.safeParse({
+      ...BASE,
+      mode: 'chat',
+      repoContext: { name: 'n'.repeat(257), description: '', structure: '' },
+    }).success).toBe(false)
+    expect(callOptionsSchema.safeParse({
+      ...BASE,
+      mode: 'chat',
+      repoContext: { name: 'repo', description: 'd'.repeat(2_001), structure: '' },
+    }).success).toBe(false)
+  })
+
+  it('enforces target path, refs, and PR SHA contracts at exact boundaries', () => {
+    expect(callOptionsSchema.safeParse({
+      ...BASE,
+      mode: 'docs',
+      docType: 'file-explanation',
+      repoContext: REPO_CONTEXT,
+      targetFile: 'p'.repeat(4_096),
+    }).success).toBe(true)
+    expect(callOptionsSchema.safeParse({
+      ...BASE,
+      mode: 'docs',
+      docType: 'file-explanation',
+      repoContext: REPO_CONTEXT,
+      targetFile: 'p'.repeat(4_097),
+    }).success).toBe(false)
+
+    const changelog = {
+      ...BASE,
+      mode: 'changelog',
+      changelogType: 'conventional',
+      repoContext: REPO_CONTEXT,
+      fromRef: 'f'.repeat(256),
+      toRef: 't'.repeat(256),
+      commitData: '',
+    }
+    expect(callOptionsSchema.safeParse(changelog).success).toBe(true)
+    expect(callOptionsSchema.safeParse({ ...changelog, fromRef: 'f'.repeat(257) }).success).toBe(false)
+
+    const review = {
+      ...BASE,
+      mode: 'pr-review',
+      prNumber: 1,
+      prTitle: 'title',
+      baseSha: 'abcdef1',
+      headSha: 'a'.repeat(64),
+      diffSummary: '',
+    }
+    expect(callOptionsSchema.safeParse(review).success).toBe(true)
+    expect(callOptionsSchema.safeParse({ ...review, baseSha: 'abcdef' }).success).toBe(false)
+    expect(callOptionsSchema.safeParse({ ...review, headSha: 'g'.repeat(7) }).success).toBe(false)
+    expect(callOptionsSchema.safeParse({ ...review, headSha: 'a'.repeat(65) }).success).toBe(false)
+  })
 })

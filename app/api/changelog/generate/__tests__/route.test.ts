@@ -6,12 +6,15 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 const mockCreateAgentUIStreamResponse = vi.fn()
 
-vi.mock('ai', () => ({
-  createAgentUIStreamResponse: (...args: unknown[]) => mockCreateAgentUIStreamResponse(...args),
-  smoothStream: () => 'smooth-transform',
-  consumeStream: vi.fn(),
-  ToolLoopAgent: vi.fn(),
-}))
+vi.mock('ai', async importOriginal => {
+  const actual = await importOriginal<typeof import('ai')>()
+  return {
+    ...actual,
+    createAgentUIStreamResponse: (...args: unknown[]) => mockCreateAgentUIStreamResponse(...args),
+    smoothStream: () => 'smooth-transform',
+    consumeStream: vi.fn(),
+  }
+})
 
 vi.mock('@/lib/ai/agent', () => ({
   repoLensAgent: { id: 'mock-agent' },
@@ -39,7 +42,7 @@ import { NextRequest } from 'next/server'
 
 function validBody(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
-    messages: [{ role: 'user', content: 'Generate changelog' }],
+    messages: [{ id: 'message-1', role: 'user', parts: [{ type: 'text', text: 'Generate changelog' }] }],
     provider: 'openai',
     model: 'gpt-4o',
     apiKey: 'sk-test-key',
@@ -78,7 +81,7 @@ describe('POST /api/changelog/generate', () => {
     )
   })
 
-  it('returns 400 for invalid JSON body', async () => {
+  it('returns 422 for invalid JSON body', async () => {
     const req = new NextRequest('http://localhost/api/changelog/generate', {
       method: 'POST',
       body: 'not json!!!',
@@ -86,9 +89,9 @@ describe('POST /api/changelog/generate', () => {
     })
 
     const res = await POST(req)
-    expect(res.status).toBe(400)
+    expect(res.status).toBe(422)
     const body = await res.json()
-    expect(body.error.code).toBe('INVALID_JSON')
+    expect(body.error.code).toBe('VALIDATION_ERROR')
   })
 
   it('returns 422 for empty body', async () => {

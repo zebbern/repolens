@@ -1,7 +1,9 @@
 import { streamText } from 'ai'
 import type { NextRequest } from 'next/server'
 import * as z from 'zod'
+import { createUntrustedContextMessage } from '@/lib/ai/agent/prompt-context'
 import { createAIModel } from '@/lib/ai/providers'
+import { aiRequestSchemaError, readBoundedAIRequest } from '@/lib/api/ai-request'
 import { apiError } from '@/lib/api/error'
 import { applyRateLimit } from '@/lib/api/rate-limit'
 
@@ -17,7 +19,7 @@ const inlineActionSchema = z.object({
   symbolCode: z.string().min(1).max(50_000),
   symbolName: z.string().min(1).max(200),
   symbolKind: z.enum(VALID_SYMBOL_KINDS),
-  filePath: z.string().min(1).max(500),
+  filePath: z.string().min(1).max(4_096),
   language: z.string().min(1).max(50),
   provider: z.enum(['openai', 'google', 'anthropic', 'openrouter']),
   model: z.string().min(1).max(100),
@@ -47,39 +49,30 @@ export async function POST(req: NextRequest) {
   const rateLimited = applyRateLimit(req, { bucket: '/api/inline-actions' })
   if (rateLimited) return rateLimited
 
-  let raw: unknown
-  try {
-    raw = await req.json()
-  } catch {
-    return apiError('INVALID_JSON', 'Invalid JSON in request body', 400)
-  }
+  const raw = await readBoundedAIRequest(req)
+  if (!raw.success) return raw.response
 
   try {
-    const parsed = inlineActionSchema.safeParse(raw)
+    const parsed = inlineActionSchema.safeParse(raw.data)
     if (!parsed.success) {
-      return apiError(
-        'VALIDATION_ERROR',
-        'Invalid request',
-        422,
-        JSON.stringify(parsed.error.flatten().fieldErrors),
-      )
+      return aiRequestSchemaError(parsed.error)
     }
 
     const { action, symbolCode, symbolName, symbolKind, filePath, language, provider, model, apiKey } = parsed.data
 
     const systemPrompt = buildSystemPrompt(action, symbolKind)
-    const userMessage = `File: \`${filePath}\` (${language})
-
-\`\`\`${language}
-${symbolCode}
-\`\`\`
-
-Analyze the ${symbolKind} \`${symbolName}\` above.`
+    const contextMessage = createUntrustedContextMessage([{
+      kind: 'pinned-files',
+      data: { filePath, language, symbolCode, symbolName, symbolKind },
+    }])
 
     const result = streamText({
       model: createAIModel(provider, model, apiKey),
       system: systemPrompt,
-      messages: [{ role: 'user' as const, content: userMessage }],
+      messages: [
+        contextMessage,
+        { role: 'user' as const, content: `Analyze the selected ${symbolKind} for the requested ${action} action.` },
+      ],
       abortSignal: req.signal,
     })
 

@@ -1,5 +1,5 @@
 import type { LanguageModelV3 } from '@ai-sdk/provider'
-import { stepCountIs, wrapLanguageModel } from 'ai'
+import { stepCountIs, wrapLanguageModel, type ModelMessage } from 'ai'
 import { createAIModel, getModelContextWindow } from '@/lib/ai/providers'
 import { codeTools } from '@/lib/ai/tool-definitions'
 import { buildChatPrompt } from './prompts/chat'
@@ -8,6 +8,10 @@ import { buildChangelogPrompt } from './prompts/changelog'
 import { buildPRReviewPrompt } from './prompts/pr-review'
 import { createLoggingMiddleware } from './middleware'
 import type { CallOptions } from './options'
+import {
+  createUntrustedContextMessage,
+  type UntrustedContextBlock,
+} from './prompt-context'
 
 /**
  * Context passed through `experimental_context` for use in `prepareStep`.
@@ -17,6 +21,8 @@ export interface CompactionContext {
   model: string
   provider: string
   contextWindow: number
+  /** Messages present at request start; only later server-executed results can unlock tools. */
+  trustedControlStartIndex: number
 }
 
 /**
@@ -72,8 +78,102 @@ async function wrapWithDevTools(model: LanguageModelV3): Promise<LanguageModelV3
  */
 const loggingMiddleware = createLoggingMiddleware()
 
+type PrepareCallArgs = {
+  options: CallOptions
+  prompt?: string | ModelMessage[]
+  messages?: ModelMessage[]
+} & Record<string, unknown>
+
+function repositoryBlocks(
+  repoContext: { name: string; description: string; structure: string } | undefined,
+  structuralIndex: string | undefined,
+): UntrustedContextBlock[] {
+  const blocks: UntrustedContextBlock[] = []
+  if (repoContext) {
+    blocks.push({
+      kind: 'repository-metadata',
+      data: { name: repoContext.name, description: repoContext.description },
+    })
+    blocks.push({ kind: 'file-tree', data: repoContext.structure })
+  }
+  if (structuralIndex) blocks.push({ kind: 'structural-index', data: structuralIndex })
+  return blocks
+}
+
+function untrustedBlocksForOptions(callOptions: CallOptions): UntrustedContextBlock[] {
+  switch (callOptions.mode) {
+    case 'chat':
+      return [
+        ...repositoryBlocks(callOptions.repoContext, callOptions.structuralIndex),
+        ...(callOptions.pinnedContext
+          ? [{ kind: 'pinned-files' as const, data: callOptions.pinnedContext }]
+          : []),
+      ]
+    case 'docs':
+      return [
+        ...repositoryBlocks(callOptions.repoContext, callOptions.structuralIndex),
+        ...(callOptions.targetFile
+          ? [{ kind: 'pinned-files' as const, data: { targetFile: callOptions.targetFile } }]
+          : []),
+      ]
+    case 'changelog':
+      return [
+        ...repositoryBlocks(callOptions.repoContext, callOptions.structuralIndex),
+        {
+          kind: 'commit-data',
+          data: {
+            fromRef: callOptions.fromRef,
+            toRef: callOptions.toRef,
+            commits: callOptions.commitData,
+          },
+        },
+      ]
+    case 'pr-review':
+      return [
+        ...repositoryBlocks(callOptions.repoContext, callOptions.structuralIndex),
+        {
+          kind: 'pr-metadata',
+          data: {
+            number: callOptions.prNumber,
+            title: callOptions.prTitle,
+            body: callOptions.prBody,
+            baseSha: callOptions.baseSha,
+            headSha: callOptions.headSha,
+          },
+        },
+        { kind: 'diff-summary', data: callOptions.diffSummary },
+      ]
+    default: {
+      const exhaustive: never = callOptions
+      return exhaustive
+    }
+  }
+}
+
+function prependUntrustedContext(
+  baseCallArgs: PrepareCallArgs,
+  blocks: readonly UntrustedContextBlock[],
+): PrepareCallArgs {
+  if (blocks.length === 0) return baseCallArgs
+  const contextMessage = createUntrustedContextMessage(blocks)
+
+  if (baseCallArgs.messages) {
+    return { ...baseCallArgs, messages: [contextMessage, ...baseCallArgs.messages] }
+  }
+  if (Array.isArray(baseCallArgs.prompt)) {
+    return { ...baseCallArgs, prompt: [contextMessage, ...baseCallArgs.prompt] }
+  }
+  if (typeof baseCallArgs.prompt === 'string') {
+    return {
+      ...baseCallArgs,
+      prompt: [contextMessage, { role: 'user', content: baseCallArgs.prompt }],
+    }
+  }
+  return { ...baseCallArgs, prompt: [contextMessage] }
+}
+
 export function buildPrepareCall() {
-  return async (baseCallArgs: { options: CallOptions } & Record<string, unknown>) => {
+  return async (baseCallArgs: PrepareCallArgs) => {
     const { options: callOptions } = baseCallArgs
     const { provider, model, apiKey } = callOptions
     const contextWindow = getModelContextWindow(model)
@@ -90,7 +190,17 @@ export function buildPrepareCall() {
       model,
       provider,
       contextWindow,
+      trustedControlStartIndex: 0,
     }
+    const preparedBaseCallArgs = prependUntrustedContext(
+      baseCallArgs,
+      untrustedBlocksForOptions(callOptions),
+    )
+    compactionContext.trustedControlStartIndex = Array.isArray(preparedBaseCallArgs.messages)
+      ? preparedBaseCallArgs.messages.length
+      : Array.isArray(preparedBaseCallArgs.prompt)
+        ? preparedBaseCallArgs.prompt.length
+        : 0
 
     switch (callOptions.mode) {
       case 'chat': {
@@ -98,12 +208,11 @@ export function buildPrepareCall() {
         compactionContext.maxSteps = stepBudget
 
         return {
-          ...baseCallArgs,
+          ...preparedBaseCallArgs,
           model: wrappedModel,
           instructions: buildChatPrompt({
-            repoContext: callOptions.repoContext,
-            structuralIndex: callOptions.structuralIndex,
-            pinnedContext: callOptions.pinnedContext,
+            hasRepositoryContext: Boolean(callOptions.repoContext),
+            hasPinnedContext: Boolean(callOptions.pinnedContext),
             stepBudget,
             contextWindow,
             toolCount,
@@ -123,13 +232,11 @@ export function buildPrepareCall() {
         compactionContext.maxSteps = stepBudget
 
         return {
-          ...baseCallArgs,
+          ...preparedBaseCallArgs,
           model: wrappedModel,
           instructions: buildDocsPrompt({
             docType: callOptions.docType,
-            repoContext: callOptions.repoContext,
-            structuralIndex: callOptions.structuralIndex,
-            targetFile: callOptions.targetFile,
+            hasTargetFile: Boolean(callOptions.targetFile),
             stepBudget,
             model,
             activeSkills: callOptions.activeSkills,
@@ -147,15 +254,10 @@ export function buildPrepareCall() {
         compactionContext.maxSteps = stepBudget
 
         return {
-          ...baseCallArgs,
+          ...preparedBaseCallArgs,
           model: wrappedModel,
           instructions: buildChangelogPrompt({
             changelogType: callOptions.changelogType,
-            repoContext: callOptions.repoContext,
-            structuralIndex: callOptions.structuralIndex,
-            fromRef: callOptions.fromRef,
-            toRef: callOptions.toRef,
-            commitData: callOptions.commitData,
             stepBudget,
             model,
             activeSkills: callOptions.activeSkills,
@@ -173,19 +275,10 @@ export function buildPrepareCall() {
         compactionContext.maxSteps = stepBudget
 
         return {
-          ...baseCallArgs,
+          ...preparedBaseCallArgs,
           model: wrappedModel,
           instructions: buildPRReviewPrompt({
-            repoContext: callOptions.repoContext,
-            structuralIndex: callOptions.structuralIndex,
-            prNumber: callOptions.prNumber,
-            prTitle: callOptions.prTitle,
-            prBody: callOptions.prBody,
-            baseSha: callOptions.baseSha,
-            headSha: callOptions.headSha,
-            diffSummary: callOptions.diffSummary,
             stepBudget,
-            model,
             activeSkills: callOptions.activeSkills,
           }),
           stopWhen: stepCountIs(stepBudget),
@@ -194,6 +287,10 @@ export function buildPrepareCall() {
           }),
           experimental_context: compactionContext,
         }
+      }
+      default: {
+        const exhaustive: never = callOptions
+        return exhaustive
       }
     }
   }

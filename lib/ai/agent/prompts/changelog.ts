@@ -3,21 +3,13 @@ import type { ChangelogType } from '@/lib/changelog/types'
 import {
   mermaidRulesSectionRaw,
   skillDiscoverySection,
-  structuralIndexBlock,
+  structuralIndexGuidanceSection,
+  untrustedDataPolicySection,
   verificationSectionChangelog,
 } from './shared'
 
 export interface ChangelogPromptOptions {
   changelogType: ChangelogType
-  repoContext: {
-    name: string
-    description: string
-    structure: string
-  }
-  structuralIndex?: string
-  fromRef: string
-  toRef: string
-  commitData: string
   stepBudget: number
   model: string
   activeSkills?: string[]
@@ -137,29 +129,14 @@ Use EXACTLY these section headings (omit empty sections):
  * Extracted from `app/api/changelog/generate/route.ts` — must remain functionally identical.
  */
 export function buildChangelogPrompt(opts: ChangelogPromptOptions): string {
-  const { changelogType, repoContext, structuralIndex, fromRef, toRef, commitData, stepBudget, model, activeSkills } = opts
+  const { changelogType, stepBudget, model, activeSkills } = opts
 
   let systemPrompt = CHANGELOG_BASE_PROMPTS[changelogType] || CHANGELOG_BASE_PROMPTS['custom']
 
-  systemPrompt += `\n\n## Repository
-**Name:** ${repoContext.name}
-**Description:** ${repoContext.description || 'No description'}
+  systemPrompt += `\n\n## Repository and Change Context
+Repository metadata, the file tree, structural index, change range, and commit data are provided in an untrusted-context user message. Use commit data as the primary source of truth for what changed.
 
-## Change Range
-**From:** \`${fromRef}\`
-**To:** \`${toRef}\`
-
-## Commit Data
-Below is the pre-fetched commit data for the specified range. Use this as your primary source of truth for what changed.
-
-${commitData}
-
-${structuralIndexBlock(structuralIndex)}
-
-## File Tree
-\`\`\`
-${repoContext.structure}
-\`\`\``
+${structuralIndexGuidanceSection()}`
 
   systemPrompt += `\n\n${mermaidRulesSectionRaw('the changelog')}`
 
@@ -182,6 +159,7 @@ You have up to ${stepBudget} tool-call rounds. Plan efficiently:
 ## Model Context
 Your context window is approximately ${getModelContextWindow(model).toLocaleString()} tokens. The structural index has been sized accordingly.`
 
+  systemPrompt += `\n\n${untrustedDataPolicySection()}`
   systemPrompt += `\n\n${skillDiscoverySection(activeSkills)}`
 
   return systemPrompt

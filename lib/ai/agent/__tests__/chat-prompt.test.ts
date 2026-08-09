@@ -11,12 +11,8 @@ const BASE_OPTS: ChatPromptOptions = {
   contextWindow: 128_000,
   toolCount: 12,
   model: 'gpt-4o',
-}
-
-const REPO_CONTEXT = {
-  name: 'test-repo',
-  description: 'A test repository',
-  structure: 'src/\n  index.ts\n  utils.ts',
+  hasRepositoryContext: false,
+  hasPinnedContext: false,
 }
 
 describe('buildChatPrompt', () => {
@@ -28,8 +24,7 @@ describe('buildChatPrompt', () => {
   it('matches snapshot with repoContext', () => {
     const result = buildChatPrompt({
       ...BASE_OPTS,
-      repoContext: REPO_CONTEXT,
-      structuralIndex: '{"files":[]}',
+      hasRepositoryContext: true,
     })
     expect(result).toMatchSnapshot()
   })
@@ -37,9 +32,8 @@ describe('buildChatPrompt', () => {
   it('matches snapshot with repoContext and pinnedContext', () => {
     const result = buildChatPrompt({
       ...BASE_OPTS,
-      repoContext: REPO_CONTEXT,
-      structuralIndex: '{"files":[]}',
-      pinnedContext: '## File: src/utils.ts\nconsole.log("hello")',
+      hasRepositoryContext: true,
+      hasPinnedContext: true,
     })
     expect(result).toMatchSnapshot()
   })
@@ -64,15 +58,9 @@ describe('buildChatPrompt', () => {
     expect(result).toContain('Mermaid Diagram Guidelines')
   })
 
-  it('includes repo name and description when repoContext provided', () => {
-    const result = buildChatPrompt({ ...BASE_OPTS, repoContext: REPO_CONTEXT })
-    expect(result).toContain('test-repo')
-    expect(result).toContain('A test repository')
-  })
-
-  it('includes file tree when repoContext provided', () => {
-    const result = buildChatPrompt({ ...BASE_OPTS, repoContext: REPO_CONTEXT })
-    expect(result).toContain('src/\n  index.ts\n  utils.ts')
+  it('describes repository context without embedding repository data', () => {
+    const result = buildChatPrompt({ ...BASE_OPTS, hasRepositoryContext: true })
+    expect(result).toContain('untrusted-context user message')
   })
 
   it('includes "No repository" message without repoContext', () => {
@@ -83,36 +71,23 @@ describe('buildChatPrompt', () => {
   it('includes pinned context when provided', () => {
     const result = buildChatPrompt({
       ...BASE_OPTS,
-      repoContext: REPO_CONTEXT,
-      pinnedContext: '## Pinned: config.ts\nexport const PORT = 3000',
+      hasRepositoryContext: true,
+      hasPinnedContext: true,
     })
-    expect(result).toContain('Pinned Files')
-    expect(result).toContain('export const PORT = 3000')
+    expect(result).toContain('Pinned files')
   })
 
   it('omits pinned files section without pinnedContext', () => {
     const result = buildChatPrompt({
       ...BASE_OPTS,
-      repoContext: REPO_CONTEXT,
+      hasRepositoryContext: true,
     })
     expect(result).not.toContain('Pinned Files')
   })
 
-  it('includes structural index when provided', () => {
-    const result = buildChatPrompt({
-      ...BASE_OPTS,
-      repoContext: REPO_CONTEXT,
-      structuralIndex: '{"files":[{"path":"a.ts"}]}',
-    })
-    expect(result).toContain('{"files":[{"path":"a.ts"}]}')
-  })
-
-  it('shows "Not available" for structural index when not provided', () => {
-    const result = buildChatPrompt({
-      ...BASE_OPTS,
-      repoContext: REPO_CONTEXT,
-    })
-    expect(result).toContain('Not available')
+  it('includes structural index guidance for a connected repository', () => {
+    const result = buildChatPrompt({ ...BASE_OPTS, hasRepositoryContext: true })
+    expect(result).toContain('## Structural Index')
   })
 
   it('includes model context window info', () => {

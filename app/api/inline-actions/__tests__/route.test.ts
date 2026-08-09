@@ -174,7 +174,7 @@ describe('Inline Actions API — POST handler', () => {
     })
   })
 
-  it('returns 400 for invalid JSON body', async () => {
+  it('returns 422 for invalid JSON body', async () => {
     const req = new NextRequest('http://localhost/api/inline-actions', {
       method: 'POST',
       body: 'not json!!!',
@@ -182,9 +182,9 @@ describe('Inline Actions API — POST handler', () => {
     })
 
     const res = await POST(req)
-    expect(res.status).toBe(400)
+    expect(res.status).toBe(422)
     const body = await res.json()
-    expect(body.error.code).toBe('INVALID_JSON')
+    expect(body.error.code).toBe('VALIDATION_ERROR')
   })
 
   it('returns 422 for missing required fields', async () => {
@@ -250,8 +250,9 @@ describe('Inline Actions API — POST handler', () => {
     expect(mockStreamText).toHaveBeenCalledOnce()
     const callArgs = mockStreamText.mock.calls[0][0]
     expect(callArgs.system).toContain('complexity')
-    expect(callArgs.messages).toHaveLength(1)
+    expect(callArgs.messages).toHaveLength(2)
     expect(callArgs.messages[0].role).toBe('user')
+    expect(callArgs.messages[0].content).toContain('<repolens_untrusted_context format="json">')
   })
 
   it('returns a streaming response for a valid request', async () => {

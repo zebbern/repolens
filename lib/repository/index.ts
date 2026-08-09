@@ -6,6 +6,7 @@ export { DEFAULT_INDEXING_PROGRESS } from './indexing-state'
 
 export {
   COVERAGE_SAMPLE_LIMIT,
+  PARTIAL_COVERAGE_NOTICE,
   createRepositoryCoverage,
   updateRepositoryCoverage,
   isCoverageComplete,

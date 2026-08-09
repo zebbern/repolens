@@ -68,20 +68,31 @@ const SKILL_TOOLS: Record<string, AgentToolName[]> = {
  */
 function extractLoadedSkillIds(messages: ModelMessage[]): string[] {
   const ids = new Set<string>()
-  // Handle both raw quotes and JSON-escaped quotes (\" → \\ and " in the string)
-  const SKILL_TAG_PATTERN = /<skill-instructions source=\\?"([^"\\]+)\\?">/g
   for (const msg of messages) {
     if (msg.role !== 'tool') continue
-    // Only scan loadSkill tool results to prevent spoofing via repo content
     const parts = Array.isArray(msg.content) ? msg.content : []
     for (const part of parts) {
-      if ((part as { toolName?: string }).toolName !== 'loadSkill') continue
-      const serialized = JSON.stringify(part)
-      let match: RegExpExecArray | null
-      while ((match = SKILL_TAG_PATTERN.exec(serialized)) !== null) {
-        ids.add(match[1])
+      const toolResult = part as {
+        toolName?: string
+        output?: unknown
+        result?: unknown
       }
-      SKILL_TAG_PATTERN.lastIndex = 0
+      if (toolResult.toolName !== 'loadSkill') continue
+
+      const normalizedOutput = toolResult.output as { type?: unknown; value?: unknown } | undefined
+      const candidate = normalizedOutput?.type === 'json'
+        ? normalizedOutput.value
+        : toolResult.result
+      if (!candidate || typeof candidate !== 'object') continue
+      const result = candidate as { id?: unknown; name?: unknown; instructions?: unknown }
+      if (
+        typeof result.id !== 'string'
+        || typeof result.name !== 'string'
+        || typeof result.instructions !== 'string'
+      ) continue
+
+      const expectedOpeningTag = `<skill-instructions source="${result.id}">`
+      if (result.instructions.startsWith(expectedOpeningTag)) ids.add(result.id)
     }
   }
   return [...ids]
@@ -140,7 +151,10 @@ export function buildPrepareStep() {
     }
 
     // 3. Progressive tool disclosure
-    const activeTools = getActiveTools(processedMessages)
+    const trustedControlMessages = ctx
+      ? messages.slice(ctx.trustedControlStartIndex)
+      : []
+    const activeTools = getActiveTools(trustedControlMessages)
 
     return { messages: processedMessages, activeTools }
   }

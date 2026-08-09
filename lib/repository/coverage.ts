@@ -3,6 +3,7 @@ import { LAZY_CONTENT_THRESHOLD_KB } from '@/config/constants'
 import { isFileIndexable } from '@/lib/github/zipball'
 
 export const COVERAGE_SAMPLE_LIMIT = 100
+export const PARTIAL_COVERAGE_NOTICE = 'Coverage notice: PARTIAL. GitHub returned a truncated tree and/or some supported files failed to load. Do not imply repository-wide completeness.'
 
 export function createRepositoryCoverage(
   tree: ResolvedRepoTree,
@@ -50,5 +51,13 @@ export function isCoverageComplete(coverage: RepositoryCoverage): boolean {
 
 export function coverageNotice(coverage: RepositoryCoverage | undefined): string | undefined {
   if (!coverage || isCoverageComplete(coverage)) return undefined
-  return `Repository coverage is ${coverage.treeStatus === 'partial' ? 'partial' : coverage.mode === 'on-demand' ? 'on-demand' : 'incomplete'} (${coverage.supportedFiles.loaded}/${coverage.supportedFiles.discovered} supported files loaded; ${coverage.failures.count} file failures; ${coverage.failedSubtrees.count} failed subtrees). Do not imply repository-wide completeness.`
+  if (
+    coverage.treeStatus === 'partial'
+    || coverage.failures.count > 0
+    || coverage.failedSubtrees.count > 0
+    || (coverage.mode === 'full' && coverage.supportedFiles.loaded < coverage.supportedFiles.discovered)
+  ) {
+    return PARTIAL_COVERAGE_NOTICE
+  }
+  return `Repository coverage is ${coverage.mode === 'on-demand' ? 'on-demand' : 'incomplete'} (${coverage.supportedFiles.loaded}/${coverage.supportedFiles.discovered} supported files loaded; ${coverage.failures.count} file failures; ${coverage.failedSubtrees.count} failed subtrees). Do not imply repository-wide completeness.`
 }

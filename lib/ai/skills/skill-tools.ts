@@ -16,6 +16,14 @@ export const loadSkillTool = tool({
   inputSchema: z.object({
     skillId: SKILL_ID_SCHEMA.describe('The skill ID to load (from discoverSkills results)'),
   }),
+  outputSchema: z.union([
+    z.object({
+      id: SKILL_ID_SCHEMA,
+      name: z.string(),
+      instructions: z.string(),
+    }),
+    z.object({ error: z.string() }),
+  ]),
   execute: async ({ skillId }): Promise<{ id: string; name: string; instructions: string } | { error: string }> => {
     const skill = skillRegistry.getSkill(skillId)
     if (!skill) {

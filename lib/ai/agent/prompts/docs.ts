@@ -2,7 +2,8 @@ import { getModelContextWindow } from '@/lib/ai/providers'
 import {
   mermaidRulesSectionRaw,
   skillDiscoverySection,
-  structuralIndexBlock,
+  structuralIndexGuidanceSection,
+  untrustedDataPolicySection,
   verificationSectionDefault,
 } from './shared'
 
@@ -10,13 +11,7 @@ export type DocType = 'architecture' | 'setup' | 'api-reference' | 'file-explana
 
 export interface DocsPromptOptions {
   docType: DocType
-  repoContext: {
-    name: string
-    description: string
-    structure: string
-  }
-  structuralIndex?: string
-  targetFile?: string | null
+  hasTargetFile: boolean
   stepBudget: number
   model: string
   activeSkills?: string[]
@@ -307,25 +302,18 @@ The structural index (provided in your context) contains per-file: path, languag
  * Extracted from `app/api/docs/generate/route.ts` — must remain functionally identical.
  */
 export function buildDocsPrompt(opts: DocsPromptOptions): string {
-  const { docType, repoContext, structuralIndex, targetFile, stepBudget, model, activeSkills } = opts
+  const { docType, hasTargetFile, stepBudget, model, activeSkills } = opts
 
   let systemPrompt = DOC_BASE_PROMPTS[docType] || DOC_BASE_PROMPTS['custom']
 
-  systemPrompt += `\n\n## Repository
-**Name:** ${repoContext.name}
-**Description:** ${repoContext.description || 'No description'}
+  systemPrompt += `\n\n## Repository Context
+Repository metadata and the file tree are provided in an untrusted-context user message.
 
-${structuralIndexBlock(structuralIndex)}
+${structuralIndexGuidanceSection()}`
 
-## File Tree
-\`\`\`
-${repoContext.structure}
-\`\`\``
-
-  if (targetFile) {
+  if (hasTargetFile) {
     systemPrompt += `\n\n## Target File
-The user is asking specifically about: \`${targetFile}\`
-Start by reading this file with readFile.`
+The target path is provided in the untrusted-context user message. Start by reading that file with readFile.`
   }
 
   systemPrompt += `\n\n${mermaidRulesSectionRaw('documentation')}`
@@ -349,6 +337,7 @@ You have up to ${stepBudget} tool-call rounds. Plan efficiently:
 ## Model Context
 Your context window is approximately ${getModelContextWindow(model).toLocaleString()} tokens. The structural index has been sized accordingly.`
 
+  systemPrompt += `\n\n${untrustedDataPolicySection()}`
   systemPrompt += `\n\n${skillDiscoverySection(activeSkills)}`
 
   return systemPrompt

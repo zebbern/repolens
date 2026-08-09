@@ -37,6 +37,11 @@ describe('readFileSchema', () => {
     const result = readFileSchema.safeParse({ path: 123 })
     expect(result.success).toBe(false)
   })
+
+  it('enforces the 4096-character path boundary', () => {
+    expect(readFileSchema.safeParse({ path: 'p'.repeat(4_096) }).success).toBe(true)
+    expect(readFileSchema.safeParse({ path: 'p'.repeat(4_097) }).success).toBe(false)
+  })
 })
 
 // ---------------------------------------------------------------------------

@@ -1,23 +1,11 @@
 import {
   skillDiscoverySection,
-  structuralIndexBlock,
+  structuralIndexGuidanceSection,
+  untrustedDataPolicySection,
 } from './shared'
 
 export interface PRReviewPromptOptions {
-  repoContext?: {
-    name: string
-    description: string
-    structure: string
-  }
-  structuralIndex?: string
-  prNumber: number
-  prTitle: string
-  prBody?: string | null
-  baseSha: string
-  headSha: string
-  diffSummary: string
   stepBudget: number
-  model: string
   activeSkills?: string[]
 }
 
@@ -26,16 +14,7 @@ export interface PRReviewPromptOptions {
  */
 export function buildPRReviewPrompt(opts: PRReviewPromptOptions): string {
   const {
-    repoContext,
-    structuralIndex,
-    prNumber,
-    prTitle,
-    prBody,
-    baseSha,
-    headSha,
-    diffSummary,
     stepBudget,
-    model,
     activeSkills,
   } = opts
 
@@ -49,12 +28,9 @@ export function buildPRReviewPrompt(opts: PRReviewPromptOptions): string {
 - Provide actionable suggestions — show what the code should look like.
 
 ## PR Context
-- **PR #${prNumber}**: ${prTitle}
-- **Base**: ${baseSha.slice(0, 8)} → **Head**: ${headSha.slice(0, 8)}
-${prBody ? `- **Description**: ${prBody.slice(0, 2000)}` : ''}
+Pull-request metadata and the diff summary are provided in an untrusted-context user message.
 
-## Diff Summary
-${diffSummary}
+${structuralIndexGuidanceSection()}
 
 ## Review Methodology
 1. **Understand the PR**: Read the title, description, and file list to understand intent.
@@ -83,19 +59,7 @@ State whether the PR is ready to merge, needs changes, or has blocking issues.
 ## Step Budget
 You have ${stepBudget} tool-call steps. Use them wisely — prioritize reviewing files with the most changes first.`
 
-  if (repoContext) {
-    systemPrompt += `\n\n## Repository Context
-**${repoContext.name}** — ${repoContext.description}
-
-<file-tree>
-${repoContext.structure}
-</file-tree>`
-  }
-
-  if (structuralIndex) {
-    systemPrompt += '\n\n' + structuralIndexBlock(structuralIndex)
-  }
-
+  systemPrompt += '\n\n' + untrustedDataPolicySection()
   systemPrompt += '\n\n' + skillDiscoverySection(activeSkills)
 
   return systemPrompt

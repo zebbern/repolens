@@ -9,6 +9,7 @@ const harness = vi.hoisted(() => ({
       repo: { fullName: 'acme/a', description: 'Repository A' },
       files: [{ name: 'a.ts', path: 'a.ts', type: 'file' }],
       codeIndex: null,
+      repositorySession: { id: 1, signal: new AbortController().signal },
     },
   },
   chat: {
@@ -37,10 +38,10 @@ vi.mock('@ai-sdk/react', async () => {
   const ReactModule = await import('react')
   return {
     useChat: vi.fn(({ id, onToolCall }: {
-      id: 'docs-generator' | 'changelog-generator'
+      id: string
       onToolCall: (args: { toolCall: { dynamic: boolean; toolName: string; input: unknown; toolCallId: string } }) => Promise<void>
     }) => {
-      const kind = id === 'docs-generator' ? 'docs' : 'changelog'
+      const kind = id.startsWith('docs-generator') ? 'docs' : 'changelog'
       const controls = harness.chat[kind]
       controls.onToolCall = onToolCall
       const [messages, setMessageState] = ReactModule.useState<UIMessage[]>([{
@@ -85,6 +86,9 @@ vi.mock('@/providers', () => ({
     apiKeys: { openai: { key: 'test-key' } },
   }),
   useRepositoryData: () => harness.repository.current,
+  useRepositoryActions: () => ({
+    isRepositorySessionCurrent: (session: unknown) => session === harness.repository.current.repositorySession,
+  }),
 }))
 
 vi.mock('@/lib/github/fetcher', () => ({
@@ -131,6 +135,7 @@ describe('repository-scoped AI provider state', () => {
       repo: { fullName: 'acme/a', description: 'Repository A' },
       files: [{ name: 'a.ts', path: 'a.ts', type: 'file' }],
       codeIndex: null,
+      repositorySession: { id: 1, signal: new AbortController().signal },
     }
   })
 
@@ -160,6 +165,7 @@ describe('repository-scoped AI provider state', () => {
         activeSkills: ['security-review'],
       })
     })
+    const oldToolHandler = harness.chat.docs.onToolCall!
     let toolCompletion!: Promise<void>
     act(() => {
       toolCompletion = harness.chat.docs.onToolCall!({
@@ -171,8 +177,13 @@ describe('repository-scoped AI provider state', () => {
       repo: { fullName: 'acme/b', description: 'Repository B' },
       files: [{ name: 'b.ts', path: 'b.ts', type: 'file' }],
       codeIndex: null,
+      repositorySession: { id: 2, signal: new AbortController().signal },
     }
     await act(async () => rerender())
+    await act(async () => oldToolHandler({
+      toolCall: { dynamic: false, toolName: 'readFile', input: { path: 'a.ts' }, toolCallId: 'docs-late-tool' },
+    }))
+    expect(handleToolCall).toHaveBeenCalledTimes(1)
 
     expect(harness.chat.docs.stop).toHaveBeenCalledOnce()
     expect(result.current.chat.messages).toEqual([])
@@ -224,6 +235,7 @@ describe('repository-scoped AI provider state', () => {
         activeSkills: ['release-notes'],
       })
     })
+    const oldToolHandler = harness.chat.changelog.onToolCall!
     let toolCompletion!: Promise<void>
     act(() => {
       toolCompletion = harness.chat.changelog.onToolCall!({
@@ -235,8 +247,13 @@ describe('repository-scoped AI provider state', () => {
       repo: { fullName: 'acme/b', description: 'Repository B' },
       files: [{ name: 'b.ts', path: 'b.ts', type: 'file' }],
       codeIndex: null,
+      repositorySession: { id: 2, signal: new AbortController().signal },
     }
     await act(async () => rerender())
+    await act(async () => oldToolHandler({
+      toolCall: { dynamic: false, toolName: 'readFile', input: { path: 'a.ts' }, toolCallId: 'changelog-late-tool' },
+    }))
+    expect(handleToolCall).toHaveBeenCalledTimes(1)
 
     expect(harness.chat.changelog.stop).toHaveBeenCalledOnce()
     expect(result.current.chat.messages).toEqual([])

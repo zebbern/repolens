@@ -66,6 +66,7 @@ vi.mock('@/components/ui/tooltip', () => ({
 vi.mock('@/providers', () => {
   const getTabCache = vi.fn(() => undefined)
   const setTabCache = vi.fn()
+  const repositorySession = { id: 1, signal: new AbortController().signal }
   return {
     useRepository: () => ({
       getTabCache,
@@ -74,7 +75,9 @@ vi.mock('@/providers', () => {
     useRepositoryActions: () => ({
       getTabCache,
       setTabCache,
+      isRepositorySessionCurrent: (session: unknown) => session === repositorySession,
     }),
+    useRepositoryData: () => ({ repositorySession }),
   }
 })
 

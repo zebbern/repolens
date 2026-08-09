@@ -30,6 +30,11 @@ import {
 // Re-export for backward compatibility
 export type { LoadingStage, SearchState, ContentAvailability, ContentLoadingStats } from '@/lib/repository'
 
+export interface RepositorySession {
+  readonly id: number
+  readonly signal: AbortSignal
+}
+
 // Data context — rarely changes after repo load/indexing
 export interface RepositoryDataContextType {
   repo: GitHubRepo | null
@@ -39,13 +44,14 @@ export interface RepositoryDataContextType {
   codebaseAnalysis: FullAnalysis | null
   failedFiles: Array<{ path: string; error: string }>
   isCacheHit: boolean
+  repositorySession: RepositorySession | null
 }
 
 // Actions context — stable callbacks (never change identity)
 export interface RepositoryActionsContextType {
   connectRepository: (url: string) => Promise<boolean>
   disconnectRepository: () => void
-  loadFileContent: (path: string) => Promise<string | null>
+  loadFileContent: (path: string, session?: RepositorySession | null) => Promise<string | null>
   getFileByPath: (path: string) => FileNode | null
   updateCodeIndex: (index: CodeIndex) => void
   pinFile: (path: string, type?: 'file' | 'directory') => void
@@ -58,7 +64,9 @@ export interface RepositoryActionsContextType {
   setTabCache: (key: string, value: unknown) => void
   setSearchState: Dispatch<SetStateAction<SearchState>>
   setModifiedContents: Dispatch<SetStateAction<Map<string, string>>>
-  getFileContent: (path: string) => Promise<string | null>
+  getFileContent: (path: string, session?: RepositorySession | null) => Promise<string | null>
+  getRepositorySession: () => RepositorySession | null
+  isRepositorySessionCurrent: (session: RepositorySession | null) => boolean
 }
 
 // Progress context — changes frequently during indexing/search/pins
@@ -96,6 +104,8 @@ export function RepositoryProvider({ children }: { children: ReactNode }) {
   const [indexingProgress, setIndexingProgress] = useState<IndexingProgress>(DEFAULT_INDEXING_PROGRESS)
   const connectionEpochRef = useRef(0)
   const connectionAbortRef = useRef<AbortController | null>(null)
+  const repositorySessionRef = useRef<RepositorySession | null>(null)
+  const [repositorySession, setRepositorySession] = useState<RepositorySession | null>(null)
   const [searchState, setSearchState] = useState<SearchState>(DEFAULT_SEARCH_STATE)
   const [modifiedContents, setModifiedContents] = useState<Map<string, string>>(new Map())
   const [codebaseAnalysis, setCodebaseAnalysis] = useState<FullAnalysis | null>(null)
@@ -147,15 +157,23 @@ export function RepositoryProvider({ children }: { children: ReactNode }) {
     connectionEpochRef.current += 1
     connectionAbortRef.current?.abort()
     connectionAbortRef.current = null
+    repositorySessionRef.current = null
   }, [])
 
+  const getRepositorySession = useCallback(() => repositorySessionRef.current, [])
+  const isRepositorySessionCurrent = useCallback((session: RepositorySession | null) => (
+    session !== null && repositorySessionRef.current === session && !session.signal.aborted
+  ), [])
+
   // Helper: get file content from modifiedContents first, then codeIndex, then contentStore
-  const getFileContent = useCallback(async (path: string): Promise<string | null> => {
+  const getFileContent = useCallback(async (path: string, session = repositorySessionRef.current): Promise<string | null> => {
+    if (!isRepositorySessionCurrent(session)) return null
     if (modifiedContents.has(path)) return modifiedContents.get(path)!
     const indexed = codeIndex.files.get(path)
     if (indexed?.content) return indexed.content
-    return codeIndex.contentStore.get(path)
-  }, [modifiedContents, codeIndex])
+    const content = await codeIndex.contentStore.get(path)
+    return isRepositorySessionCurrent(session) ? content : null
+  }, [modifiedContents, codeIndex, isRepositorySessionCurrent])
 
   // Detect lazy content store and wire up progress tracking
   useEffect(() => {
@@ -215,6 +233,9 @@ export function RepositoryProvider({ children }: { children: ReactNode }) {
     connectionEpochRef.current = epoch
     const controller = new AbortController()
     connectionAbortRef.current = controller
+    const session = Object.freeze({ id: epoch, signal: controller.signal })
+    repositorySessionRef.current = session
+    setRepositorySession(session)
 
     resetRepositoryState({ isLoading: true, loadingStage: 'metadata' })
 
@@ -249,7 +270,7 @@ export function RepositoryProvider({ children }: { children: ReactNode }) {
         // Cache hit — hydrate code index from cached data
         const useIDB = repoData.size != null && repoData.size >= getIdbThresholdKB()
         const baseIndex = useIDB
-          ? createEmptyIndexWithStore(new IDBContentStore(`${owner}/${repoName}`))
+          ? createEmptyIndexWithStore(new IDBContentStore(`${owner}/${repoName}`, controller.signal))
           : createEmptyIndex()
         const index = batchIndexFiles(baseIndex, cached.files)
         codeIndexRef.current = index
@@ -289,6 +310,8 @@ export function RepositoryProvider({ children }: { children: ReactNode }) {
     connectionEpochRef.current += 1
     connectionAbortRef.current?.abort()
     connectionAbortRef.current = null
+    repositorySessionRef.current = null
+    setRepositorySession(null)
     resetRepositoryState({ isLoading: false, loadingStage: 'idle' })
   }, [resetRepositoryState])
   
@@ -297,10 +320,10 @@ export function RepositoryProvider({ children }: { children: ReactNode }) {
     setCodeIndex(index)
   }, [])
   
-  const loadFileContent = useCallback(async (path: string): Promise<string | null> => {
+  const loadFileContent = useCallback(async (path: string, session = repositorySessionRef.current): Promise<string | null> => {
     const epoch = connectionEpochRef.current
     const controller = connectionAbortRef.current
-    const requestIsCurrent = () => (
+    const requestIsCurrent = () => session === repositorySessionRef.current && (
       controller !== null && isCurrentConnection(epoch, controller)
     )
 
@@ -599,17 +622,19 @@ export function RepositoryProvider({ children }: { children: ReactNode }) {
   }, [codeIndex, indexingProgress.isComplete, isCurrentConnection])
 
   const dataValue = useMemo<RepositoryDataContextType>(() => ({
-    repo, files, parsedFiles, codeIndex, codebaseAnalysis, failedFiles, isCacheHit,
-  }), [repo, files, parsedFiles, codeIndex, codebaseAnalysis, failedFiles, isCacheHit])
+    repo, files, parsedFiles, codeIndex, codebaseAnalysis, failedFiles, isCacheHit, repositorySession,
+  }), [repo, files, parsedFiles, codeIndex, codebaseAnalysis, failedFiles, isCacheHit, repositorySession])
 
   const actionsValue = useMemo<RepositoryActionsContextType>(() => ({
     connectRepository, disconnectRepository, loadFileContent, getFileByPath,
     updateCodeIndex, pinFile, unpinFile, clearPins, renameFiles, getPinnedContents,
     getTabCache, setTabCache, setSearchState, setModifiedContents, getFileContent,
+    getRepositorySession, isRepositorySessionCurrent,
   }), [
     connectRepository, disconnectRepository, loadFileContent, getFileByPath,
     updateCodeIndex, pinFile, unpinFile, clearPins, renameFiles, getPinnedContents,
     getTabCache, setTabCache, setSearchState, setModifiedContents, getFileContent,
+    getRepositorySession, isRepositorySessionCurrent,
   ])
 
   const progressValue = useMemo<RepositoryProgressContextType>(() => ({

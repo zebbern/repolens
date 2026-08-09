@@ -78,7 +78,7 @@ export async function startIndexing(
     })
 
     const repoKey = `${repoData.owner}/${repoData.name}`
-    const lazyStore = new LazyContentStore(repoKey, fetchQueue)
+    const lazyStore = new LazyContentStore(repoKey, fetchQueue, signal)
     lazyStore.registerPaths(indexableFiles.map(f => f.path))
 
     const metadataEntries = indexableFiles.map(f => ({
@@ -104,7 +104,7 @@ export async function startIndexing(
   // For IDB tier (50-200 MB): create content store early so we can write during streaming
   const useIDB = repoData.size != null && repoData.size >= getIdbThresholdKB()
   const contentStore = useIDB
-    ? new IDBContentStore(`${repoData.owner}/${repoData.name}`)
+    ? new IDBContentStore(`${repoData.owner}/${repoData.name}`, signal)
     : null
 
   // B1: Try streaming zipball for repos under 200 MB
@@ -233,8 +233,8 @@ export async function startIndexing(
     description: repoData.description,
     stars: repoData.stars,
     language: repoData.language,
-  })
-    .catch(() => { /* cache write failure is non-critical */ })
+  }, { signal })
+    .catch(() => { /* aborted/stale cache publication is a no-op */ })
 
   // B6: Notify user of failed files
   if (errors.length > 0) {

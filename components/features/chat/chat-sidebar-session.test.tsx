@@ -9,6 +9,7 @@ const harness = vi.hoisted(() => ({
       repo: { owner: 'acme', name: 'a', fullName: 'acme/a', description: 'Repository A' },
       files: [{ name: 'a.ts', path: 'a.ts', type: 'file' }],
       codeIndex: { files: new Map() },
+      repositorySession: { id: 1, signal: new AbortController().signal },
     },
   },
   status: { current: 'streaming' as 'streaming' | 'ready' },
@@ -26,6 +27,7 @@ const harness = vi.hoisted(() => ({
     getPinnedContents: vi.fn().mockResolvedValue({
       content: '', fileCount: 0, totalBytes: 0, skipped: [],
     }),
+    isRepositorySessionCurrent: (session: unknown) => session === harness.repository.current.repositorySession,
   },
 }))
 
@@ -151,6 +153,7 @@ describe('ChatSidebar repository session isolation', () => {
       repo: { owner: 'acme', name: 'a', fullName: 'acme/a', description: 'Repository A' },
       files: [{ name: 'a.ts', path: 'a.ts', type: 'file' }],
       codeIndex: { files: new Map() },
+      repositorySession: { id: 1, signal: new AbortController().signal },
     }
   })
 
@@ -167,6 +170,7 @@ describe('ChatSidebar repository session isolation', () => {
     fireEvent.click(screen.getByRole('button', { name: 'skills:0' }))
     expect(screen.getByText('attachments:1')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'skills:1' })).toBeInTheDocument()
+    const oldToolHandler = harness.chat.onToolCall!
     let toolCompletion!: Promise<void>
     act(() => {
       toolCompletion = harness.chat.onToolCall!({
@@ -178,8 +182,13 @@ describe('ChatSidebar repository session isolation', () => {
       repo: { owner: 'acme', name: 'b', fullName: 'acme/b', description: 'Repository B' },
       files: [{ name: 'b.ts', path: 'b.ts', type: 'file' }],
       codeIndex: { files: new Map() },
+      repositorySession: { id: 2, signal: new AbortController().signal },
     }
     await act(async () => rerender(<ChatSidebar />))
+    await act(async () => oldToolHandler({
+      toolCall: { dynamic: false, toolName: 'readFile', input: { path: 'a.ts' }, toolCallId: 'chat-late-tool' },
+    }))
+    expect(handleToolCall).toHaveBeenCalledTimes(1)
 
     expect(harness.chat.stop).toHaveBeenCalledOnce()
     expect(harness.chat.setMessages).toHaveBeenCalledWith([])

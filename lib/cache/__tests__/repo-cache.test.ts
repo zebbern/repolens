@@ -36,6 +36,16 @@ describe('repo-cache (IndexedDB)', () => {
     globalThis.IDBKeyRange = IDBKeyRange
   })
 
+  it('does not publish an aborted same-repository cache replacement', async () => {
+    await setCachedRepo('owner', 'repo', 'current', SAMPLE_FILES, SAMPLE_TREE)
+    const controller = new AbortController()
+    controller.abort()
+    await expect(setCachedRepo('owner', 'repo', 'stale', SAMPLE_FILES, SAMPLE_TREE, undefined, {
+      signal: controller.signal,
+    })).rejects.toMatchObject({ name: 'AbortError' })
+    expect((await getCachedRepo('owner', 'repo'))?.sha).toBe('current')
+  })
+
   // -----------------------------------------------------------------------
   // Basic CRUD
   // -----------------------------------------------------------------------

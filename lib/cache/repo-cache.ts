@@ -147,9 +147,15 @@ export async function setCachedRepo(
   files: Array<{ path: string; content: string; language?: string }>,
   tree: FileNode[],
   meta?: { description?: string | null; stars?: number; language?: string | null },
+  options: { signal?: AbortSignal } = {},
 ): Promise<void> {
+  const throwIfAborted = () => {
+    if (options.signal?.aborted) throw options.signal.reason ?? new DOMException('The operation was aborted', 'AbortError')
+  }
   try {
+    throwIfAborted()
     const db = await openDB()
+    throwIfAborted()
     const key = `${owner}/${repo}`
     const record: CachedRepo = {
       key,
@@ -168,15 +174,20 @@ export async function setCachedRepo(
 
     await new Promise<void>((resolve, reject) => {
       const tx = db.transaction(STORE_NAME, 'readwrite')
+      const abort = () => { try { tx.abort() } catch { /* already complete */ } }
+      options.signal?.addEventListener('abort', abort, { once: true })
       const store = tx.objectStore(STORE_NAME)
-      store.put(record)
+      if (options.signal?.aborted) abort()
+      else store.put(record)
 
-      tx.oncomplete = () => resolve()
-      tx.onerror = () => reject(tx.error)
+      tx.oncomplete = () => { options.signal?.removeEventListener('abort', abort); resolve() }
+      tx.onerror = tx.onabort = () => { options.signal?.removeEventListener('abort', abort); reject(tx.error ?? new DOMException('The operation was aborted', 'AbortError')) }
     })
 
+    throwIfAborted()
     await evictLRU(db)
-  } catch {
+  } catch (error) {
+    if (options.signal?.aborted) throw error
     // Cache write failure is non-critical — silently ignore.
   }
 }

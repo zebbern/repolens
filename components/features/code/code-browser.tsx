@@ -28,8 +28,8 @@ import { TourPlayerBar } from "./tour-player-bar"
 import { TourStopOverlay } from "./tour-stop-overlay"
 
 export function CodeBrowser({ navigateToFile, navigateToLine, onNavigateComplete }: CodeBrowserProps) {
-  const { repo, files, codeIndex, codebaseAnalysis } = useRepositoryData()
-  const { updateCodeIndex, setModifiedContents, getFileContent, loadFileContent, setSearchState } = useRepositoryActions()
+  const { repo, files, codeIndex, codebaseAnalysis, repositorySession } = useRepositoryData()
+  const { updateCodeIndex, setModifiedContents, getFileContent, loadFileContent, setSearchState, isRepositorySessionCurrent } = useRepositoryActions()
   const { indexingProgress: sharedIndexingProgress, modifiedContents, contentAvailability, contentLoadingStats, searchState } = useRepositoryProgress()
 
   // Tours
@@ -131,6 +131,8 @@ export function CodeBrowser({ navigateToFile, navigateToLine, onNavigateComplete
     onNavigateComplete,
     loadFileContent,
     contentAvailability,
+    repositorySession,
+    isRepositorySessionCurrent,
   })
 
   // Sync activeTabPath to app-level selectedFilePath for Git History tab
@@ -192,6 +194,8 @@ export function CodeBrowser({ navigateToFile, navigateToLine, onNavigateComplete
     searchResults,
     modifiedContents,
     setOpenTabs,
+    repositorySession,
+    isRepositorySessionCurrent,
   })
 
   const {

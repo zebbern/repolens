@@ -123,11 +123,12 @@ export class IDBContentStore implements ContentStore {
   private paths: Set<string> = new Set()
   private dbPromise: Promise<IDBDatabase> | null = null
 
-  constructor(repoKey: string) {
+  constructor(repoKey: string, private readonly signal?: AbortSignal) {
     this.repoKey = repoKey
   }
 
   private openDB(): Promise<IDBDatabase> {
+    if (this.signal?.aborted) return Promise.reject(new DOMException('Aborted', 'AbortError'))
     if (!this.dbPromise) {
       this.dbPromise = new Promise((resolve, reject) => {
         const request = indexedDB.open(IDB_CONTENT_DB, IDB_CONTENT_VERSION)
@@ -142,6 +143,19 @@ export class IDBContentStore implements ContentStore {
       })
     }
     return this.dbPromise
+  }
+
+  private write(run: (store: IDBObjectStore) => void): void {
+    if (this.signal?.aborted) return
+    this.openDB().then(db => {
+      if (this.signal?.aborted) return
+      const tx = db.transaction(IDB_CONTENT_STORE, 'readwrite')
+      const abort = () => { try { tx.abort() } catch { /* already complete */ } }
+      this.signal?.addEventListener('abort', abort, { once: true })
+      tx.oncomplete = tx.onerror = tx.onabort = () => this.signal?.removeEventListener('abort', abort)
+      if (this.signal?.aborted) abort()
+      else run(tx.objectStore(IDB_CONTENT_STORE))
+    }).catch(() => { /* non-critical */ })
   }
 
   private idbKey(path: string): string {
@@ -197,30 +211,17 @@ export class IDBContentStore implements ContentStore {
   }
 
   put(path: string, content: string): void {
+    if (this.signal?.aborted) return
     this.paths.add(path)
-    this.openDB()
-      .then((db) => {
-        const tx = db.transaction(IDB_CONTENT_STORE, 'readwrite')
-        tx.objectStore(IDB_CONTENT_STORE).put(content, this.idbKey(path))
-      })
-      .catch(() => {
-        /* non-critical */
-      })
+    this.write(store => store.put(content, this.idbKey(path)))
   }
 
   putBatch(entries: Array<{ path: string; content: string }>): void {
+    if (this.signal?.aborted) return
     for (const { path } of entries) this.paths.add(path)
-    this.openDB()
-      .then((db) => {
-        const tx = db.transaction(IDB_CONTENT_STORE, 'readwrite')
-        const store = tx.objectStore(IDB_CONTENT_STORE)
-        for (const { path, content } of entries) {
-          store.put(content, this.idbKey(path))
-        }
-      })
-      .catch(() => {
-        /* non-critical */
-      })
+    this.write(store => {
+      for (const { path, content } of entries) store.put(content, this.idbKey(path))
+    })
   }
 
   has(path: string): boolean {
@@ -228,15 +229,9 @@ export class IDBContentStore implements ContentStore {
   }
 
   delete(path: string): void {
+    if (this.signal?.aborted) return
     this.paths.delete(path)
-    this.openDB()
-      .then((db) => {
-        const tx = db.transaction(IDB_CONTENT_STORE, 'readwrite')
-        tx.objectStore(IDB_CONTENT_STORE).delete(this.idbKey(path))
-      })
-      .catch(() => {
-        /* non-critical */
-      })
+    this.write(store => store.delete(this.idbKey(path)))
   }
 
   getAllSync(): Map<string, string> {
@@ -293,9 +288,10 @@ export class LazyContentStore implements ContentStore {
   constructor(
     repoKey: string,
     fetchQueue: FetchQueue,
+    private readonly signal?: AbortSignal,
   ) {
     this.repoKey = repoKey
-    this.idbStore = new IDBContentStore(repoKey)
+    this.idbStore = new IDBContentStore(repoKey, signal)
     this.fetchQueue = fetchQueue
   }
 
@@ -326,11 +322,13 @@ export class LazyContentStore implements ContentStore {
   }
 
   put(path: string, content: string): void {
+    if (this.signal?.aborted) return
     this.idbStore.put(path, content)
     this.loadedPaths.add(path)
   }
 
   putBatch(entries: Array<{ path: string; content: string }>): void {
+    if (this.signal?.aborted) return
     this.idbStore.putBatch(entries)
     for (const { path } of entries) {
       this.loadedPaths.add(path)

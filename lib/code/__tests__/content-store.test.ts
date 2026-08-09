@@ -130,6 +130,24 @@ describe('InMemoryContentStore', () => {
   })
 })
 
+describe('IDBContentStore publication cancellation', () => {
+  beforeEach(() => {
+    globalThis.indexedDB = new IDBFactory()
+    globalThis.IDBKeyRange = IDBKeyRange
+  })
+
+  it('does not publish a queued write after its repository session aborts', async () => {
+    const controller = new AbortController()
+    const stale = new IDBContentStore('acme/repo', controller.signal)
+    stale.put('stale.ts', 'stale')
+    controller.abort()
+    await new Promise(resolve => setTimeout(resolve, 0))
+
+    const current = new IDBContentStore('acme/repo')
+    expect(await current.get('stale.ts')).toBeNull()
+  })
+})
+
 // ---------------------------------------------------------------------------
 // CodeIndex Phase 3 dual-write
 // ---------------------------------------------------------------------------

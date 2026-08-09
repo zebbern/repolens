@@ -10,7 +10,7 @@ import { compareVersions, isOutdated } from '@/lib/deps/version-checker'
 import type { DependencyHealth, NpmPackageMeta } from '@/lib/deps/types'
 import { cn } from '@/lib/utils'
 import { Package, RefreshCw } from 'lucide-react'
-import { useRepositoryActions } from '@/providers'
+import { useRepositoryActions, useRepositoryData } from '@/providers'
 import { DepsSummary } from './deps-summary'
 import { DepsTable } from './deps-table'
 import { DepsDetailDrawer } from './deps-detail-drawer'
@@ -28,9 +28,11 @@ export function DepsPanel({ codeIndex }: DepsPanelProps) {
   const [depTypes, setDepTypes] = useState<Map<string, 'production' | 'dev'>>(new Map())
   const [cveResults, setCveResults] = useState<CveResult[]>([])
   const [selectedDep, setSelectedDep] = useState<DependencyHealth | null>(null)
-  const { getTabCache, setTabCache } = useRepositoryActions()
+  const { repositorySession } = useRepositoryData()
+  const { getTabCache, setTabCache, isRepositorySessionCurrent } = useRepositoryActions()
 
   const loadDependencies = useCallback(async () => {
+    const session = repositorySession
     setLoadState('loading')
     setErrorMessage('')
 
@@ -54,6 +56,7 @@ export function DepsPanel({ codeIndex }: DepsPanelProps) {
       // Step 2: Fetch npm metadata
       const packageNames = parsed.map(p => p.name)
       const metaMap = await fetchDependencyMeta(packageNames)
+      if (!isRepositorySessionCurrent(session)) return
 
       // Step 3: Query OSV for CVEs via server-side proxy
       let cves: CveResult[] = []
@@ -65,9 +68,11 @@ export function DepsPanel({ codeIndex }: DepsPanelProps) {
         })
         if (cveResponse.ok) {
           const osvResult = (await cveResponse.json()) as { results: CveResult[]; errors: string[] }
+          if (!isRepositorySessionCurrent(session)) return
           cves = osvResult.results
         }
       } catch {
+        if (!isRepositorySessionCurrent(session)) return
         // CVE lookup failure is non-fatal — continue without CVE data
         console.warn('[deps-panel] CVE lookup failed, continuing without vulnerability data')
       }
@@ -116,14 +121,16 @@ export function DepsPanel({ codeIndex }: DepsPanelProps) {
       setErrorMessage(message)
       setLoadState('error')
     }
-  }, [codeIndex, setTabCache])
+  }, [codeIndex, setTabCache, repositorySession, isRepositorySessionCurrent])
 
   // Load on mount / codeIndex change
   useEffect(() => {
     if (codeIndex.totalFiles > 0) {
       const cached = getTabCache<{ healthData: DependencyHealth[]; depTypes: Map<string, 'production' | 'dev'>; cveResults: CveResult[] }>('deps')
       if (cached) {
+        const session = repositorySession
         queueMicrotask(() => {
+          if (!isRepositorySessionCurrent(session)) return
           setHealthData(cached.healthData)
           setDepTypes(cached.depTypes)
           setCveResults(cached.cveResults)
@@ -132,10 +139,11 @@ export function DepsPanel({ codeIndex }: DepsPanelProps) {
         return
       }
       queueMicrotask(() => {
+        if (!isRepositorySessionCurrent(repositorySession)) return
         void loadDependencies()
       })
     }
-  }, [codeIndex, loadDependencies, getTabCache])
+  }, [codeIndex, loadDependencies, getTabCache, repositorySession, isRepositorySessionCurrent])
 
   // CVEs for selected dep
   const selectedCves = useMemo(() => {

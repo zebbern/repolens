@@ -2,18 +2,21 @@ import { useState, useCallback, type Dispatch, type SetStateAction } from "react
 import type { CodeIndex, SearchResult } from "@/lib/code/code-index"
 import { buildSearchRegex, indexFile, batchIndexFiles } from "@/lib/code/code-index"
 import type { OpenTab, SearchOptions } from "../types"
+import type { RepositorySession } from '@/providers/repository-provider'
 
 interface UseReplaceOptions {
   codeIndex: CodeIndex
   updateCodeIndex: (index: CodeIndex) => void
   setModifiedContents: Dispatch<SetStateAction<Map<string, string>>>
-  getFileContent: (path: string) => Promise<string | null>
+  getFileContent: (path: string, session?: RepositorySession | null) => Promise<string | null>
   debouncedSearchQuery: string
   searchOptions: SearchOptions
   replaceQuery: string
   searchResults: SearchResult[]
   modifiedContents: Map<string, string>
   setOpenTabs: Dispatch<SetStateAction<OpenTab[]>>
+  repositorySession: RepositorySession | null
+  isRepositorySessionCurrent: (session: RepositorySession | null) => boolean
 }
 
 /**
@@ -31,6 +34,8 @@ export function useReplace({
   searchResults,
   modifiedContents,
   setOpenTabs,
+  repositorySession,
+  isRepositorySessionCurrent,
 }: UseReplaceOptions) {
   const [confirmReplaceAll, setConfirmReplaceAll] = useState(false)
 
@@ -56,10 +61,12 @@ export function useReplace({
 
   // Replace single match on a specific line
   const replaceInFile = useCallback(async (filePath: string, matchLine: number) => {
+    const session = repositorySession
     const searchPattern = buildSearchRegex(debouncedSearchQuery, searchOptions)
     if (!searchPattern) return
 
-    const content = await getFileContent(filePath)
+    const content = await getFileContent(filePath, session)
+    if (!isRepositorySessionCurrent(session)) return
     if (!content) return
 
     const lines = content.split('\n')
@@ -69,22 +76,25 @@ export function useReplace({
       lines[lineIndex] = lines[lineIndex].replace(searchPattern, replaceQuery)
     }
     applyReplace(filePath, lines.join('\n'))
-  }, [debouncedSearchQuery, searchOptions, replaceQuery, getFileContent, applyReplace])
+  }, [debouncedSearchQuery, searchOptions, replaceQuery, getFileContent, applyReplace, repositorySession, isRepositorySessionCurrent])
 
   // Replace all matches in one file
   const replaceAllInFile = useCallback(async (filePath: string) => {
+    const session = repositorySession
     const searchPattern = buildSearchRegex(debouncedSearchQuery, searchOptions)
     if (!searchPattern) return
 
-    const content = await getFileContent(filePath)
+    const content = await getFileContent(filePath, session)
+    if (!isRepositorySessionCurrent(session)) return
     if (!content) return
 
     searchPattern.lastIndex = 0
     applyReplace(filePath, content.replace(searchPattern, replaceQuery))
-  }, [debouncedSearchQuery, searchOptions, replaceQuery, getFileContent, applyReplace])
+  }, [debouncedSearchQuery, searchOptions, replaceQuery, getFileContent, applyReplace, repositorySession, isRepositorySessionCurrent])
 
   // Replace all matches across ALL files
   const replaceAllInAllFiles = useCallback(async () => {
+    const session = repositorySession
     setConfirmReplaceAll(false)
     const searchPattern = buildSearchRegex(debouncedSearchQuery, searchOptions)
     if (!searchPattern) return
@@ -96,9 +106,10 @@ export function useReplace({
     const uniquePaths = [...new Set(searchResults.map(r => r.file))]
     const prefetched = new Map<string, string>()
     await Promise.all(uniquePaths.map(async (p) => {
-      const c = await getFileContent(p)
+      const c = await getFileContent(p, session)
       if (c) prefetched.set(p, c)
     }))
+    if (!isRepositorySessionCurrent(session)) return
 
     for (const result of searchResults) {
       const content = prefetched.get(result.file)
@@ -125,19 +136,20 @@ export function useReplace({
       const newContent = newModified.get(tab.path) ?? tab.content
       return { ...tab, content: newContent, isModified: newContent !== tab.originalContent }
     }))
-  }, [searchResults, debouncedSearchQuery, searchOptions, replaceQuery, getFileContent, modifiedContents, codeIndex, updateCodeIndex, setModifiedContents, setOpenTabs])
+  }, [searchResults, debouncedSearchQuery, searchOptions, replaceQuery, getFileContent, modifiedContents, codeIndex, updateCodeIndex, setModifiedContents, setOpenTabs, repositorySession, isRepositorySessionCurrent])
 
   // Revert a file to its original content
   const revertFile = useCallback(async (filePath: string) => {
+    const session = repositorySession
     const indexed = codeIndex.files.get(filePath)
 
+    const originalContent = indexed?.content ?? await codeIndex.contentStore.get(filePath)
+    if (!isRepositorySessionCurrent(session)) return
     setModifiedContents(prev => {
       const next = new Map(prev)
       next.delete(filePath)
       return next
     })
-
-    const originalContent = indexed?.content ?? await codeIndex.contentStore.get(filePath)
     if (indexed && originalContent) {
       updateCodeIndex(indexFile(codeIndex, filePath, originalContent, indexed.language))
     }
@@ -146,7 +158,7 @@ export function useReplace({
       if (tab.path !== filePath) return tab
       return { ...tab, content: originalContent ?? tab.originalContent, isModified: false }
     }))
-  }, [codeIndex, updateCodeIndex, setModifiedContents, setOpenTabs])
+  }, [codeIndex, updateCodeIndex, setModifiedContents, setOpenTabs, repositorySession, isRepositorySessionCurrent])
 
   return {
     confirmReplaceAll,

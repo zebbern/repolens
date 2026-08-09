@@ -13,7 +13,7 @@ import {
 import { useChat } from '@ai-sdk/react'
 import { DefaultChatTransport, lastAssistantMessageIsCompleteWithToolCalls } from 'ai'
 import type { UIMessage } from 'ai'
-import { useAPIKeys, useRepositoryData } from '@/providers'
+import { useAPIKeys, useRepositoryActions, useRepositoryData } from '@/providers'
 import { buildFileTreeString } from '@/lib/github/fetcher'
 import { buildStructuralIndex } from '@/lib/ai/structural-index'
 import { getMaxIndexBytesForModel } from '@/lib/ai/providers'
@@ -125,9 +125,9 @@ function createChangelogTransportController() {
 
 export function ChangelogProvider({ children }: { children: ReactNode }) {
   const { selectedModel, apiKeys } = useAPIKeys()
-  const { repo, files, codeIndex } = useRepositoryData()
+  const { repo, files, codeIndex, repositorySession } = useRepositoryData()
+  const { isRepositorySessionCurrent } = useRepositoryActions()
   const repoKey = repo?.fullName
-  const repoSessionRef = useRef(0)
 
   // --- Changelog state ---
   const [generatedChangelogs, setGeneratedChangelogs] = useState<GeneratedChangelog[]>([])
@@ -169,12 +169,13 @@ export function ChangelogProvider({ children }: { children: ReactNode }) {
   // --- useChat (lives in provider so state survives unmount) ---
   const { messages, sendMessage, addToolOutput, status, setMessages, stop, error } = useChat({
     transport,
-    id: 'changelog-generator',
+    id: `changelog-generator:${repositorySession?.id ?? 'none'}`,
 
     onToolCall: async ({ toolCall }): Promise<void> => {
-      const repoSession = repoSessionRef.current
+      const repoSession = repositorySession
+      if (!isRepositorySessionCurrent(repoSession)) return
       const addOutputIfCurrent: AddToolOutputFn = output => {
-        if (repoSessionRef.current === repoSession) addToolOutput(output)
+        if (isRepositorySessionCurrent(repoSession)) addToolOutput(output)
       }
       await handleToolCall(toolCall, addOutputIfCurrent, codeIndexRef, allFilePathsRef.current)
     },
@@ -189,7 +190,6 @@ export function ChangelogProvider({ children }: { children: ReactNode }) {
   const prevRepoRef = useRef(repoKey)
   useEffect(() => {
     if (prevRepoRef.current !== repoKey) {
-      repoSessionRef.current += 1
       stop()
       setGeneratedChangelogs([])
       setActiveChangelogId(null)

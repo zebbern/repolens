@@ -5,6 +5,7 @@ import { flattenFiles } from "@/lib/code/code-index"
 import { fetchFileViaProxy } from "@/lib/github/client"
 import type { ContentAvailability } from "@/lib/repository"
 import type { OpenTab } from "../types"
+import type { RepositorySession } from '@/providers/repository-provider'
 
 interface UseFileOperationsOptions {
   repo: { owner: string; name: string; defaultBranch: string } | null
@@ -14,9 +15,11 @@ interface UseFileOperationsOptions {
   navigateToFile?: string | null
   onNavigateComplete?: () => void
   /** On-demand content loader for lazy repos. */
-  loadFileContent?: (path: string) => Promise<string | null>
+  loadFileContent?: (path: string, session?: RepositorySession | null) => Promise<string | null>
   /** Whether file content is fully available or metadata-only. */
   contentAvailability?: ContentAvailability
+  repositorySession: RepositorySession | null
+  isRepositorySessionCurrent: (session: RepositorySession | null) => boolean
 }
 
 /**
@@ -32,6 +35,8 @@ export function useFileOperations({
   onNavigateComplete,
   loadFileContent,
   contentAvailability,
+  repositorySession,
+  isRepositorySessionCurrent,
 }: UseFileOperationsOptions) {
   const [openTabs, setOpenTabs] = useState<OpenTab[]>([])
   const [activeTabPath, setActiveTabPath] = useState<string | null>(null)
@@ -44,6 +49,7 @@ export function useFileOperations({
 
   // Open a file in a new tab or switch to existing tab
   const openFile = useCallback(async (file: FileNode) => {
+    const session = repositorySession
     let alreadyOpen = false
     setOpenTabs(prev => {
       const existing = prev.find(t => t.path === file.path)
@@ -81,11 +87,13 @@ export function useFileOperations({
           if (!indexed.content && contentAvailability !== 'full' && loadFileContent) {
             // Lazy repo: content not loaded yet — fetch on demand
             try {
-              const content = await loadFileContent(file.path)
+              const content = await loadFileContent(file.path, session)
+              if (!isRepositorySessionCurrent(session)) return
               setOpenTabs(prev => prev.map(t =>
                 t.path === file.path ? { ...t, content, originalContent: content, isLoading: false } : t
               ))
             } catch {
+              if (!isRepositorySessionCurrent(session)) return
               setOpenTabs(prev => prev.map(t =>
                 t.path === file.path ? { ...t, error: 'Failed to load file content', isLoading: false } : t
               ))
@@ -97,17 +105,30 @@ export function useFileOperations({
           }
         } else {
           const content = await fetchFileViaProxy(repo.owner, repo.name, repo.defaultBranch, file.path)
+          if (!isRepositorySessionCurrent(session)) return
           setOpenTabs(prev => prev.map(t =>
             t.path === file.path ? { ...t, content, originalContent: content, isLoading: false } : t
           ))
         }
       } catch {
+        if (!isRepositorySessionCurrent(session)) return
         setOpenTabs(prev => prev.map(t =>
           t.path === file.path ? { ...t, error: 'Failed to load file', isLoading: false } : t
         ))
       }
     }
-  }, [repo, codeIndex, modifiedContents, loadFileContent, contentAvailability])
+  }, [repo, codeIndex, modifiedContents, loadFileContent, contentAvailability, repositorySession, isRepositorySessionCurrent])
+
+  useEffect(() => {
+    let cancelled = false
+    queueMicrotask(() => {
+      if (cancelled) return
+      setOpenTabs([])
+      setActiveTabPath(null)
+      setExpandedFolders(new Set())
+    })
+    return () => { cancelled = true }
+  }, [repositorySession])
 
   // Navigate-to-file effect (e.g. from diagram clicks)
   const lastNavigatedRef = useRef<string | null>(null)

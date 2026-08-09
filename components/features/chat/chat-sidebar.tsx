@@ -32,8 +32,8 @@ import type { Tour } from "@/types/tours"
 
 export function ChatSidebar({ className, onCollapse }: { className?: string; onCollapse?: () => void }) {
   const { selectedModel, apiKeys, getValidProviders } = useAPIKeys()
-  const { repo, files, codeIndex } = useRepositoryData()
-  const { pinFile, unpinFile, clearPins, getPinnedContents } = useRepositoryActions()
+  const { repo, files, codeIndex, repositorySession } = useRepositoryData()
+  const { pinFile, unpinFile, clearPins, getPinnedContents, isRepositorySessionCurrent } = useRepositoryActions()
   const { pinnedFiles } = useRepositoryProgress()
   const { saveTour, startTour } = useTours()
   const { token: githubToken } = useGitHubToken()
@@ -99,7 +99,6 @@ export function ChatSidebar({ className, onCollapse }: { className?: string; onC
   const repoRef = useRef(repo)
   useEffect(() => { repoRef.current = repo }, [repo])
   const repoKey = repo?.fullName
-  const repoSessionRef = useRef(0)
 
   const githubTokenRef = useRef(githubToken)
   useEffect(() => { githubTokenRef.current = githubToken }, [githubToken])
@@ -111,10 +110,11 @@ export function ChatSidebar({ className, onCollapse }: { className?: string; onC
       addOutput: AddToolOutputFn,
       indexRef: React.MutableRefObject<CodeIndex | null>,
       filePathsRef: React.MutableRefObject<string[]>,
-      repoSession: number,
+      repoSession: typeof repositorySession,
     ) => {
+      if (!isRepositorySessionCurrent(repoSession)) return
       const addOutputIfCurrent: AddToolOutputFn = output => {
-        if (repoSessionRef.current === repoSession) addOutput(output)
+        if (isRepositorySessionCurrent(repoSession)) addOutput(output)
       }
       // Construct tool executor options from current refs
       const currentRepo = repoRef.current
@@ -151,7 +151,7 @@ export function ChatSidebar({ className, onCollapse }: { className?: string; onC
             filePathsRef.current,
             toolOptions,
           )
-          if (repoSessionRef.current !== repoSession) return
+          if (!isRepositorySessionCurrent(repoSession)) return
           const parsed = JSON.parse(resultStr)
           if (parsed.tour && !parsed.error) {
             const tour = parsed.tour as Tour
@@ -176,7 +176,7 @@ export function ChatSidebar({ className, onCollapse }: { className?: string; onC
       }
       await handleToolCall(toolCall, addOutputIfCurrent, indexRef, filePathsRef.current, toolOptions)
     }
-  }, [])
+  }, [isRepositorySessionCurrent])
 
   // Create a stable transport — always available so the Chat instance
   // created by useChat is never initialised with transport: undefined.
@@ -187,14 +187,14 @@ export function ChatSidebar({ className, onCollapse }: { className?: string; onC
 
   const { messages, sendMessage, addToolOutput, status, error, stop, setMessages } = useChat({
     transport,
-    id: 'codedoc-chat',
+    id: `codedoc-chat:${repositorySession?.id ?? 'none'}`,
 
     onToolCall: async ({ toolCall }): Promise<void> => handleToolCallWithTourCapture(
       toolCall,
       addToolOutput,
       codeIndexRef,
       allFilePathsRef,
-      repoSessionRef.current,
+      repositorySession,
     ),
 
     sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithToolCalls,
@@ -205,7 +205,6 @@ export function ChatSidebar({ className, onCollapse }: { className?: string; onC
   const previousRepoKeyRef = useRef(repoKey)
   useEffect(() => {
     if (previousRepoKeyRef.current !== repoKey) {
-      repoSessionRef.current += 1
       stop()
       setMessages([])
       setInput('')

@@ -668,3 +668,304 @@ describe('trackTaint — sink metadata and nested scope isolation', () => {
     })
   })
 })
+
+describe('trackTaint — path-compatible alternatives', () => {
+  it('reports when sanitized and raw operands are combined', () => {
+    const flow = getFlows(`function handler(req) {
+  const clean = DOMPurify.sanitize(req.body.clean);
+  const mixed = clean + req.body.raw;
+  element.innerHTML = mixed;
+}`).find(candidate => candidate.sink.type === 'xss')
+    expect(flow).toMatchObject({ sanitized: false, confidence: 'medium' })
+    expect(flow!.mitigationEvidence.map(item => item.name)).toEqual(['DOMPurify.sanitize()'])
+  })
+
+  it('reports when only one conditional branch is sanitized', () => {
+    const flow = getFlows(`function handler(req) {
+  const value = flag ? DOMPurify.sanitize(req.body.html) : req.body.html;
+  element.innerHTML = value;
+}`).find(candidate => candidate.sink.type === 'xss')
+    expect(flow).toMatchObject({
+      sanitized: false,
+      precision: 'control-flow-approximate',
+      confidence: 'low',
+    })
+  })
+
+  it('does not let placeholders suppress raw SQL concatenation in another argument', () => {
+    const flow = getFlows(`function handler(req) {
+  db.query("SELECT * FROM users WHERE name = '" + req.body.name + "' AND id = ?", [req.body.id]);
+}`).find(candidate => candidate.sink.type === 'sql-injection')
+    expect(flow).toMatchObject({ sanitized: false })
+    expect(taintFlowsToIssues([flow!])).toHaveLength(1)
+  })
+
+  it('suppresses only when every combined alternative is XSS-sanitized', () => {
+    const flow = getFlows(`function handler(req) {
+  const safe = DOMPurify.sanitize(req.body.a) + he.encode(req.body.b);
+  element.innerHTML = safe;
+}`).find(candidate => candidate.sink.type === 'xss')
+    expect(flow).toMatchObject({ sanitized: true })
+    expect(taintFlowsToIssues([flow!])).toHaveLength(0)
+  })
+
+  it('allows straight-line sanitization to replace the prior raw path', () => {
+    const flow = getFlows(`function handler(req) {
+  let value = req.body.html;
+  value = DOMPurify.sanitize(value);
+  element.innerHTML = value;
+}`).find(candidate => candidate.sink.type === 'xss')
+    expect(flow).toMatchObject({ sanitized: true })
+  })
+
+  it('does not globally sanitize a value on only one assignment branch', () => {
+    const flow = getFlows(`function handler(req) {
+  let value = req.body.html;
+  if (flag) value = DOMPurify.sanitize(value);
+  element.innerHTML = value;
+}`).find(candidate => candidate.sink.type === 'xss')
+    expect(flow).toMatchObject({
+      sanitized: false,
+      precision: 'control-flow-approximate',
+      confidence: 'low',
+    })
+  })
+})
+
+describe('trackTaint — specific sanitizer matching', () => {
+  it.each([
+    {
+      name: 'sqlstring.escape suppresses SQL',
+      code: `function handler(req) {
+  const safe = sqlstring.escape(req.body.value);
+  db.query("SELECT * FROM t WHERE value = " + safe);
+}`,
+      sinkType: 'sql-injection',
+      sanitizer: 'sqlstring.escape',
+    },
+    {
+      name: 'he.escape suppresses XSS',
+      code: `function handler(req) {
+  const safe = he.escape(req.body.value);
+  element.innerHTML = safe;
+}`,
+      sinkType: 'xss',
+      sanitizer: 'he.encode',
+    },
+  ])('$name', ({ code, sinkType, sanitizer }) => {
+    const flow = getFlows(code).find(candidate => candidate.sink.type === sinkType)
+    expect(flow).toMatchObject({ sanitized: true })
+    expect(flow!.sanitizer?.name).toBe(sanitizer)
+  })
+
+  it('keeps he.escape sink-specific when used before eval', () => {
+    const flow = getFlows(`function handler(req) {
+  const encoded = he.escape(req.body.code);
+  eval(encoded);
+}`)[0]
+    expect(flow).toMatchObject({ sanitized: false, confidence: 'high' })
+  })
+
+  it('treats generic escape as validation evidence only', () => {
+    const flow = getFlows(`function handler(req) {
+  const escaped = escape(req.body.code);
+  eval(escaped);
+}`)[0]
+    expect(flow).toMatchObject({ sanitized: false, confidence: 'medium' })
+    expect(flow.mitigationEvidence.map(item => item.name)).toEqual(['escape'])
+  })
+})
+
+describe('trackTaint — destructuring and container propagation', () => {
+  it('derives explicit Koa sources from ctx.request object destructuring', () => {
+    const flows = getFlows(`function handler(ctx) {
+  const { body, query, params, headers } = ctx.request;
+  eval(body.code);
+  eval(query.code);
+  eval(params.code);
+  eval(headers.code);
+}`)
+    expect(flows.map(flow => flow.source.name)).toEqual([
+      'ctx.request.body',
+      'ctx.request.query',
+      'ctx.request.params',
+      'ctx.request.headers',
+    ])
+    expect(flows.every(flow => flow.source.baseConfidence === 'high')).toBe(true)
+  })
+
+  it('recursively binds object defaults and rest from explicit Koa input', () => {
+    const flows = getFlows(`function handler(ctx) {
+  const { nested: { value = "safe" }, ...rest } = ctx.request.body;
+  eval(value);
+  eval(rest.other);
+}`)
+    expect(flows).toHaveLength(2)
+    for (const flow of flows) {
+      expect(flow.source).toMatchObject({
+        name: 'ctx.request.body',
+        origin: 'catalog-user-input',
+        baseConfidence: 'high',
+      })
+    }
+  })
+
+  it('recursively binds array defaults and rest', () => {
+    const flows = getFlows(`function handler(req) {
+  const [first = "safe", ...rest] = req.body.items;
+  eval(first);
+  eval(rest[0]);
+}`)
+    expect(flows).toHaveLength(2)
+    expect(flows.every(flow => flow.source.name === 'req.body')).toBe(true)
+  })
+
+  it('propagates a tainted destructuring default initializer', () => {
+    const flow = getFlows(`function handler(req) {
+  const safe = {};
+  const { value = req.body.fallback } = safe;
+  eval(value);
+}`)[0]
+    expect(flow.source).toMatchObject({ name: 'req.body', baseConfidence: 'high' })
+  })
+
+  it('recognizes computed request body access as an explicit high-confidence source', () => {
+    const flow = getFlows(`function handler(req) { eval(req['body'].code); }`)[0]
+    expect(flow.source).toMatchObject({
+      name: 'req.body',
+      origin: 'catalog-user-input',
+      baseConfidence: 'high',
+    })
+    expect(flow.confidence).toBe('high')
+  })
+
+  it('does not match a request source name in the middle of another member path', () => {
+    expect(getFlows(`function handler() {
+  const shadow = { req: { body: { code: "safe" } } };
+  eval(shadow.req.body.code);
+}`)).toHaveLength(0)
+  })
+
+  it.each([
+    {
+      name: 'object member',
+      code: `function handler(req) {
+  const container = { value: req.body.code };
+  eval(container.value);
+}`,
+    },
+    {
+      name: 'array member',
+      code: `function handler(req) {
+  const container = [req.body.code];
+  eval(container[0]);
+}`,
+    },
+  ])('propagates through a $name read', ({ code }) => {
+    const flow = getFlows(code)[0]
+    expect(flow.source.name).toBe('req.body')
+    expect(flow.precision).toBe('linear')
+  })
+})
+
+describe('trackTaint — complete function scope coverage', () => {
+  it('analyzes async generator object methods with fresh synthetic state', () => {
+    const flow = getFlows(`const handlers = {
+  async *run(request) {
+    eval(request.payload);
+  }
+};`)[0]
+    expect(flow.source).toMatchObject({
+      name: 'request',
+      origin: 'synthetic-handler-param',
+    })
+  })
+
+  it('analyzes private class methods with fresh synthetic state', () => {
+    const flow = getFlows(`class Handler {
+  async #run(request) {
+    eval(request.payload);
+  }
+}`)[0]
+    expect(flow.source).toMatchObject({
+      name: 'request',
+      origin: 'synthetic-handler-param',
+    })
+  })
+})
+
+describe('trackTaint — structural sink recognition', () => {
+  it('reports a nested eval exactly once', () => {
+    const flows = getFlows(`function handler(req) {
+  wrapper(eval(req.body.code));
+}`).filter(flow => flow.sink.name === 'eval()')
+    expect(flows).toHaveLength(1)
+  })
+
+  it.each([
+    'function log(req) { logger.info("eval(req.body.code)"); }',
+    'function log(req) { console.log("db.query(req.body.value)"); }',
+  ])('does not recognize sink text inside a string literal', code => {
+    expect(getFlows(code)).toHaveLength(0)
+  })
+
+  it('does not classify Array.find as a NoSQL sink', () => {
+    expect(getFlows(`function handler(req) {
+  const values = [1, 2, 3];
+  values.find(req.body.value);
+}`)).toHaveLength(0)
+  })
+
+  it('retains Mongoose model find recognition', () => {
+    const flow = getFlows('function handler(req) { User.find(req.body.filter); }')[0]
+    expect(flow.sink.type).toBe('nosql-injection')
+  })
+
+  it('recognizes a NewExpression sink from its actual callee', () => {
+    const flows = getFlows('function handler(req) { new Function(req.body.code); }')
+    expect(flows.filter(flow => flow.sink.name === 'Function()')).toHaveLength(1)
+  })
+})
+
+describe('trackTaint — sanitizer aliases and evidence occurrences', () => {
+  it('tracks a simple immutable sanitizer alias', () => {
+    const flow = getFlows(`function handler(req) {
+  const clean = DOMPurify.sanitize;
+  const safe = clean(req.body.html);
+  element.innerHTML = safe;
+}`).find(candidate => candidate.sink.type === 'xss')
+    expect(flow).toMatchObject({ sanitized: true })
+    expect(flow!.sanitizer?.name).toBe('DOMPurify.sanitize()')
+  })
+
+  it('counts sequential validation occurrences separately', () => {
+    const flow = getFlows(`function handler(req) {
+  let value = req.body.code;
+  value = schema.parse(value);
+  value = schema.parse(value);
+  eval(value);
+}`)[0]
+    expect(flow).toMatchObject({ sanitized: false, confidence: 'low' })
+    expect(flow.mitigationEvidence.map(item => item.name)).toEqual(['zod.parse', 'zod.parse'])
+  })
+
+  it('deduplicates one validation occurrence copied into multiple operands', () => {
+    const flow = getFlows(`function handler(req) {
+  const value = schema.parse(req.body.code);
+  const left = value;
+  const right = value;
+  eval(left + right);
+}`)[0]
+    expect(flow).toMatchObject({ sanitized: false, confidence: 'medium' })
+    expect(flow.mitigationEvidence.map(item => item.name)).toEqual(['zod.parse'])
+  })
+
+  it('counts nested validation occurrences deterministically', () => {
+    const flow = getFlows(`function handler(req) {
+  const value = schema.parse(schema.parse(req.body.code));
+  eval(value);
+}`)[0]
+    expect(flow).toMatchObject({ sanitized: false, confidence: 'low' })
+    expect(flow.mitigationEvidence.map(item => item.name)).toEqual(['zod.parse', 'zod.parse'])
+  })
+})

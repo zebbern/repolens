@@ -3,7 +3,7 @@
 // These rules target languages NOT covered by the Babel AST analyzer (Python, Java, Go,
 // Rust, C, C++, Ruby, PHP, Swift, Kotlin). JS/TS are excluded to avoid overlap.
 
-import type { IssueCategory, IssueSeverity } from './types'
+import type { IssueCategory, IssueConfidence, IssueSeverity } from './types'
 
 export interface TreeSitterRule {
   id: string
@@ -22,7 +22,7 @@ export interface TreeSitterRule {
   captureName?: string
   /** Regex to exclude files by path */
   excludeFiles?: RegExp
-  confidence?: 'high' | 'medium' | 'low'
+  confidence?: IssueConfidence
 }
 
 // ---------------------------------------------------------------------------

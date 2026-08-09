@@ -166,7 +166,7 @@ export const DEFAULT_SINKS: readonly TaintSink[] = [
   { type: 'code-injection', name: 'vm.runInThisContext()', pattern: /\bvm\.runInThisContext\s*\(/, cwe: 'CWE-94', severity: 'critical', description: 'Executes code in current V8 context' },
   { type: 'code-injection', name: 'new vm.Script()', pattern: /\bnew\s+vm\.Script\s*\(/, cwe: 'CWE-94', severity: 'critical', description: 'Compiles code as V8 Script' },
   // NoSQL injection
-  { type: 'nosql-injection', name: 'Model.find()', pattern: /\.(find|findOne|findById|findOneAndUpdate|aggregate|where)\s*\(/, cwe: 'CWE-943', severity: 'warning', description: 'MongoDB/Mongoose query with potential operator injection' },
+  { type: 'nosql-injection', name: 'Model.find()', pattern: /(?:\b(?:Model|model|collection|[A-Za-z_$][\w$]*(?:Model|Collection))|\b[A-Z][\w$]*|\b(?:db\.collection|mongoose\.model)\s*\([^)]*\))\.(?:find|findOne|findById|findOneAndUpdate|aggregate|where)\s*\(/, cwe: 'CWE-943', severity: 'warning', description: 'MongoDB/Mongoose query with potential operator injection' },
   // Template injection
   { type: 'code-injection', name: 'template literal eval', pattern: /\bnew\s+Function\s*\(\s*`/, cwe: 'CWE-94', severity: 'critical', description: 'Template literal passed to Function constructor' },
 ]
@@ -231,82 +231,32 @@ function nodeToSource(node: t.Node, lines: string[]): string {
   return parts.join('\n')
 }
 
-function matchesSource(text: string, sources: readonly TaintSource[]): TaintSource | undefined {
-  return sources.find(source => execPattern(source.pattern, text))
-}
-
-function matchesSink(text: string, sinks: readonly TaintSink[]): TaintSink | undefined {
-  return sinks.find(sink => execPattern(sink.pattern, text))
-}
-
-interface MatchRange {
-  start: number
-  end: number
-}
-
 /** Exec a catalog pattern without letting a caller-supplied /g or /y regex carry lastIndex state. */
 function execPattern(pattern: RegExp, text: string): RegExpExecArray | null {
   if (pattern.global || pattern.sticky) pattern.lastIndex = 0
   return pattern.exec(text)
 }
 
-/** Like matchesSink, but also reports where in `text` the sink pattern matched. */
-function matchSinkRange(
-  text: string,
-  sinks: readonly TaintSink[],
-): { sink: TaintSink; range: MatchRange } | undefined {
-  for (const s of sinks) {
-    const m = execPattern(s.pattern, text)
-    if (m) return { sink: s, range: { start: m.index, end: m.index + m[0].length } }
-  }
-  return undefined
+function matchesSource(text: string, sources: readonly TaintSource[]): TaintSource | undefined {
+  return sources.find(source => execPattern(source.pattern, text)?.index === 0)
 }
 
-/**
- * Find sanitizer matches that do not overlap the sink or a more specific
- * sanitizer already matched at the same source range.
- *
- * A sink's own call text must never be read as its own sanitizer: `db.query(`
- * contains `query(`, which the express-validator sanitizer pattern matches, so
- * every inline SQL-injection flow was silently stamped as sanitized.
- */
-function matchesSanitizersOutside(
-  text: string,
-  sanitizers: readonly TaintSanitizer[],
-  exclude?: MatchRange,
-): TaintSanitizer[] {
-  const matches: Array<{ sanitizer: TaintSanitizer; range: MatchRange }> = []
-  for (const sanitizer of sanitizers) {
-    const flags = sanitizer.pattern.flags.includes('g') ? sanitizer.pattern.flags : `${sanitizer.pattern.flags}g`
-    const scan = new RegExp(sanitizer.pattern.source, flags)
-    let m: RegExpExecArray | null
-    while ((m = scan.exec(text)) !== null) {
-      if (m[0].length === 0) {
-        scan.lastIndex++
-        continue
-      }
-      const start = m.index
-      const end = start + m[0].length
-      const range = { start, end }
-      const overlapsSink = exclude && start < exclude.end && end > exclude.start
-      const overlapsCatalogMatch = matches.some(existing => (
-        start < existing.range.end && end > existing.range.start
-      ))
-      if (!overlapsSink && !overlapsCatalogMatch) {
-        matches.push({ sanitizer, range })
-      }
-    }
-  }
-  return matches.map(match => match.sanitizer)
+function matchesSink(text: string, sinks: readonly TaintSink[]): TaintSink | undefined {
+  return sinks.find(sink => execPattern(sink.pattern, text))
 }
 
-/** Extract identifier name from various node types. */
-function getIdentifierName(node: t.LVal | t.Expression | t.Node): string | null {
+/** Normalize dot and string-literal member access to one catalog path. */
+function getMemberPath(node: t.Node): string | null {
   if (t.isIdentifier(node)) return node.name
-  if (t.isMemberExpression(node) && !node.computed) {
-    const objName = getIdentifierName(node.object)
-    const propName = t.isIdentifier(node.property) ? node.property.name : null
-    if (objName && propName) return `${objName}.${propName}`
+  if (t.isThisExpression(node)) return 'this'
+  if (t.isMemberExpression(node) || t.isOptionalMemberExpression(node)) {
+    const objectName = getMemberPath(node.object)
+    if (!objectName) return null
+    let propertyName: string | null = null
+    if (!node.computed && t.isIdentifier(node.property)) propertyName = node.property.name
+    if (node.computed && t.isStringLiteral(node.property)) propertyName = node.property.value
+    if (node.computed && t.isNumericLiteral(node.property)) propertyName = String(node.property.value)
+    if (propertyName !== null) return `${objectName}.${propertyName}`
   }
   return null
 }
@@ -315,19 +265,25 @@ function getIdentifierName(node: t.LVal | t.Expression | t.Node): string | null 
 // Taint State per Function Scope
 // ---------------------------------------------------------------------------
 
-interface TaintEntry {
+interface TaintTransformationOccurrence {
+  sanitizer: TaintSanitizer
+  occurrence: string
+}
+
+interface TaintAlternative {
   source: TaintSource
   chain: string[]
-  transformations: TaintSanitizer[]
+  transformations: TaintTransformationOccurrence[]
   precision: TaintPathPrecision
 }
 
 interface TaintState {
-  tainted: Map<string, TaintEntry>
+  tainted: Map<string, TaintAlternative[]>
+  aliases: Map<string, TaintSanitizer>
 }
 
 function createTaintState(): TaintState {
-  return { tainted: new Map() }
+  return { tainted: new Map(), aliases: new Map() }
 }
 
 // ---------------------------------------------------------------------------
@@ -373,21 +329,21 @@ export function trackTaint(
 
   try {
     traverse(ast, {
-      'FunctionDeclaration|FunctionExpression|ArrowFunctionExpression|ClassMethod'(
+      'FunctionDeclaration|FunctionExpression|ArrowFunctionExpression|ObjectMethod|ClassMethod|ClassPrivateMethod'(
         fnPath: NodePath,
       ) {
         const state = createTaintState()
-        const node = fnPath.node as t.FunctionDeclaration | t.FunctionExpression | t.ArrowFunctionExpression | t.ClassMethod
+        const node = fnPath.node as t.Function
 
         // Mark function params with source-like names as tainted
         for (const param of node.params) {
-          markParamTaint(param, state, sources, lines)
+          markParamTaint(param, state)
         }
 
         // Walk only this function body. The outer traversal will visit each
         // nested function independently with fresh state.
         fnPath.traverse({
-          'FunctionDeclaration|FunctionExpression|ArrowFunctionExpression|ClassMethod'(
+          'FunctionDeclaration|FunctionExpression|ArrowFunctionExpression|ObjectMethod|ClassMethod|ClassPrivateMethod'(
             nestedPath: NodePath,
           ) {
             nestedPath.skip()
@@ -401,12 +357,12 @@ export function trackTaint(
               sanitizers,
               lines,
               isControlFlowApproximate(path, fnPath),
+              path.parentPath?.isVariableDeclaration({ kind: 'const' }) ?? false,
             )
           },
 
           AssignmentExpression(path: NodePath<t.AssignmentExpression>) {
             const controlFlowApproximate = isControlFlowApproximate(path, fnPath)
-            processAssignment(path.node, state, sources, sanitizers, lines, controlFlowApproximate)
             checkAssignmentSink(
               path.node,
               state,
@@ -417,10 +373,25 @@ export function trackTaint(
               file,
               controlFlowApproximate,
             )
+            processAssignment(path.node, state, sources, sanitizers, lines, controlFlowApproximate)
           },
 
-          CallExpression(path: NodePath<t.CallExpression>) {
-            checkCallSink(
+          'CallExpression|OptionalCallExpression'(path: NodePath) {
+            const invocation = path.node as t.CallExpression | t.OptionalCallExpression
+            checkInvocationSink(
+              invocation,
+              state,
+              sinks,
+              sanitizers,
+              flows,
+              file,
+              sources,
+              isControlFlowApproximate(path, fnPath),
+            )
+          },
+
+          NewExpression(path: NodePath<t.NewExpression>) {
+            checkInvocationSink(
               path.node,
               state,
               sinks,
@@ -465,7 +436,7 @@ function isControlFlowApproximate(path: NodePath, functionPath: NodePath): boole
 // Param Tainting
 // ---------------------------------------------------------------------------
 
-// Common Express/Fastify/Koa handler parameter names that typically carry
+// Common Express/Fastify handler parameter names that typically carry
 // user-controlled data. When these appear as function parameters (e.g. in
 // `(req, res) => { ... }` patterns), we auto-taint them with a synthetic
 // source so taint flows from `req.anything` are tracked even without an
@@ -477,23 +448,9 @@ function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
-function markParamTaint(
-  param: t.Node,
-  state: TaintState,
-  sources: readonly TaintSource[],
-  lines: string[],
-): void {
+function markParamTaint(param: t.Node, state: TaintState): void {
   if (t.isIdentifier(param)) {
-    const text = nodeToSource(param, lines)
-    const source = matchesSource(text, sources)
-    if (source) {
-      state.tainted.set(param.name, {
-        source,
-        chain: [param.name],
-        transformations: [],
-        precision: 'direct',
-      })
-    } else if (AUTO_TAINT_PARAM_NAMES.has(param.name)) {
+    if (AUTO_TAINT_PARAM_NAMES.has(param.name)) {
       // Auto-taint common request parameter names
       const syntheticSource: TaintSource = {
         type: 'user-input',
@@ -503,21 +460,30 @@ function markParamTaint(
         origin: 'synthetic-handler-param',
         baseConfidence: 'medium',
       }
-      state.tainted.set(param.name, {
+      state.tainted.set(param.name, [{
         source: syntheticSource,
         chain: [param.name],
         transformations: [],
         precision: 'direct',
-      })
+      }])
     }
+    return
   }
   if (t.isObjectPattern(param)) {
     for (const prop of param.properties) {
-      if (t.isObjectProperty(prop) && t.isIdentifier(prop.value)) {
-        markParamTaint(prop.value, state, sources, lines)
-      }
+      if (t.isObjectProperty(prop)) markParamTaint(prop.value, state)
+      if (t.isRestElement(prop)) markParamTaint(prop.argument, state)
     }
+    return
   }
+  if (t.isArrayPattern(param)) {
+    for (const element of param.elements) {
+      if (element) markParamTaint(element, state)
+    }
+    return
+  }
+  if (t.isAssignmentPattern(param)) markParamTaint(param.left, state)
+  if (t.isRestElement(param)) markParamTaint(param.argument, state)
 }
 
 // ---------------------------------------------------------------------------
@@ -531,11 +497,28 @@ function processDeclarator(
   sanitizers: readonly TaintSanitizer[],
   lines: string[],
   controlFlowApproximate: boolean,
+  immutable: boolean,
 ): void {
   if (!node.init) return
-  const varName = getIdentifierName(node.id)
-  if (!varName) return
-  processBinding(varName, node.init, state, sources, sanitizers, lines, controlFlowApproximate)
+  if (immutable && t.isIdentifier(node.id)) {
+    const alias = matchSanitizerReference(node.init, sanitizers, lines)
+    if (alias) {
+      state.aliases.set(node.id.name, alias)
+      state.tainted.delete(node.id.name)
+      return
+    }
+  }
+  const alternatives = expressionAlternatives(node.init, state, sources, sanitizers, lines)
+  bindPattern(
+    node.id,
+    alternatives,
+    state,
+    controlFlowApproximate,
+    sources,
+    sanitizers,
+    lines,
+    getMemberPath(node.init),
+  )
 }
 
 function processAssignment(
@@ -546,73 +529,143 @@ function processAssignment(
   lines: string[],
   controlFlowApproximate: boolean,
 ): void {
-  const varName = getIdentifierName(node.left)
-  if (!varName) return
-  processBinding(varName, node.right, state, sources, sanitizers, lines, controlFlowApproximate)
+  const alternatives = expressionAlternatives(node.right, state, sources, sanitizers, lines)
+  bindPattern(
+    node.left,
+    alternatives,
+    state,
+    controlFlowApproximate,
+    sources,
+    sanitizers,
+    lines,
+    getMemberPath(node.right),
+  )
 }
 
-function processBinding(
-  varName: string,
-  rhs: t.Expression,
+function bindPattern(
+  pattern: t.Node,
+  alternatives: readonly TaintAlternative[],
   state: TaintState,
+  controlFlowApproximate: boolean,
   sources: readonly TaintSource[],
   sanitizers: readonly TaintSanitizer[],
   lines: string[],
-  controlFlowApproximate: boolean,
+  sourceBasePath: string | null = null,
 ): void {
-  const rhsText = nodeToSource(rhs, lines)
-  const transformations = matchesSanitizersOutside(rhsText, sanitizers)
-  const expressionIsApproximate = controlFlowApproximate
-    || t.isConditionalExpression(rhs)
-    || t.isLogicalExpression(rhs)
-
-  // 1. Check if RHS is a direct source. Transformations stay attached to the
-  // taint entry until a concrete sink can decide whether they are compatible.
-  const source = matchesSource(rhsText, sources)
-  if (source) {
-    state.tainted.set(varName, {
-      source,
-      chain: [source.name, varName],
-      transformations,
-      precision: expressionIsApproximate ? 'control-flow-approximate' : 'linear',
-    })
+  if (t.isIdentifier(pattern)) {
+    state.aliases.delete(pattern.name)
+    const assigned = alternatives.map(alternative => ({
+      ...alternative,
+      chain: [...alternative.chain, pattern.name],
+      transformations: [...alternative.transformations],
+      precision: controlFlowApproximate
+        ? 'control-flow-approximate' as const
+        : promotePrecision(alternative.precision, 'linear'),
+    }))
+    if (controlFlowApproximate) {
+      const previous = (state.tainted.get(pattern.name) ?? []).map(markApproximate)
+      const merged = dedupeAlternatives([...previous, ...assigned])
+      if (merged.length > 0) state.tainted.set(pattern.name, merged)
+      return
+    }
+    if (assigned.length > 0) state.tainted.set(pattern.name, dedupeAlternatives(assigned))
+    else state.tainted.delete(pattern.name)
     return
   }
-
-  // 2. Check if RHS references a tainted variable (propagation).
-  const taintedRef = findTaintedInExpression(rhs, state)
-  if (taintedRef) {
-    const existing = state.tainted.get(taintedRef)!
-    state.tainted.set(varName, {
-      source: existing.source,
-      chain: [...existing.chain, varName],
-      transformations: mergeTransformations(existing.transformations, transformations),
-      precision: expressionIsApproximate
-        ? 'control-flow-approximate'
-        : promotePrecision(existing.precision, 'linear'),
-    })
+  if (t.isObjectPattern(pattern)) {
+    for (const property of pattern.properties) {
+      if (t.isObjectProperty(property)) {
+        const propertyName = getObjectPropertyName(property)
+        const childSourcePath = sourceBasePath && propertyName !== null
+          ? `${sourceBasePath}.${propertyName}`
+          : null
+        const explicitSource = childSourcePath ? matchesSource(childSourcePath, sources) : undefined
+        bindPattern(
+          property.value,
+          explicitSource ? [sourceAlternative(explicitSource)] : alternatives,
+          state,
+          controlFlowApproximate,
+          sources,
+          sanitizers,
+          lines,
+          childSourcePath,
+        )
+      }
+      if (t.isRestElement(property)) {
+        const explicitRestSources = sourceBasePath
+          ? sources.filter(source => source.name.startsWith(`${sourceBasePath}.`)).map(sourceAlternative)
+          : []
+        bindPattern(
+          property.argument,
+          explicitRestSources.length > 0 ? explicitRestSources : alternatives,
+          state,
+          controlFlowApproximate,
+          sources,
+          sanitizers,
+          lines,
+          sourceBasePath,
+        )
+      }
+    }
     return
   }
-
-  // 3. A safe assignment in only one branch cannot clear taint from the
-  // merged approximation; an unconditional safe reassignment still can.
+  if (t.isArrayPattern(pattern)) {
+    for (const element of pattern.elements) {
+      if (element) {
+        bindPattern(element, alternatives, state, controlFlowApproximate, sources, sanitizers, lines, sourceBasePath)
+      }
+    }
+    return
+  }
+  if (t.isAssignmentPattern(pattern)) {
+    const defaults = expressionAlternatives(pattern.right, state, sources, sanitizers, lines)
+    bindPattern(
+      pattern.left,
+      dedupeAlternatives([...alternatives, ...defaults]),
+      state,
+      controlFlowApproximate,
+      sources,
+      sanitizers,
+      lines,
+      sourceBasePath,
+    )
+    return
+  }
+  if (t.isRestElement(pattern)) {
+    bindPattern(
+      pattern.argument,
+      alternatives,
+      state,
+      controlFlowApproximate,
+      sources,
+      sanitizers,
+      lines,
+      sourceBasePath,
+    )
+    return
+  }
+  const memberName = getMemberPath(pattern)
+  if (!memberName) return
   if (controlFlowApproximate) {
-    const existing = state.tainted.get(varName)
-    if (existing) existing.precision = 'control-flow-approximate'
-    return
+    const previous = (state.tainted.get(memberName) ?? []).map(markApproximate)
+    const merged = dedupeAlternatives([...previous, ...alternatives.map(markApproximate)])
+    if (merged.length > 0) state.tainted.set(memberName, merged)
+  } else if (alternatives.length > 0) {
+    state.tainted.set(memberName, dedupeAlternatives(alternatives))
+  } else {
+    state.tainted.delete(memberName)
   }
-  state.tainted.delete(varName)
 }
 
-function mergeTransformations(
-  existing: readonly TaintSanitizer[],
-  added: readonly TaintSanitizer[],
-): TaintSanitizer[] {
-  const merged = [...existing]
-  for (const sanitizer of added) {
-    if (!merged.includes(sanitizer)) merged.push(sanitizer)
-  }
-  return merged
+function getObjectPropertyName(property: t.ObjectProperty): string | null {
+  if (!property.computed && t.isIdentifier(property.key)) return property.key.name
+  if (t.isStringLiteral(property.key)) return property.key.value
+  if (t.isNumericLiteral(property.key)) return String(property.key.value)
+  return null
+}
+
+function markApproximate(alternative: TaintAlternative): TaintAlternative {
+  return { ...alternative, transformations: [...alternative.transformations], precision: 'control-flow-approximate' }
 }
 
 function promotePrecision(
@@ -626,69 +679,218 @@ function promotePrecision(
   return 'direct'
 }
 
-/** Recursively check if an expression references a tainted variable. */
-function findTaintedInExpression(
-  node: t.Expression | t.Node,
+function dedupeAlternatives(alternatives: readonly TaintAlternative[]): TaintAlternative[] {
+  const seen = new Set<string>()
+  return alternatives.filter(alternative => {
+    const key = [
+      alternative.source.name,
+      alternative.chain.join('\u0000'),
+      alternative.precision,
+      alternative.transformations.map(item => item.occurrence).sort().join('\u0000'),
+    ].join('\u0001')
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+}
+
+function sourceForNode(
+  node: t.Node,
+  sources: readonly TaintSource[],
+  lines: string[],
+): TaintSource | undefined {
+  if (t.isMemberExpression(node) || t.isOptionalMemberExpression(node)) {
+    const memberPath = getMemberPath(node)
+    return memberPath ? matchesSource(memberPath, sources) : undefined
+  }
+  if (t.isCallExpression(node) || t.isOptionalCallExpression(node)) {
+    return matchesSource(`${nodeToSource(node.callee, lines)}(`, sources)
+  }
+  if (t.isNewExpression(node)) {
+    return matchesSource(`new ${nodeToSource(node.callee, lines)}(`, sources)
+  }
+  return undefined
+}
+
+function sourceAlternative(source: TaintSource): TaintAlternative {
+  return { source, chain: [source.name], transformations: [], precision: 'direct' }
+}
+
+function expressionAlternatives(
+  node: t.Node,
   state: TaintState,
-): string | null {
+  sources: readonly TaintSource[],
+  sanitizers: readonly TaintSanitizer[],
+  lines: string[],
+): TaintAlternative[] {
+  const directSource = sourceForNode(node, sources, lines)
+  if (directSource) return [sourceAlternative(directSource)]
+
   if (t.isIdentifier(node)) {
-    if (state.tainted.has(node.name)) return node.name
+    return cloneAlternatives(state.tainted.get(node.name) ?? [])
   }
-
-  if (t.isMemberExpression(node)) {
-    const fullName = getIdentifierName(node)
-    if (fullName && state.tainted.has(fullName)) {
-      return fullName
-    }
-    return findTaintedInExpression(node.object, state)
+  if (t.isMemberExpression(node) || t.isOptionalMemberExpression(node)) {
+    const memberName = getMemberPath(node)
+    const exact = memberName ? state.tainted.get(memberName) : undefined
+    if (exact) return cloneAlternatives(exact)
+    return expressionAlternatives(node.object, state, sources, sanitizers, lines)
   }
-
   if (t.isTemplateLiteral(node)) {
-    for (const expr of node.expressions) {
-      const found = findTaintedInExpression(expr as t.Expression, state)
-      if (found) return found
-    }
+    return combineNodes(node.expressions, state, sources, sanitizers, lines)
   }
-
   if (t.isBinaryExpression(node)) {
-    return (
-      findTaintedInExpression(node.left, state) ??
-      findTaintedInExpression(node.right, state)
-    )
+    return combineNodes([node.left, node.right], state, sources, sanitizers, lines)
   }
-
-  if (t.isCallExpression(node)) {
-    for (const arg of node.arguments) {
-      if (t.isExpression(arg)) {
-        const found = findTaintedInExpression(arg, state)
-        if (found) return found
-      }
-    }
+  if (t.isLogicalExpression(node) || t.isConditionalExpression(node)) {
+    const nodes = t.isLogicalExpression(node)
+      ? [node.left, node.right]
+      : [node.consequent, node.alternate]
+    return combineNodes(nodes, state, sources, sanitizers, lines).map(markApproximate)
   }
-
-  if (t.isConditionalExpression(node)) {
-    return findTaintedInExpression(node.consequent, state)
-      ?? findTaintedInExpression(node.alternate, state)
+  if (t.isCallExpression(node) || t.isOptionalCallExpression(node) || t.isNewExpression(node)) {
+    const alternatives = combineArguments(node.arguments, state, sources, sanitizers, lines)
+    const sanitizer = matchSanitizerInvocation(node, state, sanitizers, lines)
+    return sanitizer ? applyTransformation(alternatives, sanitizer, node) : alternatives
   }
-
-  if (t.isLogicalExpression(node)) {
-    return findTaintedInExpression(node.left, state)
-      ?? findTaintedInExpression(node.right, state)
+  if (t.isTaggedTemplateExpression(node)) {
+    const alternatives = combineNodes(node.quasi.expressions, state, sources, sanitizers, lines)
+    const sanitizer = selectSpecificSanitizer(`${nodeToSource(node.tag, lines)}\``, sanitizers)
+    return sanitizer ? applyTransformation(alternatives, sanitizer, node) : alternatives
   }
-
   if (t.isAwaitExpression(node)) {
-    return findTaintedInExpression(node.argument, state)
+    return expressionAlternatives(node.argument, state, sources, sanitizers, lines)
   }
+  if (t.isObjectExpression(node)) {
+    const values: t.Node[] = []
+    for (const property of node.properties) {
+      if (t.isObjectProperty(property)) values.push(property.value)
+      if (t.isSpreadElement(property)) values.push(property.argument)
+    }
+    return combineNodes(values, state, sources, sanitizers, lines)
+  }
+  if (t.isArrayExpression(node)) {
+    return combineNodes(node.elements.filter((element): element is t.Expression | t.SpreadElement => element !== null), state, sources, sanitizers, lines)
+  }
+  if (t.isSpreadElement(node)) {
+    return expressionAlternatives(node.argument, state, sources, sanitizers, lines)
+  }
+  if (t.isAssignmentExpression(node)) {
+    return expressionAlternatives(node.right, state, sources, sanitizers, lines)
+  }
+  if (t.isSequenceExpression(node)) {
+    const last = node.expressions.at(-1)
+    return last ? expressionAlternatives(last, state, sources, sanitizers, lines) : []
+  }
+  if (t.isUnaryExpression(node) || t.isUpdateExpression(node)) {
+    return expressionAlternatives(node.argument, state, sources, sanitizers, lines)
+  }
+  if (t.isTSAsExpression(node) || t.isTSTypeAssertion(node) || t.isTSNonNullExpression(node)) {
+    return expressionAlternatives(node.expression, state, sources, sanitizers, lines)
+  }
+  if (t.isParenthesizedExpression(node)) {
+    return expressionAlternatives(node.expression, state, sources, sanitizers, lines)
+  }
+  return []
+}
 
-  return null
+function cloneAlternatives(alternatives: readonly TaintAlternative[]): TaintAlternative[] {
+  return alternatives.map(alternative => ({
+    ...alternative,
+    chain: [...alternative.chain],
+    transformations: [...alternative.transformations],
+  }))
+}
+
+function combineNodes(
+  nodes: readonly t.Node[],
+  state: TaintState,
+  sources: readonly TaintSource[],
+  sanitizers: readonly TaintSanitizer[],
+  lines: string[],
+): TaintAlternative[] {
+  return dedupeAlternatives(nodes.flatMap(node => expressionAlternatives(node, state, sources, sanitizers, lines)))
+}
+
+function combineArguments(
+  args: readonly (t.Expression | t.SpreadElement | t.JSXNamespacedName | t.ArgumentPlaceholder)[],
+  state: TaintState,
+  sources: readonly TaintSource[],
+  sanitizers: readonly TaintSanitizer[],
+  lines: string[],
+): TaintAlternative[] {
+  const nodes = args.filter((arg): arg is t.Expression | t.SpreadElement => t.isExpression(arg) || t.isSpreadElement(arg))
+  return combineNodes(nodes, state, sources, sanitizers, lines)
+}
+
+function selectSpecificSanitizer(
+  text: string,
+  sanitizers: readonly TaintSanitizer[],
+): TaintSanitizer | undefined {
+  const matches = sanitizers.flatMap((sanitizer, index) => {
+    if (sanitizer.name === 'parameterized query') return []
+    const match = execPattern(sanitizer.pattern, text)
+    return match ? [{ sanitizer, index, length: match[0].length }] : []
+  })
+  matches.sort((left, right) => (
+    right.length - left.length
+    || right.sanitizer.pattern.source.length - left.sanitizer.pattern.source.length
+    || left.index - right.index
+  ))
+  return matches[0]?.sanitizer
+}
+
+type InvocationNode = t.CallExpression | t.OptionalCallExpression | t.NewExpression
+
+function matchSanitizerInvocation(
+  node: InvocationNode,
+  state: TaintState,
+  sanitizers: readonly TaintSanitizer[],
+  lines: string[],
+): TaintSanitizer | undefined {
+  if (t.isIdentifier(node.callee)) {
+    const alias = state.aliases.get(node.callee.name)
+    if (alias) return alias
+  }
+  const prefix = t.isNewExpression(node) ? 'new ' : ''
+  return selectSpecificSanitizer(`${prefix}${nodeToSource(node.callee, lines)}(`, sanitizers)
+}
+
+function matchSanitizerReference(
+  node: t.Expression,
+  sanitizers: readonly TaintSanitizer[],
+  lines: string[],
+): TaintSanitizer | undefined {
+  if (!t.isIdentifier(node) && !t.isMemberExpression(node) && !t.isOptionalMemberExpression(node)) return undefined
+  const sanitizer = selectSpecificSanitizer(`${nodeToSource(node, lines)}(`, sanitizers)
+  return sanitizer?.effect === 'sanitizes' ? sanitizer : undefined
+}
+
+function transformationOccurrence(sanitizer: TaintSanitizer, node: t.Node): TaintTransformationOccurrence {
+  const start = node.start ?? node.loc?.start.line ?? 0
+  const end = node.end ?? node.loc?.end.line ?? 0
+  return { sanitizer, occurrence: `${sanitizer.name}:${start}:${end}` }
+}
+
+function applyTransformation(
+  alternatives: readonly TaintAlternative[],
+  sanitizer: TaintSanitizer,
+  node: t.Node,
+): TaintAlternative[] {
+  const occurrence = transformationOccurrence(sanitizer, node)
+  return alternatives.map(alternative => ({
+    ...alternative,
+    transformations: alternative.transformations.some(item => item.occurrence === occurrence.occurrence)
+      ? [...alternative.transformations]
+      : [...alternative.transformations, occurrence],
+  }))
 }
 
 // ---------------------------------------------------------------------------
 // Sink Checks
 // ---------------------------------------------------------------------------
 
-function checkCallSink(
-  node: t.CallExpression,
+function checkInvocationSink(
+  node: InvocationNode,
   state: TaintState,
   sinks: readonly TaintSink[],
   sanitizers: readonly TaintSanitizer[],
@@ -697,45 +899,52 @@ function checkCallSink(
   sources: readonly TaintSource[],
   controlFlowApproximate: boolean,
 ): void {
-  const callText = nodeToSource(node, getFileLines(file))
-  const sinkMatch = matchSinkRange(callText, sinks)
-  if (!sinkMatch) return
-  const { sink, range: sinkRange } = sinkMatch
+  const lines = getFileLines(file)
+  const sink = matchInvocationSink(node, sinks, lines)
+  if (!sink) return
 
-  for (const arg of node.arguments) {
-    if (!t.isExpression(arg)) continue
-
-    const argText = nodeToSource(arg, getFileLines(file))
-
-    // Direct source in argument
-    const directSource = matchesSource(argText, sources)
-    if (directSource) {
-      const transformations = matchesSanitizersOutside(callText, sanitizers, sinkRange)
-      flows.push(createFlow({
-        source: directSource,
-        chain: [directSource.name],
-        transformations,
-        precision: controlFlowApproximate || t.isConditionalExpression(arg) || t.isLogicalExpression(arg)
-          ? 'control-flow-approximate'
-          : 'direct',
-      }, sink, file, node))
-      continue
+  const argumentNodes = node.arguments.filter((arg): arg is t.Expression | t.SpreadElement => (
+    t.isExpression(arg) || t.isSpreadElement(arg)
+  ))
+  let alternatives: TaintAlternative[]
+  if (sink.type === 'sql-injection' && argumentNodes.length > 1) {
+    const queryAlternatives = expressionAlternatives(argumentNodes[0], state, sources, sanitizers, lines)
+    let parameterAlternatives = combineNodes(argumentNodes.slice(1), state, sources, sanitizers, lines)
+    const parameterized = sanitizers.find(item => item.name === 'parameterized query')
+    if (parameterized && hasSqlPlaceholder(argumentNodes[0])) {
+      parameterAlternatives = applyTransformation(parameterAlternatives, parameterized, node)
     }
-
-    // Tainted variable as argument
-    const taintedRef = findTaintedInExpression(arg, state)
-    if (taintedRef) {
-      const taint = state.tainted.get(taintedRef)!
-      const callTransformations = matchesSanitizersOutside(callText, sanitizers, sinkRange)
-      flows.push(createFlow({
-        ...taint,
-        transformations: mergeTransformations(taint.transformations, callTransformations),
-        precision: controlFlowApproximate || t.isConditionalExpression(arg) || t.isLogicalExpression(arg)
-          ? 'control-flow-approximate'
-          : taint.precision,
-      }, sink, file, node))
-    }
+    alternatives = dedupeAlternatives([...queryAlternatives, ...parameterAlternatives])
+  } else {
+    alternatives = combineNodes(argumentNodes, state, sources, sanitizers, lines)
   }
+  if (controlFlowApproximate) alternatives = alternatives.map(markApproximate)
+  if (alternatives.length > 0) flows.push(createFlow(alternatives, sink, file, node))
+}
+
+function matchInvocationSink(
+  node: InvocationNode,
+  sinks: readonly TaintSink[],
+  lines: string[],
+): TaintSink | undefined {
+  const callee = nodeToSource(node.callee, lines)
+  const setAttributeSink = sinks.find(sink => sink.name === 'setAttribute(on*)')
+  if (setAttributeSink && /\.setAttribute$/.test(callee)) {
+    const firstArgument = node.arguments[0]
+    if (t.isStringLiteral(firstArgument) && /^on/i.test(firstArgument.value)) return setAttributeSink
+  }
+  const prefix = t.isNewExpression(node) ? 'new ' : ''
+  return sinks
+    .filter(sink => sink.name !== 'setAttribute(on*)')
+    .find(sink => execPattern(sink.pattern, `${prefix}${callee}(`))
+}
+
+function hasSqlPlaceholder(node: t.Node): boolean {
+  if (t.isStringLiteral(node)) return /\?|\$\d+/.test(node.value)
+  if (t.isTemplateLiteral(node) && node.expressions.length === 0) {
+    return node.quasis.some(quasi => /\?|\$\d+/.test(quasi.value.cooked ?? quasi.value.raw))
+  }
+  return false
 }
 
 interface FlowLocation {
@@ -743,29 +952,53 @@ interface FlowLocation {
 }
 
 function createFlow(
-  taint: TaintEntry,
+  alternatives: readonly TaintAlternative[],
   sink: TaintSink,
   file: IndexedFile,
   location: FlowLocation,
 ): TaintFlow {
-  const applicableTransformations = taint.transformations.filter(transformation => (
-    transformation.appliesTo.includes(sink.type)
+  const applicableByAlternative = alternatives.map(alternative => alternative.transformations.filter(item => (
+    item.sanitizer.appliesTo.includes(sink.type)
+  )))
+  const sanitizersByAlternative = applicableByAlternative.map(items => items.filter(item => (
+    item.sanitizer.effect === 'sanitizes'
+  )))
+  const sanitized = alternatives.length > 0 && sanitizersByAlternative.every(items => items.length > 0)
+  const occurrences = new Map<string, TaintTransformationOccurrence>()
+  for (const items of applicableByAlternative) {
+    for (const item of items) occurrences.set(item.occurrence, item)
+  }
+  const mitigationOccurrences = [...occurrences.values()].filter(item => (
+    item.sanitizer.effect === 'validates' || !sanitized
   ))
-  const sanitizer = applicableTransformations.find(transformation => transformation.effect === 'sanitizes')
-  const mitigationEvidence = applicableTransformations.filter(transformation => transformation.effect === 'validates')
+  const mitigationEvidence = mitigationOccurrences.map(item => item.sanitizer)
+  const source = alternatives[0].source
+  const precision = alternatives.reduce<TaintPathPrecision>(
+    (current, alternative) => promotePrecision(current, alternative.precision),
+    'direct',
+  )
+  const baseConfidence = alternatives.reduce<IssueConfidence>(
+    (current, alternative) => lowerConfidence(current, alternative.source.baseConfidence),
+    'high',
+  )
   return {
-    source: taint.source,
+    source,
     sink,
-    sanitized: sanitizer !== undefined,
-    sanitizer,
-    confidence: flowConfidence(taint.source.baseConfidence, taint.precision, mitigationEvidence.length),
-    precision: taint.precision,
+    sanitized,
+    sanitizer: sanitized ? sanitizersByAlternative[0][0]?.sanitizer : undefined,
+    confidence: flowConfidence(baseConfidence, precision, mitigationEvidence.length),
+    precision,
     mitigationEvidence,
-    path: [...taint.chain, sink.name],
+    path: [...alternatives[0].chain, sink.name],
     file: file.path,
     startLine: location.loc?.start.line ?? 0,
     endLine: location.loc?.end.line ?? 0,
   }
+}
+
+function lowerConfidence(left: IssueConfidence, right: IssueConfidence): IssueConfidence {
+  const order: Record<IssueConfidence, number> = { high: 2, medium: 1, low: 0 }
+  return order[left] <= order[right] ? left : right
 }
 
 function flowConfidence(
@@ -797,37 +1030,9 @@ function checkAssignmentSink(
   const fullText = `${lhsText} = `
   const sink = matchesSink(fullText, sinks)
   if (!sink) return
-
-  const rhsText = nodeToSource(node.right, lines)
-  const transformations = matchesSanitizersOutside(rhsText, sanitizers)
-  const directSource = matchesSource(rhsText, sources)
-  if (directSource) {
-    flows.push(createFlow({
-      source: directSource,
-      chain: [directSource.name],
-      transformations,
-      precision: controlFlowApproximate
-        || t.isConditionalExpression(node.right)
-        || t.isLogicalExpression(node.right)
-        ? 'control-flow-approximate'
-        : 'direct',
-    }, sink, file, node))
-    return
-  }
-
-  const taintedRef = findTaintedInExpression(node.right, state)
-  if (taintedRef) {
-    const taint = state.tainted.get(taintedRef)!
-    flows.push(createFlow({
-      ...taint,
-      transformations: mergeTransformations(taint.transformations, transformations),
-      precision: controlFlowApproximate
-        || t.isConditionalExpression(node.right)
-        || t.isLogicalExpression(node.right)
-        ? 'control-flow-approximate'
-        : taint.precision,
-    }, sink, file, node))
-  }
+  let alternatives = expressionAlternatives(node.right, state, sources, sanitizers, lines)
+  if (controlFlowApproximate) alternatives = alternatives.map(markApproximate)
+  if (alternatives.length > 0) flows.push(createFlow(alternatives, sink, file, node))
 }
 
 // ---------------------------------------------------------------------------

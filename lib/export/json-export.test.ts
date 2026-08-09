@@ -110,6 +110,7 @@ function createScanResults(overrides: Partial<ScanResults> = {}): ScanResults {
     isPartialScan: false,
     suppressionCount: 0,
     ...overrides,
+    diagnostics: overrides.diagnostics ?? { engines: {}, failures: [] },
   }
 }
 

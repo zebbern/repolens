@@ -4,12 +4,17 @@ export type {
   IssueSeverity,
   IssueCategory,
   IssueConfidence,
+  ScanEngine,
+  ScanFailure,
+  ScanDiagnostics,
   CodeIssue,
   ScanRule,
   HealthGrade,
   ScanResults,
   CompositeRule,
 } from './types'
+
+export type { ScanOptions, AsyncScanOptions } from './scanner'
 
 export { scanIssues, scanIssuesAsync, getAllRules, clearScanCache } from './scanner'
 

@@ -226,7 +226,7 @@ describe('scanOnDemand', () => {
     expect(result.issues).toHaveLength(0)
   })
 
-  it('does not interfere with memoization cache', () => {
+  it('does not cache deprecated core-only scans', () => {
     let index = createEmptyIndex()
     index = indexFile(index, 'src/a.ts', 'eval(x)', 'typescript')
     index = indexFile(index, 'src/b.ts', 'const clean = 1', 'typescript')
@@ -235,10 +235,10 @@ describe('scanOnDemand', () => {
     const fullResult = scanIssues(index, null)
     // On-demand scan
     const onDemand = scanOnDemand(index, null, 'src/a.ts')
-    // Full scan again — should return cached result
-    const cachedResult = scanIssues(index, null)
+    // Full core-only scan again — incomplete scans are intentionally not cached.
+    const secondFullResult = scanIssues(index, null)
 
-    expect(cachedResult).toBe(fullResult) // same reference (cached)
+    expect(secondFullResult).not.toBe(fullResult)
     expect(onDemand.isPartialScan).toBe(true)
   })
 })

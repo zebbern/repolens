@@ -15,9 +15,10 @@ vi.mock('@/lib/parsers/tree-sitter', () => ({
 import '@/lib/code/scanner/scanner.worker'
 import { batchIndexFiles, createEmptyIndex, createEmptyIndexWithStore, indexFile } from '@/lib/code/code-index'
 import { IDBContentStore } from '@/lib/code/content-store'
-import { serializeCodeIndex, serializeCodeIndexMeta } from '../serialization'
+import { deserializeCodeIndex, serializeCodeIndex, serializeCodeIndexMeta } from '../serialization'
 import type { ScanWorkerRequest, ScanWorkerResponse } from '../serialization'
 import { initTreeSitter, getLanguageForFile, parseFile, queryTree } from '@/lib/parsers/tree-sitter'
+import { clearScanCache, scanIssuesAsync } from '../scanner'
 
 const mockedInitTreeSitter = vi.mocked(initTreeSitter)
 const mockedGetLanguageForFile = vi.mocked(getLanguageForFile)
@@ -96,10 +97,11 @@ function buildRequest(changedFiles?: string[]): ScanWorkerRequest {
   index = indexFile(index, '__tests__/legacy_scan.py', PY_SOURCE, 'python')
 
   return {
+    type: 'scan',
     id: 1,
     codeIndex: serializeCodeIndex(index),
     analysis: null,
-    ...(changedFiles ? { changedFiles } : {}),
+    ...(changedFiles ? { options: { changedFiles } } : {}),
   }
 }
 
@@ -131,6 +133,31 @@ describe('scanner.worker', () => {
     expect(res.results.securityGrade).not.toBe('A')
   })
 
+  it('matches the no-worker async path for a Tree-sitter-only Python rule', async () => {
+    const request = buildRequest()
+    const workerResponse = await runWorker(request)
+    expect(workerResponse.type).toBe('result')
+    if (workerResponse.type !== 'result' || request.type !== 'scan') return
+
+    clearScanCache()
+    const directResult = await scanIssuesAsync(
+      deserializeCodeIndex(request.codeIndex),
+      null,
+      { failureMode: 'strict' },
+    )
+    const workerTreeSitterIds = workerResponse.results.issues
+      .filter(issue => issue.ruleId.startsWith('ts-'))
+      .map(issue => issue.id)
+      .sort()
+    const directTreeSitterIds = directResult.issues
+      .filter(issue => issue.ruleId.startsWith('ts-'))
+      .map(issue => issue.id)
+      .sort()
+
+    expect(workerTreeSitterIds).toContain('ts-command-injection-py-src/app.py-2')
+    expect(workerTreeSitterIds).toEqual(directTreeSitterIds)
+  })
+
   it('honours changedFiles and still excludes test-fixture paths', async () => {
     const res = await runWorker(buildRequest(['__tests__/legacy_scan.py']))
     expect(res.type).toBe('result')
@@ -151,6 +178,7 @@ describe('scanner.worker', () => {
     await store.flush()
 
     const response = await runWorker({
+      type: 'scan',
       id: 7,
       codeIndex: serializeCodeIndexMeta(index),
       analysis: null,
@@ -162,5 +190,30 @@ describe('scanner.worker', () => {
     expect(response.results.issues.some(issue => issue.ruleId === 'eval-usage')).toBe(true)
     expect(response.results.scannedFiles).toBe(2)
     expect(response.results.unscannedFileCount).toBe(0)
+  })
+
+  it('cancels one request without aborting another request', async () => {
+    const captured: ScanWorkerResponse[] = []
+    Object.defineProperty(globalThis, 'postMessage', {
+      value: (message: ScanWorkerResponse) => captured.push(message),
+      writable: true,
+      configurable: true,
+    })
+
+    const first = buildRequest()
+    first.id = 21
+    const second = buildRequest()
+    second.id = 22
+
+    self.dispatchEvent(new MessageEvent('message', { data: first }))
+    self.dispatchEvent(new MessageEvent('message', { data: second }))
+    self.dispatchEvent(new MessageEvent('message', { data: { type: 'cancel', id: 21 } satisfies ScanWorkerRequest }))
+
+    await vi.waitFor(() => expect(captured).toHaveLength(2))
+    const cancelled = captured.find(response => response.id === 21)
+    const completed = captured.find(response => response.id === 22)
+
+    expect(cancelled).toMatchObject({ type: 'error', id: 21, name: 'AbortError' })
+    expect(completed?.type).toBe('result')
   })
 })

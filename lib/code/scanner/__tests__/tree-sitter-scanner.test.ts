@@ -81,34 +81,37 @@ describe('scanWithTreeSitter', () => {
     expect(result).toEqual([])
   })
 
-  it('handles init failure gracefully (returns empty, no throw)', async () => {
+  it('surfaces initialization failures to the orchestrator', async () => {
     mockedInitTreeSitter.mockRejectedValueOnce(new Error('WASM load failed'))
 
     const files = new Map<string, IndexedFile>()
     files.set('app.py', makeFile('eval(x)'))
 
-    const result = await scanWithTreeSitter(files)
-    expect(result).toEqual([])
+    await expect(scanWithTreeSitter(files)).rejects.toThrow(
+      'Tree-sitter initialization failed: WASM load failed',
+    )
   })
 
-  it('handles parse failure gracefully (continues to next file)', async () => {
+  it('surfaces parse failures with the affected path', async () => {
     mockedParseFile.mockRejectedValueOnce(new Error('Parse error'))
 
     const files = new Map<string, IndexedFile>()
     files.set('bad.py', makeFile('!!!invalid'))
 
-    const result = await scanWithTreeSitter(files)
-    expect(result).toEqual([])
+    await expect(scanWithTreeSitter(files)).rejects.toThrow(
+      'Tree-sitter parse failed for bad.py: Parse error',
+    )
   })
 
-  it('handles parseFile returning null', async () => {
+  it('surfaces parseFile returning null', async () => {
     mockedParseFile.mockResolvedValueOnce(null as unknown as import('web-tree-sitter').Tree)
 
     const files = new Map<string, IndexedFile>()
     files.set('empty.py', makeFile('# empty'))
 
-    const result = await scanWithTreeSitter(files)
-    expect(result).toEqual([])
+    await expect(scanWithTreeSitter(files)).rejects.toThrow(
+      'Tree-sitter parse failed for empty.py: parser returned no tree',
+    )
   })
 
   it('produces valid CodeIssue objects with correct fields', async () => {
@@ -156,7 +159,7 @@ describe('scanWithTreeSitter', () => {
     expect(fakeTree.delete).toHaveBeenCalledTimes(1)
   })
 
-  it('calls tree.delete() even when query throws', async () => {
+  it('surfaces query failures and still deletes the tree', async () => {
     const fakeTree = makeFakeTree()
     mockedParseFile.mockResolvedValue(fakeTree)
     mockedQueryTree.mockRejectedValue(new Error('Bad query'))
@@ -164,8 +167,9 @@ describe('scanWithTreeSitter', () => {
     const files = new Map<string, IndexedFile>()
     files.set('a.py', makeFile('pass'))
 
-    const result = await scanWithTreeSitter(files)
-    expect(result).toEqual([])
+    await expect(scanWithTreeSitter(files)).rejects.toThrow(
+      'Tree-sitter query failed for rule',
+    )
     expect(fakeTree.delete).toHaveBeenCalledTimes(1)
   })
 

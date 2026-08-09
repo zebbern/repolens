@@ -1,10 +1,19 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { scanIssues, scanIssuesAsync, clearScanCache } from '@/lib/code/scanner/scanner'
 import { createEmptyIndex, indexFile } from '@/lib/code/code-index'
+import { scanWithTreeSitter } from '@/lib/code/scanner/tree-sitter-scanner'
+
+vi.mock('@/lib/code/scanner/tree-sitter-scanner', () => ({
+  scanWithTreeSitter: vi.fn(),
+}))
+
+const mockedScanWithTreeSitter = vi.mocked(scanWithTreeSitter)
 
 describe('scanIssuesAsync', () => {
   beforeEach(() => {
     clearScanCache()
+    mockedScanWithTreeSitter.mockReset()
+    mockedScanWithTreeSitter.mockResolvedValue([])
   })
 
   it('returns same results as sync scanIssues for identical input', async () => {
@@ -16,51 +25,47 @@ describe('scanIssuesAsync', () => {
     clearScanCache()
     const asyncResult = await scanIssuesAsync(index, null)
 
-    expect(asyncResult).not.toBeNull()
-    expect(asyncResult!.issues.length).toBe(syncResult.issues.length)
-    expect(asyncResult!.summary).toEqual(syncResult.summary)
-    expect(asyncResult!.healthGrade).toBe(syncResult.healthGrade)
-    expect(asyncResult!.healthScore).toBe(syncResult.healthScore)
-    expect(asyncResult!.scannedFiles).toBe(syncResult.scannedFiles)
-    expect(asyncResult!.rulesEvaluated).toBe(syncResult.rulesEvaluated)
-    expect(asyncResult!.languagesDetected).toEqual(syncResult.languagesDetected)
+    expect(asyncResult.issues.length).toBe(syncResult.issues.length)
+    expect(asyncResult.summary).toEqual(syncResult.summary)
+    expect(asyncResult.healthGrade).toBe(syncResult.healthGrade)
+    expect(asyncResult.healthScore).toBe(syncResult.healthScore)
+    expect(asyncResult.scannedFiles).toBe(syncResult.scannedFiles)
+    expect(asyncResult.rulesEvaluated).toBe(syncResult.rulesEvaluated)
+    expect(asyncResult.languagesDetected).toEqual(syncResult.languagesDetected)
+    expect(syncResult.diagnostics.engines['tree-sitter']).toBe('skipped')
+    expect(asyncResult.diagnostics.engines['tree-sitter']).toBe('completed')
 
     // Issue IDs and severities match
     const syncIds = syncResult.issues.map(i => i.id).sort()
-    const asyncIds = asyncResult!.issues.map(i => i.id).sort()
+    const asyncIds = asyncResult.issues.map(i => i.id).sort()
     expect(asyncIds).toEqual(syncIds)
   })
 
-  it('returns null when isStale returns true immediately', async () => {
+  it('rejects with AbortError when already aborted', async () => {
     let index = createEmptyIndex()
     index = indexFile(index, 'src/app.ts', 'eval(x)', 'typescript')
 
-    const result = await scanIssuesAsync(index, null, {
-      isStale: () => true,
-    })
+    const controller = new AbortController()
+    controller.abort()
 
-    expect(result).toBeNull()
+    await expect(scanIssuesAsync(index, null, { signal: controller.signal })).rejects.toMatchObject({
+      name: 'AbortError',
+    })
   })
 
-  it('returns null when isStale becomes true mid-scan', async () => {
+  it('rejects with AbortError when aborted between phases', async () => {
     let index = createEmptyIndex()
     // Add enough files to ensure multiple phases
     for (let i = 0; i < 5; i++) {
       index = indexFile(index, `src/file${i}.ts`, `eval(x${i})`, 'typescript')
     }
 
-    let callCount = 0
-    const result = await scanIssuesAsync(index, null, {
-      isStale: () => {
-        callCount++
-        // Allow the first yield, abort on the second
-        return callCount >= 2
-      },
-    })
+    const controller = new AbortController()
+    setTimeout(() => controller.abort(), 0)
 
-    expect(result).toBeNull()
-    // isStale should have been called multiple times (once per yield point)
-    expect(callCount).toBeGreaterThanOrEqual(2)
+    await expect(scanIssuesAsync(index, null, { signal: controller.signal })).rejects.toMatchObject({
+      name: 'AbortError',
+    })
   })
 
   it('yields to main thread between phases (uses setTimeout)', async () => {
@@ -92,7 +97,6 @@ describe('scanIssuesAsync', () => {
     const result1 = await scanIssuesAsync(index, null)
     const result2 = await scanIssuesAsync(index, null)
 
-    expect(result1).not.toBeNull()
     // Should be the exact same reference (cached)
     expect(result2).toBe(result1)
   })
@@ -107,8 +111,6 @@ describe('scanIssuesAsync', () => {
     const result1 = await scanIssuesAsync(index1, null)
     const result2 = await scanIssuesAsync(index2, null)
 
-    expect(result1).not.toBeNull()
-    expect(result2).not.toBeNull()
     // Different codeIndex → different results
     expect(result2).not.toBe(result1)
   })
@@ -118,9 +120,8 @@ describe('scanIssuesAsync', () => {
 
     const result = await scanIssuesAsync(index, null)
 
-    expect(result).not.toBeNull()
-    expect(result!.issues).toHaveLength(0)
-    expect(result!.healthScore).toBe(100)
+    expect(result.issues).toHaveLength(0)
+    expect(result.healthScore).toBe(100)
   })
 
   it('supports changedFiles option for partial scans', async () => {
@@ -134,27 +135,90 @@ describe('scanIssuesAsync', () => {
       changedFiles: ['src/a.ts'],
     })
 
-    expect(fullResult).not.toBeNull()
-    expect(partialResult).not.toBeNull()
     // Partial scan should find issues only in the changed file
-    const partialFiles = new Set(partialResult!.issues.map(i => i.file))
+    const partialFiles = new Set(partialResult.issues.map(i => i.file))
     expect(partialFiles.has('src/b.ts')).toBe(false)
   })
 
-  it('isStale is checked after every yield point', async () => {
+  it('reports Tree-sitter failure in best-effort mode', async () => {
+    let index = createEmptyIndex()
+    index = indexFile(index, 'src/app.py', 'try:\n    pass\nexcept:\n    pass\n', 'python')
+    mockedScanWithTreeSitter.mockRejectedValueOnce(new Error('grammar unavailable'))
+
+    const result = await scanIssuesAsync(index, null)
+
+    expect(result.diagnostics.engines['tree-sitter']).toBe('failed')
+    expect(result.diagnostics.failures).toEqual([
+      { engine: 'tree-sitter', message: 'grammar unavailable' },
+    ])
+  })
+
+  it('reports content engines as not applicable for metadata-only scans', async () => {
     let index = createEmptyIndex()
     index = indexFile(index, 'src/app.ts', 'eval(x)', 'typescript')
 
-    let callCount = 0
-    await scanIssuesAsync(index, null, {
-      isStale: () => {
-        callCount++
-        return false
-      },
-    })
+    const result = await scanIssuesAsync(index, null, { metadataOnly: true })
 
-    // There are 5 yield points (phases 1-5 + final), so isStale should be
-    // called at least 5 times for a full scan
-    expect(callCount).toBeGreaterThanOrEqual(5)
+    expect(result.diagnostics).toEqual({
+      engines: {
+        regex: 'not-applicable',
+        ast: 'not-applicable',
+        taint: 'not-applicable',
+        composite: 'not-applicable',
+        structural: 'completed',
+        'supply-chain': 'not-applicable',
+        'tree-sitter': 'not-applicable',
+      },
+      failures: [],
+    })
+    expect(mockedScanWithTreeSitter).not.toHaveBeenCalled()
+  })
+
+  it('throws an engine failure in strict mode', async () => {
+    let index = createEmptyIndex()
+    index = indexFile(index, 'src/app.py', 'try:\n    pass\nexcept:\n    pass\n', 'python')
+    mockedScanWithTreeSitter.mockRejectedValueOnce(new Error('query failed'))
+
+    await expect(scanIssuesAsync(index, null, { failureMode: 'strict' })).rejects.toThrow(
+      'query failed',
+    )
+  })
+
+  it('does not cache a best-effort scan with an engine failure', async () => {
+    let index = createEmptyIndex()
+    index = indexFile(index, 'src/app.py', 'try:\n    pass\nexcept:\n    pass\n', 'python')
+    mockedScanWithTreeSitter
+      .mockRejectedValueOnce(new Error('temporary grammar failure'))
+      .mockResolvedValueOnce([])
+
+    const failed = await scanIssuesAsync(index, null)
+    const recovered = await scanIssuesAsync(index, null)
+
+    expect(failed.diagnostics.engines['tree-sitter']).toBe('failed')
+    expect(recovered.diagnostics.engines['tree-sitter']).toBe('completed')
+    expect(recovered).not.toBe(failed)
+    expect(mockedScanWithTreeSitter).toHaveBeenCalledTimes(2)
+  })
+
+  it('does not cache or deduplicate scans carrying a signal', async () => {
+    let index = createEmptyIndex()
+    index = indexFile(index, 'src/app.ts', 'eval(x)', 'typescript')
+
+    const first = await scanIssuesAsync(index, null, { signal: new AbortController().signal })
+    const second = await scanIssuesAsync(index, null, { signal: new AbortController().signal })
+
+    expect(second).not.toBe(first)
+    expect(mockedScanWithTreeSitter).toHaveBeenCalledTimes(2)
+  })
+
+  it('keeps cache identity separate for failure mode', async () => {
+    let index = createEmptyIndex()
+    index = indexFile(index, 'src/app.ts', 'eval(x)', 'typescript')
+
+    const bestEffort = await scanIssuesAsync(index, null, { failureMode: 'best-effort' })
+    const strict = await scanIssuesAsync(index, null, { failureMode: 'strict' })
+
+    expect(strict).not.toBe(bestEffort)
+    expect(mockedScanWithTreeSitter).toHaveBeenCalledTimes(2)
   })
 })

@@ -21,8 +21,8 @@ end`,
       language: 'ruby',
     },
     expected: [
-      { ruleId: 'ruby-system-exec', line: 4, verdict: 'tp' },
-      { ruleId: 'ruby-mass-assignment', line: 3, verdict: 'tp' },
+      { ruleId: 'ruby-system-exec', line: 4, expectation: 'present' },
+      { ruleId: 'ruby-mass-assignment', line: 3, expectation: 'present' },
     ],
   },
 
@@ -45,7 +45,7 @@ end`,
       language: 'ruby',
     },
     expected: [
-      { ruleId: 'ruby-mass-assignment', line: 3, verdict: 'tp' },
+      { ruleId: 'ruby-mass-assignment', line: 3, expectation: 'present' },
     ],
   },
 
@@ -67,7 +67,7 @@ end`,
       language: 'ruby',
     },
     expected: [
-      { ruleId: 'ruby-marshal-load', line: 4, verdict: 'tp' },
+      { ruleId: 'ruby-marshal-load', line: 4, expectation: 'present' },
     ],
   },
 ]

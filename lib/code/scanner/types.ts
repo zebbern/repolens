@@ -5,6 +5,24 @@ import type { RepositoryCoverage } from '@/types/repository'
 export type IssueSeverity = 'critical' | 'warning' | 'info'
 export type IssueCategory = 'security' | 'bad-practice' | 'reliability'
 export type IssueConfidence = 'high' | 'medium' | 'low'
+export type ScanEngine =
+  | 'regex'
+  | 'ast'
+  | 'taint'
+  | 'composite'
+  | 'structural'
+  | 'supply-chain'
+  | 'tree-sitter'
+
+export interface ScanFailure {
+  engine: ScanEngine
+  message: string
+}
+
+export interface ScanDiagnostics {
+  engines: Partial<Record<ScanEngine, 'completed' | 'not-applicable' | 'skipped' | 'failed'>>
+  failures: ScanFailure[]
+}
 
 export interface CodeIssue {
   id: string
@@ -119,6 +137,7 @@ export interface ScanResults {
   riskDistribution?: { critical: number; high: number; medium: number; low: number }
   /** Compliance coverage summary for each standard */
   complianceSummary?: { standard: string; coveredCount: number; totalCount: number; coveragePercent: number }[]
+  diagnostics: ScanDiagnostics
 }
 
 export interface CompositeRule {

@@ -18,9 +18,9 @@ chmod -R $SCRIPT_PATH`,
       language: 'shellscript',
     },
     expected: [
-      { ruleId: 'shell-unquoted-var', line: 2, verdict: 'tp' },
-      { ruleId: 'shell-unquoted-var', line: 3, verdict: 'tp' },
-      { ruleId: 'shell-unquoted-var', line: 4, verdict: 'tp' },
+      { ruleId: 'shell-unquoted-var', line: 2, expectation: 'present' },
+      { ruleId: 'shell-unquoted-var', line: 3, expectation: 'present' },
+      { ruleId: 'shell-unquoted-var', line: 4, expectation: 'present' },
     ],
   },
 ]

@@ -51,7 +51,7 @@ export default router`,
     expected: [
       // No auth middleware on admin routes → should fire
       // Note: composite rules require multi-file analysis, may not fire on single-file fixtures
-      { ruleId: 'composite-missing-auth-express-route', line: 6, verdict: 'tp' },
+      { ruleId: 'composite-missing-auth-express-route', line: 6, expectation: 'present' },
     ],
   },
 
@@ -90,8 +90,8 @@ export default router`,
     },
     expected: [
       // multer with fileFilter validation → composite-file-upload-no-validation should NOT fire
-      { ruleId: 'composite-missing-auth-express-route', line: 19, verdict: 'tp' },
-      { ruleId: 'composite-async-no-try-catch', line: 19, verdict: 'tp' },
+      { ruleId: 'composite-missing-auth-express-route', line: 19, expectation: 'present' },
+      { ruleId: 'composite-async-no-try-catch', line: 19, expectation: 'present' },
     ],
   },
 
@@ -125,10 +125,10 @@ export default router`,
     },
     expected: [
       // Path traversal mitigations present but taint tracker is conservative
-      { ruleId: 'taint-path-traversal', line: 14, verdict: 'tp' },
-      { ruleId: 'composite-missing-auth-express-route', line: 8, verdict: 'tp' },
+      { ruleId: 'taint-path-traversal', line: 14, expectation: 'present' },
+      { ruleId: 'composite-missing-auth-express-route', line: 8, expectation: 'present' },
       // composite-file-upload-no-validation no longer fires (tightened requiredPatterns: multer|formidable|busboy)
-      { ruleId: 'composite-async-no-try-catch', line: 8, verdict: 'tp' },
+      { ruleId: 'composite-async-no-try-catch', line: 8, expectation: 'present' },
     ],
   },
 
@@ -154,8 +154,8 @@ export async function proxyRequest(targetUrl: string) {
     },
     expected: [
       // Allowlist validation present but per-line rules can't see the check
-      { ruleId: 'nextjs-rsc-ssrf', line: 8, verdict: 'fp' },
-      { ruleId: 'composite-async-no-try-catch', line: 3, verdict: 'tp' },
+      { ruleId: 'nextjs-rsc-ssrf', line: 8, expectation: 'absent' },
+      { ruleId: 'composite-async-no-try-catch', line: 3, expectation: 'present' },
     ],
   },
 
@@ -181,9 +181,9 @@ export default router`,
     },
     expected: [
       // cookie-no-httponly only fires on explicit httpOnly: false, not absence
-      { ruleId: 'composite-missing-auth-express-route', line: 5, verdict: 'tp' },
-      { ruleId: 'cookie-no-samesite', line: 6, verdict: 'tp' },
-      { ruleId: 'express-cookie-not-signed', line: 6, verdict: 'tp' },
+      { ruleId: 'composite-missing-auth-express-route', line: 5, expectation: 'present' },
+      { ruleId: 'cookie-no-samesite', line: 6, expectation: 'present' },
+      { ruleId: 'express-cookie-not-signed', line: 6, expectation: 'present' },
     ],
   },
 
@@ -233,7 +233,7 @@ export function verifyToken(token: string) {
     expected: [
       // hardcoded-secret doesn't fire: JWT_SECRET has no word boundary for \bsecret\b
       // jwt-hardcoded-secret rule doesn't exist
-      { ruleId: 'jwt-missing-algorithms', line: 10, verdict: 'tp' },
+      { ruleId: 'jwt-missing-algorithms', line: 10, expectation: 'present' },
     ],
   },
 
@@ -253,7 +253,7 @@ export function verifyToken(token: string) {
       language: 'typescript',
     },
     expected: [
-      { ruleId: 'hardcoded-aws-key', line: 2, verdict: 'tp' },
+      { ruleId: 'hardcoded-aws-key', line: 2, expectation: 'present' },
       // hardcoded-secret doesn't fire on secretAccessKey: no word boundary for \bsecret\b
     ],
   },
@@ -277,8 +277,8 @@ export async function fetchRepos() {
       language: 'typescript',
     },
     expected: [
-      { ruleId: 'github-token', line: 1, verdict: 'tp' },
-      { ruleId: 'composite-async-no-try-catch', line: 3, verdict: 'tp' },
+      { ruleId: 'github-token', line: 1, expectation: 'present' },
+      { ruleId: 'composite-async-no-try-catch', line: 3, expectation: 'present' },
     ],
   },
 
@@ -303,8 +303,8 @@ export default app`,
       language: 'typescript',
     },
     expected: [
-      { ruleId: 'express-session-fixation', line: 2, verdict: 'tp' },
-      { ruleId: 'express-no-helmet', line: 4, verdict: 'tp' },
+      { ruleId: 'express-session-fixation', line: 2, expectation: 'present' },
+      { ruleId: 'express-no-helmet', line: 4, expectation: 'present' },
     ],
   },
 
@@ -326,8 +326,8 @@ export default app`,
       language: 'typescript',
     },
     expected: [
-      { ruleId: 'express-cors-credentials-wildcard', line: 5, verdict: 'tp' },
-      { ruleId: 'express-no-helmet', line: 4, verdict: 'tp' },
+      { ruleId: 'express-cors-credentials-wildcard', line: 5, expectation: 'present' },
+      { ruleId: 'express-no-helmet', line: 4, expectation: 'present' },
     ],
   },
 
@@ -351,7 +351,7 @@ wss.on('connection', (ws) => {
       language: 'typescript',
     },
     expected: [
-      { ruleId: 'composite-websocket-no-auth', line: 1, verdict: 'tp' },
+      { ruleId: 'composite-websocket-no-auth', line: 1, expectation: 'present' },
     ],
   },
 
@@ -374,7 +374,7 @@ export function safeWrite(filePath: string, data: string) {
       language: 'typescript',
     },
     expected: [
-      { ruleId: 'composite-toctou-file-check', line: 5, verdict: 'tp' },
+      { ruleId: 'composite-toctou-file-check', line: 5, expectation: 'present' },
     ],
   },
 
@@ -394,7 +394,7 @@ export function runCommand(userCmd: string) {
       language: 'typescript',
     },
     expected: [
-      { ruleId: 'composite-cmd-injection-exec-var', line: 4, verdict: 'tp' },
+      { ruleId: 'composite-cmd-injection-exec-var', line: 4, expectation: 'present' },
     ],
   },
 
@@ -415,7 +415,7 @@ export function convertPdf(inputPath: string) {
       language: 'typescript',
     },
     expected: [
-      { ruleId: 'composite-cmd-injection-format', line: 4, verdict: 'tp' },
+      { ruleId: 'composite-cmd-injection-format', line: 4, expectation: 'present' },
     ],
   },
 
@@ -436,7 +436,7 @@ export function deploy(branch: string) {
       language: 'typescript',
     },
     expected: [
-      { ruleId: 'composite-cmd-injection-concat', line: 3, verdict: 'tp' },
+      { ruleId: 'composite-cmd-injection-concat', line: 3, expectation: 'present' },
     ],
   },
 
@@ -459,7 +459,7 @@ router.get('/file', async (req, res) => {
       language: 'typescript',
     },
     expected: [
-      { ruleId: 'composite-path-traversal-req', line: 6, verdict: 'tp' },
+      { ruleId: 'composite-path-traversal-req', line: 6, expectation: 'present' },
     ],
   },
 
@@ -481,7 +481,8 @@ router.get('/proxy', async (req, res) => {
       language: 'typescript',
     },
     expected: [
-      { ruleId: 'composite-ssrf', line: 5, verdict: 'tp' },
+      { ruleId: 'composite-ssrf', line: 5, expectation: 'present' },
+      { ruleId: 'nextjs-rsc-ssrf', line: 5, expectation: 'present' },
     ],
   },
 
@@ -502,7 +503,7 @@ router.get('/callback', (req, res) => {
       language: 'typescript',
     },
     expected: [
-      { ruleId: 'composite-open-redirect-response', line: 5, verdict: 'tp' },
+      { ruleId: 'composite-open-redirect-response', line: 5, expectation: 'present' },
     ],
   },
 
@@ -523,7 +524,7 @@ router.post('/users', async (req, res) => {
       language: 'typescript',
     },
     expected: [
-      { ruleId: 'composite-mass-assignment-orm', line: 4, verdict: 'tp' },
+      { ruleId: 'composite-mass-assignment-orm', line: 4, expectation: 'present' },
     ],
   },
 
@@ -544,7 +545,7 @@ router.get('/orders/:id', async (req, res) => {
       language: 'typescript',
     },
     expected: [
-      { ruleId: 'composite-idor-direct-lookup', line: 4, verdict: 'tp' },
+      { ruleId: 'composite-idor-direct-lookup', line: 4, expectation: 'present' },
     ],
   },
 
@@ -566,7 +567,7 @@ export async function writeIfMissing(path: string, data: string) {
       language: 'typescript',
     },
     expected: [
-      { ruleId: 'composite-toctou-async-file', line: 5, verdict: 'tp' },
+      { ruleId: 'composite-toctou-async-file', line: 5, expectation: 'present' },
     ],
   },
 
@@ -673,7 +674,7 @@ export async function GET(request: Request) {
       language: 'typescript',
     },
     expected: [
-      { ruleId: 'nextjs-api-no-auth', line: 4, verdict: 'tp' },
+      { ruleId: 'nextjs-api-no-auth', line: 4, expectation: 'present' },
     ],
   },
 
@@ -695,7 +696,7 @@ router.post('/upload', upload.single('doc'), (req, res) => {
       language: 'typescript',
     },
     expected: [
-      { ruleId: 'composite-file-upload-no-validation', line: 2, verdict: 'tp' },
+      { ruleId: 'composite-file-upload-no-validation', line: 2, expectation: 'present' },
     ],
   },
 
@@ -716,7 +717,7 @@ export async function createUser(req: Request, res: Response) {
       language: 'typescript',
     },
     expected: [
-      { ruleId: 'composite-mass-assignment-sequelize', line: 4, verdict: 'tp' },
+      { ruleId: 'composite-mass-assignment-sequelize', line: 4, expectation: 'present' },
     ],
   },
 
@@ -737,7 +738,7 @@ app.use(csrf({ cookie: true }))`,
       language: 'typescript',
     },
     expected: [
-      { ruleId: 'express-method-override-before-csrf', line: 5, verdict: 'tp' },
+      { ruleId: 'express-method-override-before-csrf', line: 5, expectation: 'present' },
     ],
   },
 
@@ -768,7 +769,7 @@ export default app`,
       // express-no-helmet regex rule matches express() on line 7,
       // excludePattern checks per-line (line 7 has no 'helmet'), so it fires.
       // Helmet IS used in the file — this is a FP of the per-line regex approach.
-      { ruleId: 'express-no-helmet', line: 7, verdict: 'fp' },
+      { ruleId: 'express-no-helmet', line: 7, expectation: 'absent' },
     ],
   },
 ]

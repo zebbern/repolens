@@ -60,9 +60,10 @@ export async function scanWithTreeSitter(
   // Initialize Tree-sitter WASM runtime
   try {
     await initTreeSitter()
-  } catch (err) {
-    console.warn('[tree-sitter-scanner] Failed to initialize Tree-sitter:', err)
-    return []
+  } catch (error) {
+    throw new Error(`Tree-sitter initialization failed: ${error instanceof Error ? error.message : String(error)}`, {
+      cause: error,
+    })
   }
 
   const issues: CodeIssue[] = []
@@ -80,11 +81,14 @@ export async function scanWithTreeSitter(
       let tree
       try {
         tree = await parseFile(content, language)
-      } catch (err) {
-        console.warn(`[tree-sitter-scanner] Parse failed for ${path}:`, err)
-        continue
+      } catch (error) {
+        throw new Error(`Tree-sitter parse failed for ${path}: ${error instanceof Error ? error.message : String(error)}`, {
+          cause: error,
+        })
       }
-      if (!tree) continue
+      if (!tree) {
+        throw new Error(`Tree-sitter parse failed for ${path}: parser returned no tree`)
+      }
 
       try {
         for (const rule of rules) {
@@ -122,10 +126,11 @@ async function runRuleOnFileAsync(
   let matches
   try {
     matches = await queryTree(tree, language, rule.query)
-  } catch (err) {
-    // Query syntax may not be supported by this grammar version — skip silently
-    console.warn(`[tree-sitter-scanner] Query failed for rule ${rule.id} on ${filePath}:`, err)
-    return issues
+  } catch (error) {
+    throw new Error(
+      `Tree-sitter query failed for rule ${rule.id} on ${filePath}: ${error instanceof Error ? error.message : String(error)}`,
+      { cause: error },
+    )
   }
 
   const captureName = rule.captureName

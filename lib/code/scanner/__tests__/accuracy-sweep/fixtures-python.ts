@@ -24,8 +24,8 @@ if __name__ == '__main__':
       language: 'python',
     },
     expected: [
-      { ruleId: 'flask-debug-mode', line: 10, verdict: 'tp' },
-      { ruleId: 'debug-mode-production', line: 10, verdict: 'tp' },
+      { ruleId: 'flask-debug-mode', line: 10, expectation: 'present' },
+      { ruleId: 'debug-mode-production', line: 10, expectation: 'present' },
     ],
   },
 
@@ -46,7 +46,7 @@ def render_content(request):
       language: 'python',
     },
     expected: [
-      { ruleId: 'django-mark-safe', line: 6, verdict: 'tp' },
+      { ruleId: 'django-mark-safe', line: 6, expectation: 'present' },
     ],
   },
 
@@ -120,7 +120,7 @@ def load_model(model_path: str):
       language: 'python',
     },
     expected: [
-      { ruleId: 'python-pickle', line: 6, verdict: 'tp' },
+      { ruleId: 'python-pickle', line: 6, expectation: 'present' },
     ],
   },
 
@@ -221,7 +221,7 @@ def run_command(user_cmd: str):
       language: 'python',
     },
     expected: [
-      { ruleId: 'python-subprocess-shell', line: 4, verdict: 'tp' },
+      { ruleId: 'python-subprocess-shell', line: 4, expectation: 'present' },
     ],
   },
 
@@ -240,7 +240,7 @@ def run_command(user_cmd: str):
       language: 'python',
     },
     expected: [
-      { ruleId: 'python-exec', line: 3, verdict: 'tp' },
+      { ruleId: 'python-exec', line: 3, expectation: 'present' },
     ],
   },
 
@@ -263,7 +263,7 @@ def stripe_webhook(request):
       language: 'python',
     },
     expected: [
-      { ruleId: 'django-csrf-exempt', line: 5, verdict: 'tp' },
+      { ruleId: 'django-csrf-exempt', line: 5, expectation: 'present' },
     ],
   },
 
@@ -283,10 +283,10 @@ DEBUG = True`,
       language: 'python',
     },
     expected: [
-      { ruleId: 'hardcoded-secret', line: 1, verdict: 'tp' },
-      { ruleId: 'python-django-debug', line: 5, verdict: 'tp' },
-      { ruleId: 'flask-secret-key-hardcoded', line: 1, verdict: 'tp' },
-      { ruleId: 'debug-mode-production', line: 5, verdict: 'tp' },
+      { ruleId: 'hardcoded-secret', line: 1, expectation: 'present' },
+      { ruleId: 'python-django-debug', line: 5, expectation: 'present' },
+      { ruleId: 'flask-secret-key-hardcoded', line: 1, expectation: 'present' },
+      { ruleId: 'debug-mode-production', line: 5, expectation: 'present' },
     ],
   },
 
@@ -307,7 +307,7 @@ def load_config(path):
       language: 'python',
     },
     expected: [
-      { ruleId: 'python-yaml-load', line: 5, verdict: 'tp' },
+      { ruleId: 'python-yaml-load', line: 5, expectation: 'present' },
     ],
   },
 
@@ -325,7 +325,7 @@ def load_config(path):
       language: 'python',
     },
     expected: [
-      { ruleId: 'python-exec', line: 3, verdict: 'tp' },
+      { ruleId: 'python-exec', line: 3, expectation: 'present' },
     ],
   },
 
@@ -344,7 +344,7 @@ def convert_file(filename):
       language: 'python',
     },
     expected: [
-      { ruleId: 'python-subprocess-shell', line: 4, verdict: 'tp' },
+      { ruleId: 'python-subprocess-shell', line: 4, expectation: 'present' },
     ],
   },
 
@@ -365,7 +365,7 @@ def get_user(conn, user_id):
       language: 'python',
     },
     expected: [
-      { ruleId: 'sql-injection', line: 5, verdict: 'tp' },
+      { ruleId: 'sql-injection', line: 5, expectation: 'present' },
     ],
   },
 
@@ -388,7 +388,7 @@ def index():
       language: 'python',
     },
     expected: [
-      { ruleId: 'flask-secret-key-hardcoded', line: 4, verdict: 'tp' },
+      { ruleId: 'flask-secret-key-hardcoded', line: 4, expectation: 'present' },
     ],
   },
 
@@ -409,7 +409,7 @@ def search_user(request):
       language: 'python',
     },
     expected: [
-      { ruleId: 'django-raw-sql', line: 5, verdict: 'tp' },
+      { ruleId: 'django-raw-sql', line: 5, expectation: 'present' },
     ],
   },
 
@@ -452,7 +452,7 @@ def fetch_data(url: str):
       language: 'python',
     },
     expected: [
-      { ruleId: 'python-ssl-no-verify', line: 4, verdict: 'tp' },
+      { ruleId: 'python-ssl-no-verify', line: 4, expectation: 'present' },
     ],
   },
 
@@ -475,7 +475,7 @@ def create_temp_config():
       language: 'python',
     },
     expected: [
-      { ruleId: 'python-tempfile-mktemp', line: 5, verdict: 'tp' },
+      { ruleId: 'python-tempfile-mktemp', line: 5, expectation: 'present' },
     ],
   },
 
@@ -496,7 +496,7 @@ def create_temp_config():
       language: 'python',
     },
     expected: [
-      { ruleId: 'python-bare-except', line: 5, verdict: 'tp' },
+      { ruleId: 'python-bare-except', line: 5, expectation: 'present' },
     ],
   },
 
@@ -515,7 +515,7 @@ def restart_service(name):
       language: 'python',
     },
     expected: [
-      { ruleId: 'python-os-system', line: 4, verdict: 'tp' },
+      { ruleId: 'python-os-system', line: 4, expectation: 'present' },
     ],
   },
 
@@ -534,7 +534,7 @@ def preview():
       language: 'python',
     },
     expected: [
-      { ruleId: 'ssti-python', line: 4, verdict: 'tp' },
+      { ruleId: 'ssti-python', line: 4, expectation: 'present' },
     ],
   },
 
@@ -554,7 +554,7 @@ def load_cached(path):
       language: 'python',
     },
     expected: [
-      { ruleId: 'python-marshal-load', line: 5, verdict: 'tp' },
+      { ruleId: 'python-marshal-load', line: 5, expectation: 'present' },
     ],
   },
 
@@ -574,7 +574,7 @@ def load_xml(path):
       language: 'python',
     },
     expected: [
-      { ruleId: 'xxe-python', line: 4, verdict: 'tp' },
+      { ruleId: 'xxe-python', line: 4, expectation: 'present' },
     ],
   },
 
@@ -593,7 +593,7 @@ def load_xml(path):
       language: 'python',
     },
     expected: [
-      { ruleId: 'timing-attack-py', line: 2, verdict: 'tp' },
+      { ruleId: 'timing-attack-py', line: 2, expectation: 'present' },
     ],
   },
 
@@ -613,7 +613,7 @@ def list_files(directory):
       language: 'python',
     },
     expected: [
-      { ruleId: 'composite-python-os-cmd', line: 3, verdict: 'tp' },
+      { ruleId: 'composite-python-os-cmd', line: 3, expectation: 'present' },
     ],
   },
 
@@ -634,7 +634,7 @@ class OrderView:
       language: 'python',
     },
     expected: [
-      { ruleId: 'composite-csrf-missing-django-view', line: 4, verdict: 'tp' },
+      { ruleId: 'composite-csrf-missing-django-view', line: 4, expectation: 'present' },
     ],
   },
 
@@ -678,7 +678,7 @@ def handle_login():
       language: 'python',
     },
     expected: [
-      { ruleId: 'log-injection-py', line: 5, verdict: 'tp' },
+      { ruleId: 'log-injection-py', line: 5, expectation: 'present' },
     ],
   },
 
@@ -697,8 +697,8 @@ def handle_login():
       language: 'python',
     },
     expected: [
-      { ruleId: 'python-assert-security', line: 2, verdict: 'tp' },
-      { ruleId: 'python-assert-security', line: 3, verdict: 'tp' },
+      { ruleId: 'python-assert-security', line: 2, expectation: 'present' },
+      { ruleId: 'python-assert-security', line: 3, expectation: 'present' },
     ],
   },
 
@@ -718,7 +718,7 @@ def load_cache(path):
       language: 'python',
     },
     expected: [
-      { ruleId: 'python-shelve-open', line: 4, verdict: 'tp' },
+      { ruleId: 'python-shelve-open', line: 4, expectation: 'present' },
     ],
   },
 
@@ -740,9 +740,9 @@ def process(data):
       language: 'python',
     },
     expected: [
-      { ruleId: 'python-star-import', line: 1, verdict: 'tp' },
-      { ruleId: 'python-star-import', line: 2, verdict: 'tp' },
-      { ruleId: 'python-assert-production', line: 5, verdict: 'tp' },
+      { ruleId: 'python-star-import', line: 1, expectation: 'present' },
+      { ruleId: 'python-star-import', line: 2, expectation: 'present' },
+      { ruleId: 'python-assert-production', line: 5, expectation: 'present' },
     ],
   },
 

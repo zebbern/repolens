@@ -1,14 +1,21 @@
 // Main scanner — orchestrates all rule scanning, computes health score,
 // and produces the final ScanResults.
 //
-// NOTE: scanIssues() is memoized by codeIndex reference to avoid redundant
-// O(n) scans when multiple components (code-browser, issues-panel) call it
-// with the same index.
+// scanIssuesAsync is authoritative and memoizes successful complete scans.
+// scanIssues remains a deprecated, synchronous core-only compatibility API.
 
 import type { CodeIndex, IndexedFile } from '../code-index'
 import { buildSearchRegex, getFileLines, hydrateCodeIndexContent } from '../code-index'
 import type { FullAnalysis } from '../import-parser'
-import type { ScanRule, CodeIssue, IssueSeverity, HealthGrade, ScanResults } from './types'
+import type {
+  ScanRule,
+  CodeIssue,
+  IssueSeverity,
+  HealthGrade,
+  ScanResults,
+  ScanDiagnostics,
+  ScanEngine,
+} from './types'
 import { SKIP_VENDORED, SCANNER_EXCLUDE_PATTERNS, detectLanguages } from './constants'
 import { SECURITY_RULES } from './rules-security'
 import { SECURITY_LANG_RULES } from './rules-security-lang'
@@ -71,6 +78,7 @@ const STRING_LITERAL_SUPPRESSED_IDS = new Set(['eval-usage', 'sql-injection', 'i
 
 // Regex to extract a quoted value from a snippet like `key = "VALUE"` or `password: 'VALUE'`
 const EXTRACT_SECRET_VALUE = /[:=]\s*["'`]([^"'`]{4,})["'`]/
+const SSRF_FILE_VALIDATION = /\b(?:ALLOWED_(?:HOSTS|DOMAINS)|allowedOrigins|allowlist|whitelist|isValidUrl|validateUrl)\b/i
 
 // ---------------------------------------------------------------------------
 // Scan memoization — avoids redundant O(n) scans when multiple components
@@ -80,18 +88,24 @@ const EXTRACT_SECRET_VALUE = /[:=]\s*["'`]([^"'`]{4,})["'`]/
 let lastScanRef: WeakRef<CodeIndex> | null = null
 let lastScanAnalysis: FullAnalysis | null = null
 let lastScanResult: ScanResults | null = null
+let lastScanOptionsKey: string | null = null
 
 // In-flight async scan dedup — prevents concurrent scans for the same index.
-let pendingScan: Promise<ScanResults | null> | null = null
+let pendingScan: Promise<ScanResults> | null = null
 let pendingScanIndex: WeakRef<CodeIndex> | null = null
+let pendingScanAnalysis: FullAnalysis | null = null
+let pendingScanOptionsKey: string | null = null
 
 /** Clear the scan cache, e.g. for testing. */
 export function clearScanCache(): void {
   lastScanRef = null
   lastScanAnalysis = null
   lastScanResult = null
+  lastScanOptionsKey = null
   pendingScan = null
   pendingScanIndex = null
+  pendingScanAnalysis = null
+  pendingScanOptionsKey = null
   clearASTCache()
 }
 
@@ -233,11 +247,20 @@ function runRegexRules(ctx: ScanContext): RegexRulesResult {
 
         // Per-rule line exclusion
         if (rule.excludePattern && rule.excludePattern.test(lineContent)) continue
+        if (
+          rule.id === 'nextjs-rsc-ssrf'
+          && SSRF_FILE_VALIDATION.test(file.content)
+        ) continue
 
         // --- Context-aware suppression ---
         const lineCtx = classifyLine(lineContent, path, blockCommentLines, i)
 
-        if (lineCtx.isComment && !isSecurityCritical && rule.id !== 'todo-fixme') continue
+        if (
+          lineCtx.isComment
+          && !isSecurityCritical
+          && rule.id !== 'todo-fixme'
+          && rule.id !== 'eslint-disable'
+        ) continue
         if ((lineCtx.isTestFile || lineCtx.isGeneratedFile || lineCtx.isExampleFile) && rule.category !== 'security') continue
         if (lineCtx.isTypeAnnotation && SECRET_RULE_IDS.test(rule.id)) continue
         if (lineCtx.isStringLiteral && STRING_LITERAL_SUPPRESSED_IDS.has(rule.id)) continue
@@ -383,7 +406,12 @@ function runRegexRules(ctx: ScanContext): RegexRulesResult {
 
         // Context-aware suppression on the first line
         const lineCtx = classifyLine(lines[i], path, blockCommentLines, i)
-        if (lineCtx.isComment && !isSecurityCritical && rule.id !== 'todo-fixme') continue
+        if (
+          lineCtx.isComment
+          && !isSecurityCritical
+          && rule.id !== 'todo-fixme'
+          && rule.id !== 'eslint-disable'
+        ) continue
         if ((lineCtx.isTestFile || lineCtx.isGeneratedFile || lineCtx.isExampleFile) && rule.category !== 'security') continue
         if (lineCtx.isTypeAnnotation && SECRET_RULE_IDS.test(rule.id)) continue
         if (lineCtx.isStringLiteral && STRING_LITERAL_SUPPRESSED_IDS.has(rule.id)) continue
@@ -622,6 +650,85 @@ export interface ScanOptions {
   changedFiles?: string[]
 }
 
+export interface AsyncScanOptions extends ScanOptions {
+  signal?: AbortSignal
+  failureMode?: 'best-effort' | 'strict'
+}
+
+interface ScanAccumulator {
+  issues: CodeIssue[]
+  seenIds: Set<string>
+  rulesEvaluated: number
+  suppressionCount: number
+  ruleOverflow: Map<string, number>
+  diagnostics: ScanDiagnostics
+}
+
+function createScanAccumulator(): ScanAccumulator {
+  return {
+    issues: [],
+    seenIds: new Set(),
+    rulesEvaluated: 0,
+    suppressionCount: 0,
+    ruleOverflow: new Map(),
+    diagnostics: { engines: {}, failures: [] },
+  }
+}
+
+function addIssues(accumulator: ScanAccumulator, issues: CodeIssue[]): void {
+  for (const issue of issues) {
+    if (!accumulator.seenIds.has(issue.id)) {
+      accumulator.seenIds.add(issue.id)
+      accumulator.issues.push(issue)
+    }
+  }
+}
+
+function completeEngine(
+  accumulator: ScanAccumulator,
+  engine: ScanEngine,
+  status: 'completed' | 'not-applicable' | 'skipped' = 'completed',
+): void {
+  accumulator.diagnostics.engines[engine] = status
+}
+
+async function runAsyncEngine(
+  accumulator: ScanAccumulator,
+  engine: ScanEngine,
+  failureMode: 'best-effort' | 'strict',
+  run: () => void | Promise<void>,
+): Promise<void> {
+  try {
+    await run()
+    completeEngine(accumulator, engine)
+  } catch (error) {
+    accumulator.diagnostics.engines[engine] = 'failed'
+    accumulator.diagnostics.failures.push({
+      engine,
+      message: error instanceof Error ? error.message : String(error),
+    })
+    if (failureMode === 'strict') throw error
+  }
+}
+
+function throwIfScanAborted(signal?: AbortSignal): void {
+  if (signal?.aborted) {
+    throw new DOMException('The scan was aborted', 'AbortError')
+  }
+}
+
+function scanOptionsKey(options: AsyncScanOptions): string {
+  return JSON.stringify({
+    changedFiles: options.changedFiles ?? null,
+    metadataOnly: options.metadataOnly ?? false,
+    failureMode: options.failureMode ?? 'best-effort',
+  })
+}
+
+function isCompleteFullScan(options: AsyncScanOptions): boolean {
+  return (options.changedFiles?.length ?? 0) === 0 && !options.metadataOnly && !options.signal
+}
+
 /** Count files in the index whose source is absent. Genuine empty files are loaded. */
 function countUnscannedFiles(codeIndex: CodeIndex): number {
   let count = 0
@@ -631,10 +738,82 @@ function countUnscannedFiles(codeIndex: CodeIndex): number {
   return count
 }
 
+function finalizeScan(
+  codeIndex: CodeIndex,
+  analysis: FullAnalysis | null,
+  filesToScan: Map<string, FileEntry>,
+  isPartialScan: boolean,
+  metadataOnly: boolean,
+  accumulator: ScanAccumulator,
+): ScanResults {
+  const { issues } = accumulator
+
+  if (analysis) {
+    for (const issue of issues) {
+      const importers = analysis.graph.reverseEdges.get(issue.file)
+      const importerCount = importers?.size ?? 0
+      const isEntryPoint = analysis.topology.entryPoints.includes(issue.file)
+      const isDead = !isEntryPoint && importerCount === 0
+
+      if (isDead && issue.category !== 'security' && (issue.severity === 'warning' || issue.severity === 'critical')) {
+        issue.severity = 'info'
+      }
+      if (isEntryPoint && issue.category === 'security') {
+        issue.description += ' (entry point — publicly accessible)'
+      }
+      if (importerCount >= 10) {
+        issue.description += ` (high fan-in: ${importerCount} importers — changes affect many consumers)`
+      }
+    }
+  }
+
+  const severityOrder: Record<IssueSeverity, number> = { critical: 0, warning: 1, info: 2 }
+  issues.sort((a, b) => {
+    const severity = severityOrder[a.severity] - severityOrder[b.severity]
+    return severity !== 0 ? severity : a.file.localeCompare(b.file)
+  })
+
+  for (const issue of issues) {
+    issue.riskScore = scoreIssue(issue)
+    issue.cvssVector = buildCvssVector(issue)
+  }
+  const projectRiskScore = scoreProject(issues)
+  const riskDistribution = getRiskDistribution(issues)
+  const sloc = Array.from(filesToScan.values()).reduce((sum, file) => sum + file.lineCount, 0)
+  const grades = computeHealthGrades(issues, sloc)
+
+  return {
+    repositoryCoverage: codeIndex.coverage,
+    issues,
+    summary: computeScanSummary(issues),
+    healthGrade: grades.healthGrade,
+    healthScore: grades.healthScore,
+    ruleOverflow: accumulator.ruleOverflow,
+    languagesDetected: detectLanguages(codeIndex),
+    rulesEvaluated: accumulator.rulesEvaluated,
+    scannedFiles: isPartialScan ? filesToScan.size : codeIndex.totalFiles,
+    scannedAt: new Date(),
+    securityGrade: grades.securityGrade,
+    qualityGrade: grades.qualityGrade,
+    issuesPerKloc: grades.issuesPerKloc,
+    isPartialScan,
+    unscannedFileCount: countUnscannedFiles(codeIndex),
+    isMetadataOnly: metadataOnly,
+    suppressionCount: accumulator.suppressionCount,
+    projectRiskScore,
+    riskDistribution,
+    diagnostics: accumulator.diagnostics,
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Main scan orchestrator
 // ---------------------------------------------------------------------------
 
+/**
+ * @deprecated Core-only compatibility scan. Use scanIssuesAsync for authoritative results.
+ * Tree-sitter is not run and is reported as skipped in diagnostics.
+ */
 export function scanIssues(
   codeIndex: CodeIndex,
   analysis: FullAnalysis | null,
@@ -645,18 +824,8 @@ export function scanIssues(
     : changedFilesOrOptions ?? {}
   const { metadataOnly = false, changedFiles } = options
 
-  // Return cached result if the same codeIndex instance + analysis is requested.
-  // Only applies to full scans (no changedFiles, no metadataOnly) since partial scans are cheap.
-  if (!changedFiles && !metadataOnly && lastScanRef && lastScanResult) {
-    const cachedRef = lastScanRef.deref()
-    if (cachedRef === codeIndex && lastScanAnalysis === analysis) {
-      lastScanResult.repositoryCoverage = codeIndex.coverage
-      return lastScanResult
-    }
-  }
-
-  const issues: CodeIssue[] = []
-  const seenIds = new Set<string>()
+  const accumulator = createScanAccumulator()
+  const { issues, seenIds } = accumulator
 
   const isPartialScan = changedFiles !== undefined && changedFiles.length > 0
 
@@ -775,76 +944,16 @@ export function scanIssues(
     }
   }
 
-  // 6. Structural context cross-reference
-  if (analysis) {
-    for (const issue of issues) {
-      const importers = analysis.graph.reverseEdges.get(issue.file)
-      const importerCount = importers?.size ?? 0
-      const isEntryPoint = analysis.topology.entryPoints.includes(issue.file)
-      const isDead = !isEntryPoint && importerCount === 0
-
-      if (isDead && issue.category !== 'security' && (issue.severity === 'warning' || issue.severity === 'critical')) {
-        issue.severity = 'info'
-      }
-      if (isEntryPoint && issue.category === 'security') {
-        issue.description += ' (entry point — publicly accessible)'
-      }
-      if (importerCount >= 10) {
-        issue.description += ` (high fan-in: ${importerCount} importers — changes affect many consumers)`
-      }
-    }
+  accumulator.rulesEvaluated = rulesEvaluated
+  accumulator.suppressionCount = suppressionCount
+  accumulator.ruleOverflow = ruleOverflow
+  for (const engine of ['regex', 'ast', 'taint', 'composite', 'supply-chain'] as const) {
+    completeEngine(accumulator, engine, metadataOnly ? 'not-applicable' : 'completed')
   }
+  completeEngine(accumulator, 'structural')
+  completeEngine(accumulator, 'tree-sitter', 'skipped')
 
-  // Sort: critical first, then warning, then info. Within same severity, by file.
-  const severityOrder: Record<IssueSeverity, number> = { critical: 0, warning: 1, info: 2 }
-  issues.sort((a, b) => {
-    const sev = severityOrder[a.severity] - severityOrder[b.severity]
-    if (sev !== 0) return sev
-    return a.file.localeCompare(b.file)
-  })
-
-  // Risk scoring
-  for (const issue of issues) {
-    issue.riskScore = scoreIssue(issue)
-    issue.cvssVector = buildCvssVector(issue)
-  }
-  const projectRiskScore = scoreProject(issues)
-  const riskDistribution = getRiskDistribution(issues)
-
-  // Health grades
-  const sloc = Array.from(filesToScan.values()).reduce((sum, f) => sum + f.lineCount, 0)
-  const grades = computeHealthGrades(issues, sloc)
-
-  const result: ScanResults = {
-    repositoryCoverage: codeIndex.coverage,
-    issues,
-    summary: computeScanSummary(issues),
-    healthGrade: grades.healthGrade,
-    healthScore: grades.healthScore,
-    ruleOverflow,
-    languagesDetected: detectLanguages(codeIndex),
-    rulesEvaluated,
-    scannedFiles: isPartialScan ? filesToScan.size : codeIndex.totalFiles,
-    scannedAt: new Date(),
-    securityGrade: grades.securityGrade,
-    qualityGrade: grades.qualityGrade,
-    issuesPerKloc: grades.issuesPerKloc,
-    isPartialScan,
-    unscannedFileCount: countUnscannedFiles(codeIndex),
-    isMetadataOnly: metadataOnly,
-    suppressionCount,
-    projectRiskScore,
-    riskDistribution,
-  }
-
-  // Cache full scan results for memoization (not cached for partial or metadata-only scans)
-  if (!changedFiles && !metadataOnly) {
-    lastScanRef = new WeakRef(codeIndex)
-    lastScanAnalysis = analysis
-    lastScanResult = result
-  }
-
-  return result
+  return finalizeScan(codeIndex, analysis, filesToScan, isPartialScan, metadataOnly, accumulator)
 }
 
 // ---------------------------------------------------------------------------
@@ -860,76 +969,80 @@ function yieldToMain(): Promise<void> {
  * Async version of `scanIssues` that yields to the main thread between each
  * scanning phase so the UI stays responsive on large codebases.
  *
- * Accepts an optional `isStale` callback checked after every yield. When
- * `isStale()` returns `true` the scan aborts early and returns `null`.
- *
- * Shares the same WeakRef memoization cache as the synchronous `scanIssues`.
+ * This is the authoritative scanner path. Cancellation rejects with AbortError;
+ * best-effort engine failures are returned in diagnostics and strict failures throw.
  */
 export async function scanIssuesAsync(
   codeIndex: CodeIndex,
   analysis: FullAnalysis | null,
-  options?: {
-    changedFiles?: string[]
-    isStale?: () => boolean
-    metadataOnly?: boolean
-  },
-): Promise<ScanResults | null> {
-  const changedFiles = options?.changedFiles
-  const isStale = options?.isStale
-  const metadataOnly = options?.metadataOnly ?? false
+  options: AsyncScanOptions = {},
+): Promise<ScanResults> {
+  throwIfScanAborted(options.signal)
+  const optionsKey = scanOptionsKey(options)
+  const cacheEligible = isCompleteFullScan(options)
 
-  // Return cached result if the same codeIndex instance + analysis is requested.
-  if (!changedFiles && !metadataOnly && lastScanRef && lastScanResult) {
+  if (cacheEligible && lastScanRef && lastScanResult) {
     const cachedRef = lastScanRef.deref()
-    if (cachedRef === codeIndex && lastScanAnalysis === analysis) {
+    if (
+      cachedRef === codeIndex
+      && lastScanAnalysis === analysis
+      && lastScanOptionsKey === optionsKey
+    ) {
       lastScanResult.repositoryCoverage = codeIndex.coverage
       return lastScanResult
     }
   }
 
-  // Dedup: if a full scan is already in-flight for the same codeIndex, reuse it.
-  if (!changedFiles && pendingScanIndex?.deref() === codeIndex && pendingScan) {
+  if (
+    cacheEligible
+    && pendingScanIndex?.deref() === codeIndex
+    && pendingScanAnalysis === analysis
+    && pendingScanOptionsKey === optionsKey
+    && pendingScan
+  ) {
     return pendingScan
   }
 
   const scanPromise = scanIssuesAsyncImpl(codeIndex, analysis, options)
 
-  if (!changedFiles) {
+  if (cacheEligible) {
     pendingScan = scanPromise
     pendingScanIndex = new WeakRef(codeIndex)
+    pendingScanAnalysis = analysis
+    pendingScanOptionsKey = optionsKey
   }
 
   return scanPromise.finally(() => {
-    pendingScan = null
-    pendingScanIndex = null
+    if (pendingScan === scanPromise) {
+      pendingScan = null
+      pendingScanIndex = null
+      pendingScanAnalysis = null
+      pendingScanOptionsKey = null
+    }
   })
 }
 
 async function scanIssuesAsyncImpl(
   codeIndex: CodeIndex,
   analysis: FullAnalysis | null,
-  options?: {
-    changedFiles?: string[]
-    isStale?: () => boolean
-    metadataOnly?: boolean
-  },
-): Promise<ScanResults | null> {
-  const changedFiles = options?.changedFiles
-  const isStale = options?.isStale
-  const metadataOnly = options?.metadataOnly ?? false
+  options: AsyncScanOptions,
+): Promise<ScanResults> {
+  const { changedFiles, signal } = options
+  const metadataOnly = options.metadataOnly ?? false
+  const failureMode = options.failureMode ?? 'best-effort'
   const originalCodeIndex = codeIndex
 
+  throwIfScanAborted(signal)
   if (!metadataOnly) {
     const hydrated = await hydrateCodeIndexContent(codeIndex)
-    if (isStale?.()) return null
+    throwIfScanAborted(signal)
     if (hydrated.missingPaths.length > 0) {
       throw new Error(`Content unavailable for indexed files: ${hydrated.missingPaths.join(', ')}`)
     }
     codeIndex = hydrated.index
   }
 
-  const issues: CodeIssue[] = []
-  const seenIds = new Set<string>()
+  const accumulator = createScanAccumulator()
 
   const isPartialScan = changedFiles !== undefined && changedFiles.length > 0
 
@@ -968,179 +1081,109 @@ async function scanIssuesAsyncImpl(
   }
 
   // --- Phase 1: Regex-based rules (content-required) ---
-  let rulesEvaluated = 0
-  let suppressionCount = 0
-  let ruleOverflow = new Map<string, number>()
-
-  if (!metadataOnly) {
-    const regexResult = runRegexRules({
-      filesToScan, scanCodeIndex, isPartialScan,
-      blockCommentCache, presentExtensions, filesByExtension,
+  if (metadataOnly) {
+    completeEngine(accumulator, 'regex', 'not-applicable')
+  } else {
+    await runAsyncEngine(accumulator, 'regex', failureMode, () => {
+      const regexResult = runRegexRules({
+        filesToScan, scanCodeIndex, isPartialScan,
+        blockCommentCache, presentExtensions, filesByExtension,
+      })
+      addIssues(accumulator, regexResult.issues)
+      accumulator.rulesEvaluated = regexResult.rulesEvaluated
+      accumulator.suppressionCount = regexResult.suppressionCount
+      accumulator.ruleOverflow = regexResult.ruleOverflow
     })
-    for (const issue of regexResult.issues) {
-      if (!seenIds.has(issue.id)) {
-        seenIds.add(issue.id)
-        issues.push(issue)
-      }
-    }
-    rulesEvaluated = regexResult.rulesEvaluated
-    suppressionCount = regexResult.suppressionCount
-    ruleOverflow = regexResult.ruleOverflow
   }
 
   await yieldToMain()
-  if (isStale?.()) return null
+  throwIfScanAborted(signal)
 
   // --- Phase 2: AST analysis + taint tracking (content-required) ---
-  if (!metadataOnly) {
-    for (const issue of runAstAnalysis(filesToScan)) {
-      if (!seenIds.has(issue.id)) {
-        seenIds.add(issue.id)
-        issues.push(issue)
-      }
-    }
-    for (const issue of runTaintAnalysis(filesToScan)) {
-      if (!seenIds.has(issue.id)) {
-        seenIds.add(issue.id)
-        issues.push(issue)
-      }
-    }
-    deduplicateIssues(issues, scanCodeIndex, ruleOverflow)
+  if (metadataOnly) {
+    completeEngine(accumulator, 'ast', 'not-applicable')
+    completeEngine(accumulator, 'taint', 'not-applicable')
+  } else {
+    await runAsyncEngine(accumulator, 'ast', failureMode, () => {
+      addIssues(accumulator, runAstAnalysis(filesToScan))
+    })
+    await runAsyncEngine(accumulator, 'taint', failureMode, () => {
+      addIssues(accumulator, runTaintAnalysis(filesToScan))
+      deduplicateIssues(accumulator.issues, scanCodeIndex, accumulator.ruleOverflow)
+    })
   }
 
   await yieldToMain()
-  if (isStale?.()) return null
+  throwIfScanAborted(signal)
 
   // --- Phase 3: Composite rules (content-required) ---
-  if (!metadataOnly) {
-    const compositeIssues = scanCompositeRules(codeIndex)
-    rulesEvaluated += COMPOSITE_RULES.length
-    for (const issue of compositeIssues) {
-      if (!filesToScan.has(issue.file)) continue
-      if (!seenIds.has(issue.id)) {
-        seenIds.add(issue.id)
-        issues.push(issue)
-      }
-    }
+  if (metadataOnly) {
+    completeEngine(accumulator, 'composite', 'not-applicable')
+  } else {
+    await runAsyncEngine(accumulator, 'composite', failureMode, () => {
+      accumulator.rulesEvaluated += COMPOSITE_RULES.length
+      addIssues(
+        accumulator,
+        scanCompositeRules(scanCodeIndex).filter(issue => filesToScan.has(issue.file)),
+      )
+    })
   }
 
   await yieldToMain()
-  if (isStale?.()) return null
+  throwIfScanAborted(signal)
 
   // --- Phase 4: Structural rules (metadata-safe) ---
-  const structuralIssues = scanStructuralIssues(codeIndex, analysis)
-  const structuralRuleIds = new Set(structuralIssues.map(i => i.ruleId))
-  rulesEvaluated += structuralRuleIds.size
-  for (const issue of structuralIssues) {
-    if (!filesToScan.has(issue.file)) continue
-    if (!seenIds.has(issue.id)) {
-      seenIds.add(issue.id)
-      issues.push(issue)
-    }
-  }
-
-  await yieldToMain()
-  if (isStale?.()) return null
-
-  // --- Phase 5: Supply chain rules (content-required) ---
-  if (!metadataOnly) {
-    const supplyChainIssues = scanSupplyChain(scanCodeIndex)
-    const supplyChainRuleIds = new Set(supplyChainIssues.map(i => i.ruleId))
-    rulesEvaluated += supplyChainRuleIds.size
-    for (const issue of supplyChainIssues) {
-      if (!filesToScan.has(issue.file)) continue
-      if (!seenIds.has(issue.id)) {
-        seenIds.add(issue.id)
-        issues.push(issue)
-      }
-    }
-  }
-
-  await yieldToMain()
-  if (isStale?.()) return null
-
-  // --- Phase 5b: Tree-sitter multi-language analysis (content-required, async) ---
-  if (!metadataOnly) {
-    try {
-      const treeSitterIssues = await scanWithTreeSitter(filesToScan)
-      for (const issue of treeSitterIssues) {
-        if (!filesToScan.has(issue.file)) continue
-        if (!seenIds.has(issue.id)) {
-          seenIds.add(issue.id)
-          issues.push(issue)
-        }
-      }
-    } catch (err) {
-      console.warn('[scanner] Tree-sitter analysis failed:', err)
-    }
-  }
-
-  await yieldToMain()
-  if (isStale?.()) return null
-
-  // --- Phase 6: Context cross-reference + sorting + risk scoring ---
-  if (analysis) {
-    for (const issue of issues) {
-      const importers = analysis.graph.reverseEdges.get(issue.file)
-      const importerCount = importers?.size ?? 0
-      const isEntryPoint = analysis.topology.entryPoints.includes(issue.file)
-      const isDead = !isEntryPoint && importerCount === 0
-
-      if (isDead && issue.category !== 'security' && (issue.severity === 'warning' || issue.severity === 'critical')) {
-        issue.severity = 'info'
-      }
-      if (isEntryPoint && issue.category === 'security') {
-        issue.description += ' (entry point — publicly accessible)'
-      }
-      if (importerCount >= 10) {
-        issue.description += ` (high fan-in: ${importerCount} importers — changes affect many consumers)`
-      }
-    }
-  }
-
-  const severityOrder: Record<IssueSeverity, number> = { critical: 0, warning: 1, info: 2 }
-  issues.sort((a, b) => {
-    const sev = severityOrder[a.severity] - severityOrder[b.severity]
-    if (sev !== 0) return sev
-    return a.file.localeCompare(b.file)
+  await runAsyncEngine(accumulator, 'structural', failureMode, () => {
+    const structuralIssues = scanStructuralIssues(scanCodeIndex, analysis)
+      .filter(issue => filesToScan.has(issue.file))
+    accumulator.rulesEvaluated += new Set(structuralIssues.map(issue => issue.ruleId)).size
+    addIssues(accumulator, structuralIssues)
   })
 
-  for (const issue of issues) {
-    issue.riskScore = scoreIssue(issue)
-    issue.cvssVector = buildCvssVector(issue)
+  await yieldToMain()
+  throwIfScanAborted(signal)
+
+  // --- Phase 5: Supply chain rules (content-required) ---
+  if (metadataOnly) {
+    completeEngine(accumulator, 'supply-chain', 'not-applicable')
+  } else {
+    await runAsyncEngine(accumulator, 'supply-chain', failureMode, () => {
+      const supplyChainIssues = scanSupplyChain(scanCodeIndex)
+        .filter(issue => filesToScan.has(issue.file))
+      accumulator.rulesEvaluated += new Set(supplyChainIssues.map(issue => issue.ruleId)).size
+      addIssues(accumulator, supplyChainIssues)
+    })
   }
-  const projectRiskScore = scoreProject(issues)
-  const riskDistribution = getRiskDistribution(issues)
 
-  const sloc = Array.from(filesToScan.values()).reduce((sum, f) => sum + f.lineCount, 0)
-  const grades = computeHealthGrades(issues, sloc)
+  await yieldToMain()
+  throwIfScanAborted(signal)
 
-  const result: ScanResults = {
-    repositoryCoverage: codeIndex.coverage,
-    issues,
-    summary: computeScanSummary(issues),
-    healthGrade: grades.healthGrade,
-    healthScore: grades.healthScore,
-    ruleOverflow,
-    languagesDetected: detectLanguages(codeIndex),
-    rulesEvaluated,
-    scannedFiles: isPartialScan ? filesToScan.size : codeIndex.totalFiles,
-    scannedAt: new Date(),
-    securityGrade: grades.securityGrade,
-    qualityGrade: grades.qualityGrade,
-    issuesPerKloc: grades.issuesPerKloc,
+  // --- Phase 5b: Tree-sitter multi-language analysis (content-required, async) ---
+  if (metadataOnly) {
+    completeEngine(accumulator, 'tree-sitter', 'not-applicable')
+  } else {
+    await runAsyncEngine(accumulator, 'tree-sitter', failureMode, async () => {
+      const treeSitterIssues = await scanWithTreeSitter(filesToScan)
+      addIssues(accumulator, treeSitterIssues.filter(issue => filesToScan.has(issue.file)))
+    })
+  }
+
+  await yieldToMain()
+  throwIfScanAborted(signal)
+
+  const result = finalizeScan(
+    codeIndex,
+    analysis,
+    filesToScan,
     isPartialScan,
-    unscannedFileCount: countUnscannedFiles(codeIndex),
-    isMetadataOnly: metadataOnly,
-    suppressionCount,
-    projectRiskScore,
-    riskDistribution,
-  }
+    metadataOnly,
+    accumulator,
+  )
 
-  // Cache full scan results for memoization (not cached for partial or metadata-only scans)
-  if (!changedFiles && !metadataOnly) {
+  if (isCompleteFullScan(options) && accumulator.diagnostics.failures.length === 0) {
     lastScanRef = new WeakRef(originalCodeIndex)
     lastScanAnalysis = analysis
+    lastScanOptionsKey = scanOptionsKey(options)
     lastScanResult = result
   }
 
@@ -1155,6 +1198,9 @@ async function scanIssuesAsyncImpl(
  * Scan a single file against all rules. Used when lazy-loaded content
  * becomes available for a file that was previously metadata-only.
  * Does NOT use scan memoization (partial scans bypass the cache).
+ *
+ * @deprecated Core-engine-only compatibility path. Use scanIssuesAsync with
+ * changedFiles for authoritative results, including Tree-sitter.
  */
 export function scanOnDemand(
   codeIndex: CodeIndex,
@@ -1234,6 +1280,22 @@ export function mergeScanResults(
   }
   const projectRiskScore = scoreProject(mergedIssues)
   const riskDistribution = getRiskDistribution(mergedIssues)
+  const engines: ScanDiagnostics['engines'] = {}
+  for (const engine of [
+    'regex',
+    'ast',
+    'taint',
+    'composite',
+    'structural',
+    'supply-chain',
+    'tree-sitter',
+  ] as const) {
+    const statuses = [base.diagnostics.engines[engine], addition.diagnostics.engines[engine]]
+    if (statuses.includes('failed')) engines[engine] = 'failed'
+    else if (statuses.includes('completed')) engines[engine] = 'completed'
+    else if (statuses.includes('skipped')) engines[engine] = 'skipped'
+    else if (statuses.includes('not-applicable')) engines[engine] = 'not-applicable'
+  }
 
   return {
     repositoryCoverage: addition.repositoryCoverage ?? base.repositoryCoverage,
@@ -1255,5 +1317,9 @@ export function mergeScanResults(
     suppressionCount: base.suppressionCount + addition.suppressionCount,
     projectRiskScore,
     riskDistribution,
+    diagnostics: {
+      engines,
+      failures: [...base.diagnostics.failures, ...addition.diagnostics.failures],
+    },
   }
 }

@@ -21,7 +21,7 @@ void read_input() {
       language: 'c',
     },
     expected: [
-      { ruleId: 'c-gets', line: 5, verdict: 'tp' },
+      { ruleId: 'c-gets', line: 5, expectation: 'present' },
     ],
   },
 
@@ -42,7 +42,7 @@ void copy_name(const char* src) {
       language: 'c',
     },
     expected: [
-      { ruleId: 'c-strcpy', line: 5, verdict: 'tp' },
+      { ruleId: 'c-strcpy', line: 5, expectation: 'present' },
     ],
   },
 
@@ -62,7 +62,7 @@ void log_message(const char* user_input) {
       language: 'c',
     },
     expected: [
-      { ruleId: 'c-format-string', line: 4, verdict: 'tp' },
+      { ruleId: 'c-format-string', line: 4, expectation: 'present' },
     ],
   },
 ]

@@ -39,6 +39,7 @@ function createResults(overrides: Partial<ScanResults> = {}): ScanResults {
     projectRiskScore: 5.4,
     riskDistribution: { critical: 3, high: 5, medium: 8, low: 4 },
     ...overrides,
+    diagnostics: overrides.diagnostics ?? { engines: {}, failures: [] },
   }
 }
 

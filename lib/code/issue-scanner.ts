@@ -8,12 +8,16 @@ export type {
   IssueSeverity,
   IssueCategory,
   IssueConfidence,
+  ScanEngine,
+  ScanFailure,
+  ScanDiagnostics,
   CodeIssue,
   ScanRule,
   HealthGrade,
   ScanResults,
   CompositeRule,
 } from './scanner'
+export type { ScanOptions, AsyncScanOptions } from './scanner/scanner'
 
 // --- Worker-based scanning (lazy, no Babel in main thread) ---
 export { scanInWorker, terminateScanWorker } from './scanner'

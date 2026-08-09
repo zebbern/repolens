@@ -62,6 +62,7 @@ function makeScanResults(issues: CodeIssue[]): ScanResults {
     issuesPerKloc: 0,
     isPartialScan: false,
     suppressionCount: 0,
+    diagnostics: { engines: {}, failures: [] },
   }
 }
 

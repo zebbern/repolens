@@ -1,5 +1,7 @@
 // Fixture annotation types for scanner accuracy sweep
 
+import type { IssueConfidence, IssueSeverity } from '../../types'
+
 export interface FixtureFile {
   path: string
   content: string
@@ -11,8 +13,11 @@ export interface ExpectedFinding {
   ruleId: string
   /** 1-based line number in the fixture content */
   line: number
-  /** Whether this finding is a true positive or false positive */
-  verdict: 'tp' | 'fp'
+  /** Whether this finding must be emitted or must not be emitted. */
+  expectation: 'present' | 'absent'
+  severity?: IssueSeverity
+  cwe?: string
+  minConfidence?: IssueConfidence
 }
 
 export interface FixtureCase {
@@ -20,6 +25,8 @@ export interface FixtureCase {
   description: string
   file: FixtureFile
   expected: ExpectedFinding[]
+  /** Targeted annotations leave other findings unreviewed; exhaustive annotations classify them as false positives. */
+  annotationScope?: 'targeted' | 'exhaustive'
 }
 
 export interface RuleMetrics {

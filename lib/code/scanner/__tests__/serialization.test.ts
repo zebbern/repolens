@@ -56,6 +56,10 @@ function buildScanResults(): ScanResults {
     issuesPerKloc: 3.5,
     isPartialScan: false,
     suppressionCount: 0,
+    diagnostics: {
+      engines: { regex: 'completed', 'tree-sitter': 'completed' },
+      failures: [],
+    },
   }
 }
 

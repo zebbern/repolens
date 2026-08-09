@@ -9,6 +9,7 @@ export const phpFixtures: FixtureCase[] = [
   {
     name: 'php-eval-usage',
     description: 'eval($_GET["code"]) — direct code injection via user input',
+    annotationScope: 'exhaustive',
     file: {
       path: 'app/controllers/eval-handler.php',
       content: `<?php
@@ -20,7 +21,14 @@ function handleRequest() {
       language: 'php',
     },
     expected: [
-      { ruleId: 'php-eval', line: 4, verdict: 'tp' },
+      {
+        ruleId: 'php-eval',
+        line: 4,
+        expectation: 'present',
+        severity: 'critical',
+        cwe: 'CWE-94',
+        minConfidence: 'high',
+      },
     ],
   },
 
@@ -41,7 +49,7 @@ function findUser($conn) {
       language: 'php',
     },
     expected: [
-      { ruleId: 'php-sql-injection', line: 4, verdict: 'tp' },
+      { ruleId: 'php-sql-injection', line: 4, expectation: 'present' },
     ],
   },
 
@@ -61,7 +69,7 @@ function loadPage() {
       language: 'php',
     },
     expected: [
-      { ruleId: 'php-include-var', line: 4, verdict: 'tp' },
+      { ruleId: 'php-include-var', line: 4, expectation: 'present' },
     ],
   },
 
@@ -82,7 +90,7 @@ function restoreSession() {
       language: 'php',
     },
     expected: [
-      { ruleId: 'php-unserialize', line: 4, verdict: 'tp' },
+      { ruleId: 'php-unserialize', line: 4, expectation: 'present' },
     ],
   },
 ]

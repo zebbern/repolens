@@ -54,10 +54,10 @@ pub fn free_ptr(ptr: *mut u8) {
       language: 'rust',
     },
     expected: [
-      { ruleId: 'rust-unsafe-block', line: 4, verdict: 'tp' },
-      { ruleId: 'rust-unsafe-block', line: 8, verdict: 'tp' },
-      { ruleId: 'rust-unsafe', line: 4, verdict: 'tp' },
-      { ruleId: 'rust-unsafe', line: 8, verdict: 'tp' },
+      { ruleId: 'rust-unsafe-block', line: 4, expectation: 'present' },
+      { ruleId: 'rust-unsafe-block', line: 8, expectation: 'present' },
+      { ruleId: 'rust-unsafe', line: 4, expectation: 'present' },
+      { ruleId: 'rust-unsafe', line: 8, expectation: 'present' },
     ],
   },
 
@@ -79,8 +79,8 @@ pub fn handle_request(body: &str) -> String {
       language: 'rust',
     },
     expected: [
-      { ruleId: 'rust-unwrap', line: 4, verdict: 'tp' },
-      { ruleId: 'rust-unwrap', line: 5, verdict: 'tp' },
+      { ruleId: 'rust-unwrap', line: 4, expectation: 'present' },
+      { ruleId: 'rust-unwrap', line: 5, expectation: 'present' },
     ],
   },
 
@@ -126,8 +126,8 @@ pub fn read_config(path: &str) -> Result<String, io::Error> {
       language: 'rust',
     },
     expected: [
-      { ruleId: 'rust-unsafe', line: 2, verdict: 'tp' },
-      { ruleId: 'rust-unsafe-block', line: 2, verdict: 'tp' },
+      { ruleId: 'rust-unsafe', line: 2, expectation: 'present' },
+      { ruleId: 'rust-unsafe-block', line: 2, expectation: 'present' },
     ],
   },
 
@@ -175,7 +175,7 @@ pub fn compress(data: &[u8]) -> i32 {
     },
     expected: [
       // rust-unsafe fires (no SAFETY excludePattern on that rule)
-      { ruleId: 'rust-unsafe', line: 7, verdict: 'tp' },
+      { ruleId: 'rust-unsafe', line: 7, expectation: 'present' },
       // rust-unsafe-block has excludePattern /\/\/\s*SAFETY/ — suppressed
     ],
   },

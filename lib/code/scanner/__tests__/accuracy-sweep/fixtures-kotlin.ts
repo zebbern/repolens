@@ -21,7 +21,7 @@ export const kotlinFixtures: FixtureCase[] = [
       language: 'kotlin',
     },
     expected: [
-      { ruleId: 'kotlin-lateinit-abuse', line: 2, verdict: 'tp' },
+      { ruleId: 'kotlin-lateinit-abuse', line: 2, expectation: 'present' },
     ],
   },
 ]

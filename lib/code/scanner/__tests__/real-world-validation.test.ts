@@ -1,6 +1,13 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
+
+vi.mock('@/lib/parsers/tree-sitter', () => ({
+  initTreeSitter: vi.fn().mockResolvedValue(undefined),
+  getLanguageForFile: vi.fn(() => undefined),
+  parseFile: vi.fn(),
+  queryTree: vi.fn(),
+}))
 import { createEmptyIndex, indexFile } from '@/lib/code/code-index'
-import { scanIssues, clearScanCache } from '@/lib/code/scanner'
+import { scanIssuesAsync, clearScanCache } from '@/lib/code/scanner'
 import { REALWORLD_CORPUS, type CorpusEntry } from './accuracy-sweep/corpus-realworld'
 import type { ExpectedFinding } from './accuracy-sweep/types'
 import type { CodeIssue } from '../types'
@@ -39,7 +46,7 @@ interface FileResult {
 }
 
 function classifyFindings(entry: CorpusEntry, findings: CodeIssue[]): FileResult {
-  const expectedTPs = entry.expected.filter(e => e.verdict === 'tp')
+  const expectedTPs = entry.expected.filter(e => e.expectation === 'present')
   const matchedExpected = new Set<number>()
   let truePositives = 0
   let usefulWarnings = 0
@@ -96,12 +103,12 @@ describe('Real-world corpus validation', () => {
     clearScanCache()
   })
 
-  it(`should scan all ${REALWORLD_CORPUS.length} corpus files and classify findings`, () => {
+  it(`should scan all ${REALWORLD_CORPUS.length} corpus files and classify findings`, async () => {
     for (const entry of REALWORLD_CORPUS) {
       let index = createEmptyIndex()
       index = indexFile(index, entry.file.path, entry.file.content, entry.file.language)
 
-      const scanResult = scanIssues(index, null)
+      const scanResult = await scanIssuesAsync(index, null, { failureMode: 'strict' })
       const classified = classifyFindings(entry, scanResult.issues)
       results.push(classified)
     }
@@ -127,7 +134,7 @@ describe('Real-world corpus validation', () => {
     console.log('-'.repeat(110))
 
     for (const r of results) {
-      const expectedTPs = r.entry.expected.filter(e => e.verdict === 'tp')
+      const expectedTPs = r.entry.expected.filter(e => e.expectation === 'present')
       console.log(
         r.entry.id.padEnd(35),
         r.entry.category.padEnd(12),
@@ -162,7 +169,7 @@ describe('Real-world corpus validation', () => {
       const totalFP = catResults.reduce((s, r) => s + r.falsePositives, 0)
       const totalFindings = catResults.reduce((s, r) => s + r.findings.length, 0)
       const totalExpected = catResults.reduce(
-        (s, r) => s + r.entry.expected.filter(e => e.verdict === 'tp').length,
+        (s, r) => s + r.entry.expected.filter(e => e.expectation === 'present').length,
         0,
       )
       const recall = totalExpected > 0 ? (totalTP / totalExpected) * 100 : 100
@@ -179,7 +186,7 @@ describe('Real-world corpus validation', () => {
     // -----------------------------------------------------------------------
     const ruleFires = new Map<string, { total: number; tp: number }>()
     for (const r of results) {
-      const expectedTPs = r.entry.expected.filter(e => e.verdict === 'tp')
+      const expectedTPs = r.entry.expected.filter(e => e.expectation === 'present')
       for (const finding of r.findings) {
         const entry = ruleFires.get(finding.ruleId) ?? { total: 0, tp: 0 }
         entry.total++
@@ -221,12 +228,12 @@ describe('Real-world corpus validation', () => {
     console.log('='.repeat(110) + '\n')
   })
 
-  it('vulnerable files should have recall >= 90%', () => {
+  it('vulnerable files should have recall >= 90%', async () => {
     // Re-scan if results not populated (test isolation)
-    const vulnResults = getOrScan('vulnerable')
+    const vulnResults = await getOrScan('vulnerable')
 
     const totalExpected = vulnResults.reduce(
-      (s, r) => s + r.entry.expected.filter(e => e.verdict === 'tp').length,
+      (s, r) => s + r.entry.expected.filter(e => e.expectation === 'present').length,
       0,
     )
     const totalTP = vulnResults.reduce((s, r) => s + r.truePositives, 0)
@@ -236,8 +243,8 @@ describe('Real-world corpus validation', () => {
     expect(recall).toBeGreaterThanOrEqual(90)
   })
 
-  it('secure files should have <= 3 findings per file on average', () => {
-    const secureResults = getOrScan('secure')
+  it('secure files should have <= 3 findings per file on average', async () => {
+    const secureResults = await getOrScan('secure')
 
     if (secureResults.length === 0) return
 
@@ -255,8 +262,8 @@ describe('Real-world corpus validation', () => {
     expect(avgFindings).toBeLessThanOrEqual(3)
   })
 
-  it('overall signal-to-noise should be > 85%', () => {
-    const allResults = getOrScanAll()
+  it('overall signal-to-noise should be > 85%', async () => {
+    const allResults = await getOrScanAll()
 
     const totalFindings = allResults.reduce((s, r) => s + r.findings.length, 0)
     const totalTP = allResults.reduce((s, r) => s + r.truePositives, 0)
@@ -273,24 +280,24 @@ describe('Real-world corpus validation', () => {
   // Helpers — scan on demand for isolated tests
   // -------------------------------------------------------------------------
 
-  function scanEntry(entry: CorpusEntry): FileResult {
+  async function scanEntry(entry: CorpusEntry): Promise<FileResult> {
     clearScanCache()
     let index = createEmptyIndex()
     index = indexFile(index, entry.file.path, entry.file.content, entry.file.language)
-    const scanResult = scanIssues(index, null)
+    const scanResult = await scanIssuesAsync(index, null, { failureMode: 'strict' })
     return classifyFindings(entry, scanResult.issues)
   }
 
-  function getOrScan(category: CorpusEntry['category']): FileResult[] {
+  async function getOrScan(category: CorpusEntry['category']): Promise<FileResult[]> {
     const cached = results.filter(r => r.entry.category === category)
     if (cached.length > 0) return cached
-    return REALWORLD_CORPUS
+    return Promise.all(REALWORLD_CORPUS
       .filter(e => e.category === category)
-      .map(scanEntry)
+      .map(scanEntry))
   }
 
-  function getOrScanAll(): FileResult[] {
+  async function getOrScanAll(): Promise<FileResult[]> {
     if (results.length > 0) return results
-    return REALWORLD_CORPUS.map(scanEntry)
+    return Promise.all(REALWORLD_CORPUS.map(scanEntry))
   }
 })

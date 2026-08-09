@@ -781,8 +781,8 @@ async function executeScanIssues(
   // Build a single-file CodeIndex and run the real scanner
   let miniIndex = createEmptyIndex()
   miniIndex = indexFile(miniIndex, file.path, content, detectLang(file.path))
-  const { scanIssues } = await import('@/lib/code/scanner/scanner')
-  const result = scanIssues(miniIndex, null)
+  const { scanIssuesAsync } = await import('@/lib/code/scanner/scanner')
+  const result = await scanIssuesAsync(miniIndex, null)
 
   // Map CodeIssue to backward-compatible output shape
   const issues = result.issues.slice(0, 50).map(issue => ({

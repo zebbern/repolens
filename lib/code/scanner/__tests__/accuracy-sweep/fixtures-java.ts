@@ -111,7 +111,7 @@ public class SearchDAO {
       language: 'java',
     },
     expected: [
-      { ruleId: 'java-runtime-exec', line: 3, verdict: 'tp' },
+      { ruleId: 'java-runtime-exec', line: 3, expectation: 'present' },
     ],
   },
 
@@ -161,7 +161,7 @@ public class SecurityConfig {
       language: 'java',
     },
     expected: [
-      { ruleId: 'spring-csrf-disabled', line: 5, verdict: 'tp' },
+      { ruleId: 'spring-csrf-disabled', line: 5, expectation: 'present' },
     ],
   },
 
@@ -187,7 +187,7 @@ public class Database {
       language: 'java',
     },
     expected: [
-      { ruleId: 'hardcoded-password', line: 6, verdict: 'tp' },
+      { ruleId: 'hardcoded-password', line: 6, expectation: 'present' },
     ],
   },
 
@@ -211,7 +211,7 @@ public class Handler {
       language: 'java',
     },
     expected: [
-      { ruleId: 'java-deserialization', line: 6, verdict: 'tp' },
+      { ruleId: 'java-deserialization', line: 6, expectation: 'present' },
     ],
   },
 
@@ -285,7 +285,7 @@ public class AuditController extends HttpServlet {
       language: 'java',
     },
     expected: [
-      { ruleId: 'java-system-exit', line: 4, verdict: 'tp' },
+      { ruleId: 'java-system-exit', line: 4, expectation: 'present' },
     ],
   },
 
@@ -312,7 +312,7 @@ public class XmlParser {
       language: 'java',
     },
     expected: [
-      { ruleId: 'xxe-java', line: 7, verdict: 'tp' },
+      { ruleId: 'xxe-java', line: 7, expectation: 'present' },
     ],
   },
 
@@ -335,7 +335,7 @@ public class UserDao {
       language: 'java',
     },
     expected: [
-      { ruleId: 'java-sql-concat', line: 5, verdict: 'tp' },
+      { ruleId: 'java-sql-concat', line: 5, expectation: 'present' },
     ],
   },
 
@@ -364,8 +364,8 @@ class SecurityConfig {
       language: 'java',
     },
     expected: [
-      { ruleId: 'spring-missing-valid', line: 6, verdict: 'tp' },
-      { ruleId: 'spring-permit-all', line: 12, verdict: 'tp' },
+      { ruleId: 'spring-missing-valid', line: 6, expectation: 'present' },
+      { ruleId: 'spring-permit-all', line: 12, expectation: 'present' },
     ],
   },
 
@@ -388,7 +388,7 @@ class SecurityConfig {
       language: 'java',
     },
     expected: [
-      { ruleId: 'empty-catch', line: 5, verdict: 'tp' },
+      { ruleId: 'empty-catch', line: 5, expectation: 'present' },
     ],
   },
 ]

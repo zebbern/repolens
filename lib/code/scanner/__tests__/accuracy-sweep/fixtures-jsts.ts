@@ -128,11 +128,11 @@ app.listen(3000)`,
       language: 'typescript',
     },
     expected: [
-      { ruleId: 'express-no-helmet', line: 4, verdict: 'tp' },
-      { ruleId: 'express-no-rate-limit', line: 8, verdict: 'tp' },
-      { ruleId: 'express-body-parser-no-limit', line: 6, verdict: 'tp' },
-      { ruleId: 'composite-csrf-missing-express', line: 13, verdict: 'tp' },
-      { ruleId: 'composite-async-no-try-catch', line: 8, verdict: 'tp' },
+      { ruleId: 'express-no-helmet', line: 4, expectation: 'present' },
+      { ruleId: 'express-no-rate-limit', line: 8, expectation: 'present' },
+      { ruleId: 'express-body-parser-no-limit', line: 6, expectation: 'present' },
+      { ruleId: 'composite-csrf-missing-express', line: 13, expectation: 'present' },
+      { ruleId: 'composite-async-no-try-catch', line: 8, expectation: 'present' },
     ],
   },
 
@@ -158,7 +158,7 @@ export async function GET(request: Request) {
     },
     expected: [
       // nextjs-api-no-auth composite: getServerSession in file suppresses via mitigations
-      { ruleId: 'composite-async-no-try-catch', line: 4, verdict: 'tp' },
+      { ruleId: 'composite-async-no-try-catch', line: 4, expectation: 'present' },
     ],
   },
 
@@ -184,9 +184,9 @@ export default router`,
       language: 'typescript',
     },
     expected: [
-      { ruleId: 'eval-usage', line: 7, verdict: 'tp' },
-      { ruleId: 'taint-code-injection', line: 7, verdict: 'tp' },
-      { ruleId: 'composite-missing-auth-express-route', line: 5, verdict: 'tp' },
+      { ruleId: 'eval-usage', line: 7, expectation: 'present' },
+      { ruleId: 'taint-code-injection', line: 7, expectation: 'present' },
+      { ruleId: 'composite-missing-auth-express-route', line: 5, expectation: 'present' },
     ],
   },
 
@@ -256,9 +256,9 @@ export async function getUser(id: string) {
       language: 'typescript',
     },
     expected: [
-      { ruleId: 'console-log', line: 4, verdict: 'tp' },
-      { ruleId: 'console-log', line: 6, verdict: 'tp' },
-      { ruleId: 'composite-async-no-try-catch', line: 3, verdict: 'tp' },
+      { ruleId: 'console-log', line: 4, expectation: 'present' },
+      { ruleId: 'console-log', line: 6, expectation: 'present' },
+      { ruleId: 'composite-async-no-try-catch', line: 3, expectation: 'present' },
     ],
   },
 
@@ -285,7 +285,7 @@ export function validatePassword(input: string): string | null {
     },
     expected: [
       // "Enter your password" is a label → hardcoded-password might fire (FP)
-      { ruleId: 'hardcoded-password', line: 2, verdict: 'fp' },
+      { ruleId: 'hardcoded-password', line: 2, expectation: 'absent' },
     ],
   },
 
@@ -312,12 +312,12 @@ export const config = {
       language: 'typescript',
     },
     expected: [
-      { ruleId: 'hardcoded-aws-key', line: 1, verdict: 'tp' },
-      { ruleId: 'eval-usage', line: 4, verdict: 'tp' },
-      { ruleId: 'hardcoded-password', line: 8, verdict: 'tp' },
-      { ruleId: 'hardcoded-secret', line: 11, verdict: 'tp' },
-      { ruleId: 'taint-code-injection', line: 4, verdict: 'tp' },
-      { ruleId: 'any-type', line: 3, verdict: 'tp' },
+      { ruleId: 'hardcoded-aws-key', line: 1, expectation: 'present' },
+      { ruleId: 'eval-usage', line: 4, expectation: 'present' },
+      { ruleId: 'hardcoded-password', line: 8, expectation: 'present' },
+      { ruleId: 'hardcoded-secret', line: 11, expectation: 'present' },
+      { ruleId: 'taint-code-injection', line: 4, expectation: 'present' },
+      { ruleId: 'any-type', line: 3, expectation: 'present' },
     ],
   },
 
@@ -366,8 +366,8 @@ export default app`,
       language: 'typescript',
     },
     expected: [
-      { ruleId: 'express-body-parser-no-limit', line: 4, verdict: 'tp' },
-      { ruleId: 'express-no-helmet', line: 3, verdict: 'tp' },
+      { ruleId: 'express-body-parser-no-limit', line: 4, expectation: 'present' },
+      { ruleId: 'express-no-helmet', line: 3, expectation: 'present' },
     ],
   },
 
@@ -389,8 +389,8 @@ export function UserContent({ html }: Props) {
       language: 'typescriptreact',
     },
     expected: [
-      { ruleId: 'innerhtml-xss', line: 6, verdict: 'tp' },
-      { ruleId: 'nextjs-dangerous-html-prop', line: 6, verdict: 'tp' },
+      { ruleId: 'innerhtml-xss', line: 6, expectation: 'present' },
+      { ruleId: 'nextjs-dangerous-html-prop', line: 6, expectation: 'present' },
     ],
   },
 
@@ -412,7 +412,7 @@ export default app`,
       language: 'typescript',
     },
     expected: [
-      { ruleId: 'express-no-helmet', line: 4, verdict: 'tp' },
+      { ruleId: 'express-no-helmet', line: 4, expectation: 'present' },
     ],
   },
 
@@ -457,7 +457,7 @@ export async function getUser(name: string) {
       language: 'typescript',
     },
     expected: [
-      { ruleId: 'composite-async-no-try-catch', line: 3, verdict: 'tp' },
+      { ruleId: 'composite-async-no-try-catch', line: 3, expectation: 'present' },
     ],
   },
 
@@ -479,7 +479,7 @@ export async function getUser(name: string) {
       language: 'typescript',
     },
     expected: [
-      { ruleId: 'ast-empty-catch', line: 4, verdict: 'tp' },
+      { ruleId: 'ast-empty-catch', line: 4, expectation: 'present' },
     ],
   },
 
@@ -498,7 +498,7 @@ export async function getUser(name: string) {
     },
     expected: [
       // nextjs-api-no-auth composite: mustNotContain matches 'status' in content
-      { ruleId: 'composite-async-no-try-catch', line: 1, verdict: 'tp' },
+      { ruleId: 'composite-async-no-try-catch', line: 1, expectation: 'present' },
     ],
   },
 
@@ -540,8 +540,8 @@ export async function getUser(userId: string) {
       language: 'typescript',
     },
     expected: [
-      { ruleId: 'sql-injection', line: 4, verdict: 'tp' },
-      { ruleId: 'composite-async-no-try-catch', line: 3, verdict: 'tp' },
+      { ruleId: 'sql-injection', line: 4, expectation: 'present' },
+      { ruleId: 'composite-async-no-try-catch', line: 3, expectation: 'present' },
     ],
   },
 
@@ -563,7 +563,7 @@ export function cleanupDir(userInput: string) {
       language: 'typescript',
     },
     expected: [
-      { ruleId: 'command-injection-template', line: 4, verdict: 'tp' },
+      { ruleId: 'command-injection-template', line: 4, expectation: 'present' },
     ],
   },
 
@@ -585,7 +585,7 @@ export function listDir(dir: string) {
       language: 'typescript',
     },
     expected: [
-      { ruleId: 'command-injection-exec-direct', line: 4, verdict: 'tp' },
+      { ruleId: 'command-injection-exec-direct', line: 4, expectation: 'present' },
     ],
   },
 
@@ -603,7 +603,7 @@ MIIEpAIBAAKCAQEA0Z3VS5JJcds3xfn3ygWyF8PbnGcY1234567890abcdefg
       language: 'typescript',
     },
     expected: [
-      { ruleId: 'private-key-inline', line: 1, verdict: 'tp' },
+      { ruleId: 'private-key-inline', line: 1, expectation: 'present' },
     ],
   },
 
@@ -631,8 +631,8 @@ export default router`,
       language: 'typescript',
     },
     expected: [
-      { ruleId: 'path-traversal', line: 7, verdict: 'tp' },
-      { ruleId: 'composite-missing-auth-express-route', line: 6, verdict: 'tp' },
+      { ruleId: 'path-traversal', line: 7, expectation: 'present' },
+      { ruleId: 'composite-missing-auth-express-route', line: 6, expectation: 'present' },
     ],
   },
 
@@ -656,8 +656,8 @@ export default router`,
       language: 'typescript',
     },
     expected: [
-      { ruleId: 'open-redirect', line: 6, verdict: 'tp' },
-      { ruleId: 'composite-missing-auth-express-route', line: 5, verdict: 'tp' },
+      { ruleId: 'open-redirect', line: 6, expectation: 'present' },
+      { ruleId: 'composite-missing-auth-express-route', line: 5, expectation: 'present' },
     ],
   },
 
@@ -677,7 +677,7 @@ export function hashPassword(password: string) {
       language: 'typescript',
     },
     expected: [
-      { ruleId: 'weak-hash', line: 4, verdict: 'tp' },
+      { ruleId: 'weak-hash', line: 4, expectation: 'present' },
     ],
   },
 
@@ -695,7 +695,7 @@ export function hashPassword(password: string) {
       language: 'typescript',
     },
     expected: [
-      { ruleId: 'insecure-random', line: 2, verdict: 'tp' },
+      { ruleId: 'insecure-random', line: 2, expectation: 'present' },
     ],
   },
 
@@ -716,7 +716,7 @@ export function getUserFromToken(token: string) {
       language: 'typescript',
     },
     expected: [
-      { ruleId: 'jwt-no-verify', line: 4, verdict: 'tp' },
+      { ruleId: 'jwt-no-verify', line: 4, expectation: 'present' },
     ],
   },
 
@@ -737,7 +737,7 @@ export function getUserFromToken(token: string) {
       language: 'typescript',
     },
     expected: [
-      { ruleId: 'prototype-pollution-proto', line: 4, verdict: 'tp' },
+      { ruleId: 'prototype-pollution-proto', line: 4, expectation: 'present' },
     ],
   },
 
@@ -758,8 +758,8 @@ export async function search(filter: string) {
       language: 'typescript',
     },
     expected: [
-      { ruleId: 'nosql-injection', line: 4, verdict: 'tp' },
-      { ruleId: 'composite-async-no-try-catch', line: 3, verdict: 'tp' },
+      { ruleId: 'nosql-injection', line: 4, expectation: 'present' },
+      { ruleId: 'composite-async-no-try-catch', line: 3, expectation: 'present' },
     ],
   },
 
@@ -781,7 +781,7 @@ export default client`,
       language: 'typescript',
     },
     expected: [
-      { ruleId: 'llm-openai-key', line: 4, verdict: 'tp' },
+      { ruleId: 'llm-openai-key', line: 4, expectation: 'present' },
     ],
   },
 
@@ -800,7 +800,7 @@ export default client`,
       language: 'typescript',
     },
     expected: [
-      { ruleId: 'prompt-injection', line: 2, verdict: 'tp' },
+      { ruleId: 'prompt-injection', line: 2, expectation: 'present' },
     ],
   },
 
@@ -826,9 +826,9 @@ export default router`,
       language: 'typescript',
     },
     expected: [
-      { ruleId: 'cookie-no-httponly', line: 7, verdict: 'tp' },
-      { ruleId: 'cookie-no-samesite', line: 7, verdict: 'tp' },
-      { ruleId: 'composite-missing-auth-express-route', line: 5, verdict: 'tp' },
+      { ruleId: 'cookie-no-httponly', line: 7, expectation: 'present' },
+      { ruleId: 'cookie-no-samesite', line: 7, expectation: 'present' },
+      { ruleId: 'composite-missing-auth-express-route', line: 5, expectation: 'present' },
     ],
   },
 
@@ -848,7 +848,7 @@ export default router`,
       language: 'typescript',
     },
     expected: [
-      { ruleId: 'debug-mode-production', line: 3, verdict: 'tp' },
+      { ruleId: 'debug-mode-production', line: 3, expectation: 'present' },
     ],
   },
 
@@ -870,7 +870,7 @@ export function corsMiddleware(req: Request, res: Response, next: NextFunction) 
       language: 'typescript',
     },
     expected: [
-      { ruleId: 'cors-wildcard', line: 4, verdict: 'tp' },
+      { ruleId: 'cors-wildcard', line: 4, expectation: 'present' },
     ],
   },
 
@@ -893,9 +893,9 @@ export function increment() {
       language: 'typescript',
     },
     expected: [
-      { ruleId: 'var-usage', line: 1, verdict: 'tp' },
-      { ruleId: 'var-usage', line: 2, verdict: 'tp' },
-      { ruleId: 'var-usage', line: 5, verdict: 'tp' },
+      { ruleId: 'var-usage', line: 1, expectation: 'present' },
+      { ruleId: 'var-usage', line: 2, expectation: 'present' },
+      { ruleId: 'var-usage', line: 5, expectation: 'present' },
     ],
   },
 
@@ -943,8 +943,8 @@ export default router`,
       language: 'typescript',
     },
     expected: [
-      { ruleId: 'redos-user-regex', line: 6, verdict: 'tp' },
-      { ruleId: 'composite-missing-auth-express-route', line: 5, verdict: 'tp' },
+      { ruleId: 'redos-user-regex', line: 6, expectation: 'present' },
+      { ruleId: 'composite-missing-auth-express-route', line: 5, expectation: 'present' },
     ],
   },
 
@@ -965,7 +965,7 @@ export function encryptLegacy(data: string, key: Buffer) {
       language: 'typescript',
     },
     expected: [
-      { ruleId: 'weak-cipher-des', line: 4, verdict: 'tp' },
+      { ruleId: 'weak-cipher-des', line: 4, expectation: 'present' },
     ],
   },
 
@@ -990,7 +990,7 @@ export default server`,
       language: 'typescript',
     },
     expected: [
-      { ruleId: 'graphql-introspection-enabled', line: 7, verdict: 'tp' },
+      { ruleId: 'graphql-introspection-enabled', line: 7, expectation: 'present' },
     ],
   },
 
@@ -1151,7 +1151,7 @@ export function renderTemplate(req: Request, res: Response) {
       language: 'typescript',
     },
     expected: [
-      { ruleId: 'ssti-js', line: 5, verdict: 'tp' },
+      { ruleId: 'ssti-js', line: 5, expectation: 'present' },
     ],
   },
 
@@ -1170,7 +1170,7 @@ export const client = { httpsAgent: agent }`,
       language: 'typescript',
     },
     expected: [
-      { ruleId: 'tls-reject-unauthorized-false', line: 3, verdict: 'tp' },
+      { ruleId: 'tls-reject-unauthorized-false', line: 3, expectation: 'present' },
     ],
   },
 
@@ -1186,7 +1186,7 @@ export const client = { httpsAgent: agent }`,
       language: 'typescript',
     },
     expected: [
-      { ruleId: 'tls-env-disable', line: 1, verdict: 'tp' },
+      { ruleId: 'tls-env-disable', line: 1, expectation: 'present' },
     ],
   },
 
@@ -1207,7 +1207,7 @@ export function encrypt(data: string, key: Buffer) {
       language: 'typescript',
     },
     expected: [
-      { ruleId: 'hardcoded-iv', line: 4, verdict: 'tp' },
+      { ruleId: 'hardcoded-iv', line: 4, expectation: 'present' },
     ],
   },
 
@@ -1227,7 +1227,7 @@ export function runUserCode(code: string) {
       language: 'typescript',
     },
     expected: [
-      { ruleId: 'vm-code-execution', line: 4, verdict: 'tp' },
+      { ruleId: 'vm-code-execution', line: 4, expectation: 'present' },
     ],
   },
 
@@ -1248,7 +1248,7 @@ export function runSandboxed(code: string) {
       language: 'typescript',
     },
     expected: [
-      { ruleId: 'vm2-deprecated', line: 1, verdict: 'tp' },
+      { ruleId: 'vm2-deprecated', line: 1, expectation: 'present' },
     ],
   },
 
@@ -1268,7 +1268,7 @@ export function handleError(err: Error, req: Request, res: Response, next: NextF
       language: 'typescript',
     },
     expected: [
-      { ruleId: 'error-stack-exposure', line: 4, verdict: 'tp' },
+      { ruleId: 'error-stack-exposure', line: 4, expectation: 'present' },
     ],
   },
 
@@ -1286,7 +1286,7 @@ export function handleError(err: Error, req: Request, res: Response, next: NextF
       language: 'typescript',
     },
     expected: [
-      { ruleId: 'csp-unsafe-inline', line: 2, verdict: 'tp' },
+      { ruleId: 'csp-unsafe-inline', line: 2, expectation: 'present' },
     ],
   },
 
@@ -1304,7 +1304,7 @@ export function handleError(err: Error, req: Request, res: Response, next: NextF
       language: 'typescript',
     },
     expected: [
-      { ruleId: 'csp-unsafe-eval', line: 2, verdict: 'tp' },
+      { ruleId: 'csp-unsafe-eval', line: 2, expectation: 'present' },
     ],
   },
 
@@ -1325,8 +1325,8 @@ export const options = {
       language: 'typescript',
     },
     expected: [
-      { ruleId: 'deprecated-tls', line: 4, verdict: 'tp' },
-      { ruleId: 'deprecated-tls', line: 5, verdict: 'tp' },
+      { ruleId: 'deprecated-tls', line: 4, expectation: 'present' },
+      { ruleId: 'deprecated-tls', line: 5, expectation: 'present' },
     ],
   },
 
@@ -1346,7 +1346,7 @@ export function verifyToken(token: string) {
       language: 'typescript',
     },
     expected: [
-      { ruleId: 'jwt-algo-none', line: 4, verdict: 'tp' },
+      { ruleId: 'jwt-algo-none', line: 4, expectation: 'present' },
     ],
   },
 
@@ -1372,8 +1372,8 @@ export default router`,
       language: 'typescript',
     },
     expected: [
-      { ruleId: 'object-injection-bracket', line: 7, verdict: 'tp' },
-      { ruleId: 'composite-missing-auth-express-route', line: 6, verdict: 'tp' },
+      { ruleId: 'object-injection-bracket', line: 7, expectation: 'present' },
+      { ruleId: 'composite-missing-auth-express-route', line: 6, expectation: 'present' },
     ],
   },
 
@@ -1391,7 +1391,7 @@ export default router`,
       language: 'typescript',
     },
     expected: [
-      { ruleId: 'console-log-sensitive', line: 2, verdict: 'tp' },
+      { ruleId: 'console-log-sensitive', line: 2, expectation: 'present' },
     ],
   },
 
@@ -1412,7 +1412,7 @@ export function encryptData(data: string, iv: Buffer) {
       language: 'typescript',
     },
     expected: [
-      { ruleId: 'static-crypto-key', line: 4, verdict: 'tp' },
+      { ruleId: 'static-crypto-key', line: 4, expectation: 'present' },
     ],
   },
 
@@ -1431,7 +1431,8 @@ export function encryptData(data: string, iv: Buffer) {
       language: 'typescript',
     },
     expected: [
-      { ruleId: 'sensitive-data-in-url', line: 2, verdict: 'tp' },
+      { ruleId: 'sensitive-data-in-url', line: 2, expectation: 'present' },
+      { ruleId: 'nextjs-rsc-ssrf', line: 2, expectation: 'absent' },
     ],
   },
 
@@ -1449,7 +1450,7 @@ export function encryptData(data: string, iv: Buffer) {
       language: 'typescriptreact',
     },
     expected: [
-      { ruleId: 'react-href-javascript', line: 2, verdict: 'tp' },
+      { ruleId: 'react-href-javascript', line: 2, expectation: 'present' },
     ],
   },
 
@@ -1467,7 +1468,7 @@ export function encryptData(data: string, iv: Buffer) {
       language: 'typescriptreact',
     },
     expected: [
-      { ruleId: 'react-target-blank-noopener', line: 2, verdict: 'tp' },
+      { ruleId: 'react-target-blank-noopener', line: 2, expectation: 'present' },
     ],
   },
 
@@ -1486,8 +1487,8 @@ export function encryptData(data: string, iv: Buffer) {
       language: 'typescript',
     },
     expected: [
-      { ruleId: 'nextjs-public-env-secret', line: 2, verdict: 'tp' },
-      { ruleId: 'nextjs-public-env-secret', line: 3, verdict: 'tp' },
+      { ruleId: 'nextjs-public-env-secret', line: 2, expectation: 'present' },
+      { ruleId: 'nextjs-public-env-secret', line: 3, expectation: 'present' },
     ],
   },
 
@@ -1513,7 +1514,7 @@ export default LegacyWidget`,
       language: 'typescriptreact',
     },
     expected: [
-      { ruleId: 'react-unsafe-lifecycle', line: 4, verdict: 'tp' },
+      { ruleId: 'react-unsafe-lifecycle', line: 4, expectation: 'present' },
     ],
   },
 
@@ -1532,7 +1533,7 @@ export function createToken(userId: string) {
       language: 'typescript',
     },
     expected: [
-      { ruleId: 'jwt-weak-secret', line: 3, verdict: 'tp' },
+      { ruleId: 'jwt-weak-secret', line: 3, expectation: 'present' },
     ],
   },
 
@@ -1551,7 +1552,7 @@ export function createToken(userId: string) {
       language: 'typescript',
     },
     expected: [
-      { ruleId: 'prototype-pollution-assign', line: 2, verdict: 'tp' },
+      { ruleId: 'prototype-pollution-assign', line: 2, expectation: 'present' },
     ],
   },
 
@@ -1570,7 +1571,7 @@ const server = new ApolloServer({ typeDefs, resolvers })`,
       language: 'typescript',
     },
     expected: [
-      { ruleId: 'graphql-no-depth-limit', line: 4, verdict: 'tp' },
+      { ruleId: 'graphql-no-depth-limit', line: 4, expectation: 'present' },
     ],
   },
 
@@ -1590,7 +1591,7 @@ export function encrypt(data: string, key: Buffer) {
       language: 'typescript',
     },
     expected: [
-      { ruleId: 'weak-cipher-ecb', line: 3, verdict: 'tp' },
+      { ruleId: 'weak-cipher-ecb', line: 3, expectation: 'present' },
     ],
   },
 
@@ -1609,7 +1610,7 @@ export function deriveKey(password: string, cb: Function) {
       language: 'typescript',
     },
     expected: [
-      { ruleId: 'hardcoded-salt', line: 3, verdict: 'tp' },
+      { ruleId: 'hardcoded-salt', line: 3, expectation: 'present' },
     ],
   },
 
@@ -1628,7 +1629,7 @@ export function signPayload(data: string) {
       language: 'typescript',
     },
     expected: [
-      { ruleId: 'hardcoded-hmac-key', line: 3, verdict: 'tp' },
+      { ruleId: 'hardcoded-hmac-key', line: 3, expectation: 'present' },
     ],
   },
 
@@ -1648,7 +1649,7 @@ export function runCode(code: string) {
       language: 'typescript',
     },
     expected: [
-      { ruleId: 'worker-eval', line: 3, verdict: 'tp' },
+      { ruleId: 'worker-eval', line: 3, expectation: 'present' },
     ],
   },
 
@@ -1667,8 +1668,8 @@ export function loadSession(data: string) {
       language: 'typescript',
     },
     expected: [
-      { ruleId: 'node-serialize-unserialize', line: 1, verdict: 'tp' },
-      { ruleId: 'node-serialize-unserialize', line: 3, verdict: 'tp' },
+      { ruleId: 'node-serialize-unserialize', line: 1, expectation: 'present' },
+      { ruleId: 'node-serialize-unserialize', line: 3, expectation: 'present' },
     ],
   },
 
@@ -1687,8 +1688,8 @@ export function loadSession(data: string) {
       language: 'typescript',
     },
     expected: [
-      { ruleId: 'localstorage-secret', line: 2, verdict: 'tp' },
-      { ruleId: 'localstorage-secret', line: 3, verdict: 'tp' },
+      { ruleId: 'localstorage-secret', line: 2, expectation: 'present' },
+      { ruleId: 'localstorage-secret', line: 3, expectation: 'present' },
     ],
   },
 
@@ -1709,12 +1710,12 @@ const MAILGUN_KEY = "key-abcdefghijklmnopqrstuvwxyz012345"`,
       language: 'typescript',
     },
     expected: [
-      { ruleId: 'twilio-token', line: 1, verdict: 'tp' },
-      { ruleId: 'sendgrid-key', line: 2, verdict: 'tp' },
-      { ruleId: 'npm-token', line: 3, verdict: 'tp' },
-      { ruleId: 'pypi-token', line: 4, verdict: 'tp' },
-      { ruleId: 'heroku-api-key', line: 5, verdict: 'tp' },
-      { ruleId: 'mailgun-key', line: 6, verdict: 'tp' },
+      { ruleId: 'twilio-token', line: 1, expectation: 'present' },
+      { ruleId: 'sendgrid-key', line: 2, expectation: 'present' },
+      { ruleId: 'npm-token', line: 3, expectation: 'present' },
+      { ruleId: 'pypi-token', line: 4, expectation: 'present' },
+      { ruleId: 'heroku-api-key', line: 5, expectation: 'present' },
+      { ruleId: 'mailgun-key', line: 6, expectation: 'present' },
     ],
   },
 
@@ -1734,10 +1735,10 @@ const STRIPE_SECRET = "${'sk_live_'}abcdefghijklmnopqrstuvwxyz"`,
       language: 'typescript',
     },
     expected: [
-      { ruleId: 'llm-anthropic-key', line: 1, verdict: 'tp' },
-      { ruleId: 'llm-google-ai-key', line: 2, verdict: 'tp' },
-      { ruleId: 'slack-token', line: 3, verdict: 'tp' },
-      { ruleId: 'stripe-key', line: 4, verdict: 'tp' },
+      { ruleId: 'llm-anthropic-key', line: 1, expectation: 'present' },
+      { ruleId: 'llm-google-ai-key', line: 2, expectation: 'present' },
+      { ruleId: 'slack-token', line: 3, expectation: 'present' },
+      { ruleId: 'stripe-key', line: 4, expectation: 'present' },
     ],
   },
 
@@ -1753,7 +1754,7 @@ const STRIPE_SECRET = "${'sk_live_'}abcdefghijklmnopqrstuvwxyz"`,
       language: 'typescript',
     },
     expected: [
-      { ruleId: 'azure-connection-string', line: 1, verdict: 'tp' },
+      { ruleId: 'azure-connection-string', line: 1, expectation: 'present' },
     ],
   },
 
@@ -1772,8 +1773,8 @@ exec(cmd)`,
       language: 'typescript',
     },
     expected: [
-      { ruleId: 'command-injection-require-cp', line: 1, verdict: 'tp' },
-      { ruleId: 'command-injection-string-concat', line: 2, verdict: 'tp' },
+      { ruleId: 'command-injection-require-cp', line: 1, expectation: 'present' },
+      { ruleId: 'command-injection-string-concat', line: 2, expectation: 'present' },
     ],
   },
 
@@ -1796,8 +1797,8 @@ export function login(req: Request, res: Response) {
       language: 'typescript',
     },
     expected: [
-      { ruleId: 'cookie-no-secure', line: 4, verdict: 'tp' },
-      { ruleId: 'verbose-error-response', line: 6, verdict: 'tp' },
+      { ruleId: 'cookie-no-secure', line: 4, expectation: 'present' },
+      { ruleId: 'verbose-error-response', line: 6, expectation: 'present' },
     ],
   },
 
@@ -1819,8 +1820,8 @@ export function login(req: Request, res: Response) {
       language: 'typescript',
     },
     expected: [
-      { ruleId: 'timing-attack-comparison', line: 2, verdict: 'tp' },
-      { ruleId: 'redos-dynamic-regex', line: 5, verdict: 'tp' },
+      { ruleId: 'timing-attack-comparison', line: 2, expectation: 'present' },
+      { ruleId: 'redos-dynamic-regex', line: 5, expectation: 'present' },
     ],
   },
 
@@ -1842,8 +1843,8 @@ export function handleXml(req: Request) {
       language: 'typescript',
     },
     expected: [
-      { ruleId: 'xxe-js-parser', line: 3, verdict: 'tp' },
-      { ruleId: 'log-injection-js', line: 5, verdict: 'tp' },
+      { ruleId: 'xxe-js-parser', line: 3, expectation: 'present' },
+      { ruleId: 'log-injection-js', line: 5, expectation: 'present' },
     ],
   },
 
@@ -1863,8 +1864,8 @@ export function setHeaders(res: any) {
       language: 'typescript',
     },
     expected: [
-      { ruleId: 'weak-cipher-rc4', line: 2, verdict: 'tp' },
-      { ruleId: 'csp-wildcard-source', line: 4, verdict: 'tp' },
+      { ruleId: 'weak-cipher-rc4', line: 2, expectation: 'present' },
+      { ruleId: 'csp-wildcard-source', line: 4, expectation: 'present' },
     ],
   },
 
@@ -1886,8 +1887,8 @@ export async function aggregate(req: Request, collection: any) {
       language: 'typescript',
     },
     expected: [
-      { ruleId: 'nosql-injection-mapreduce', line: 4, verdict: 'tp' },
-      { ruleId: 'prototype-pollution-merge', line: 5, verdict: 'tp' },
+      { ruleId: 'nosql-injection-mapreduce', line: 4, expectation: 'present' },
+      { ruleId: 'prototype-pollution-merge', line: 5, expectation: 'present' },
     ],
   },
 
@@ -1907,7 +1908,7 @@ export async function aggregate(req: Request, collection: any) {
       language: 'typescript',
     },
     expected: [
-      { ruleId: 'ast-empty-catch', line: 4, verdict: 'tp' },
+      { ruleId: 'ast-empty-catch', line: 4, expectation: 'present' },
     ],
   },
 
@@ -1924,8 +1925,8 @@ const API_HOST = "203.113.0.50"`,
       language: 'typescript',
     },
     expected: [
-      { ruleId: 'hardcoded-ip', line: 1, verdict: 'tp' },
-      { ruleId: 'hardcoded-ip', line: 2, verdict: 'tp' },
+      { ruleId: 'hardcoded-ip', line: 1, expectation: 'present' },
+      { ruleId: 'hardcoded-ip', line: 2, expectation: 'present' },
     ],
   },
 
@@ -1947,7 +1948,7 @@ export async function updateProfile(formData: FormData) {
       language: 'typescript',
     },
     expected: [
-      { ruleId: 'nextjs-server-action-no-auth', line: 1, verdict: 'tp' },
+      { ruleId: 'nextjs-server-action-no-auth', line: 1, expectation: 'present' },
     ],
   },
 
@@ -1967,8 +1968,8 @@ app.listen(3000)`,
       language: 'typescript',
     },
     expected: [
-      { ruleId: 'express-trust-proxy', line: 3, verdict: 'tp' },
-      { ruleId: 'express-static-dotfiles', line: 4, verdict: 'tp' },
+      { ruleId: 'express-trust-proxy', line: 3, expectation: 'present' },
+      { ruleId: 'express-static-dotfiles', line: 4, expectation: 'present' },
     ],
   },
 
@@ -1990,8 +1991,8 @@ app.listen(3000)`,
       language: 'html',
     },
     expected: [
-      { ruleId: 'sri-missing-cdn', line: 4, verdict: 'tp' },
-      { ruleId: 'sri-missing-cdn', line: 5, verdict: 'tp' },
+      { ruleId: 'sri-missing-cdn', line: 4, expectation: 'present' },
+      { ruleId: 'sri-missing-cdn', line: 5, expectation: 'present' },
     ],
   },
 
@@ -2008,7 +2009,7 @@ const output = serialize(data, { unsafe: true })`,
       language: 'typescript',
     },
     expected: [
-      { ruleId: 'serialize-javascript-exec', line: 1, verdict: 'tp' },
+      { ruleId: 'serialize-javascript-exec', line: 1, expectation: 'present' },
     ],
   },
 
@@ -2029,7 +2030,7 @@ export function convertImage(input: string, output: string) {
       language: 'typescript',
     },
     expected: [
-      { ruleId: 'command-injection-util-format', line: 4, verdict: 'tp' },
+      { ruleId: 'command-injection-util-format', line: 4, expectation: 'present' },
     ],
   },
 
@@ -2048,8 +2049,8 @@ let value = getUnsafe()`,
       language: 'typescript',
     },
     expected: [
-      { ruleId: 'eslint-disable', line: 1, verdict: 'tp' },
-      { ruleId: 'eslint-disable', line: 3, verdict: 'tp' },
+      { ruleId: 'eslint-disable', line: 1, expectation: 'present' },
+      { ruleId: 'eslint-disable', line: 3, expectation: 'present' },
     ],
   },
 
@@ -2070,8 +2071,8 @@ let value = getUnsafe()`,
       language: 'typescript',
     },
     expected: [
-      { ruleId: 'magic-number', line: 2, verdict: 'tp' },
-      { ruleId: 'magic-number', line: 3, verdict: 'tp' },
+      { ruleId: 'magic-number', line: 2, expectation: 'present' },
+      { ruleId: 'magic-number', line: 3, expectation: 'present' },
     ],
   },
 
@@ -2091,8 +2092,8 @@ let value = getUnsafe()`,
       language: 'typescript',
     },
     expected: [
-      { ruleId: 'todo-fixme', line: 2, verdict: 'tp' },
-      { ruleId: 'todo-fixme', line: 3, verdict: 'tp' },
+      { ruleId: 'todo-fixme', line: 2, expectation: 'present' },
+      { ruleId: 'todo-fixme', line: 3, expectation: 'present' },
     ],
   },
 
@@ -2111,7 +2112,7 @@ export async function navigateAction(searchParams: { dest: string }) {
       language: 'typescript',
     },
     expected: [
-      { ruleId: 'nextjs-redirect-input', line: 3, verdict: 'tp' },
+      { ruleId: 'nextjs-redirect-input', line: 3, expectation: 'present' },
     ],
   },
 
@@ -2263,7 +2264,7 @@ export default async function handler(req, res) {
     expected: [
       // getServerSession present → nextjs-api-no-auth should NOT fire
       // But async function without try-catch triggers composite-async-no-try-catch
-      { ruleId: 'composite-async-no-try-catch', line: 2, verdict: 'tp' },
+      { ruleId: 'composite-async-no-try-catch', line: 2, expectation: 'present' },
     ],
   },
 
@@ -2281,7 +2282,7 @@ export default async function handler(req, res) {
     expected: [
       // eval-usage fires on eval(b) and new Function(d)
       // Path avoids dist/ (SKIP_VENDORED) so scanner processes it
-      { ruleId: 'eval-usage', line: 1, verdict: 'tp' },
+      { ruleId: 'eval-usage', line: 1, expectation: 'present' },
     ],
   },
 
@@ -2364,7 +2365,7 @@ app.listen(3000)`,
     },
     expected: [
       // express-no-helmet suppressed: helmet is imported and used
-      { ruleId: 'express-body-parser-no-limit', line: 6, verdict: 'tp' },
+      { ruleId: 'express-body-parser-no-limit', line: 6, expectation: 'present' },
     ],
   },
 

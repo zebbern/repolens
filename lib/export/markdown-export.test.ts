@@ -100,6 +100,7 @@ function createScanResults(
     isPartialScan: false,
     suppressionCount: 0,
     ...overrides,
+    diagnostics: overrides.diagnostics ?? { engines: {}, failures: [] },
   }
 }
 

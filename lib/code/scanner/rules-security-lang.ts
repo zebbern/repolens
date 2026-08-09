@@ -307,7 +307,7 @@ export const SECURITY_LANG_RULES: ScanRule[] = [
     suggestion: 'Use PDO prepared statements: $stmt = $pdo->prepare("SELECT * FROM users WHERE id = ?"); $stmt->execute([$id]);',
     cwe: 'CWE-89',
     owasp: 'A03:2021 Injection',
-    pattern: '(?:mysql_query|mysqli_query|\\$\\w+->query)\\s*\\(\\s*["\']\\s*(?:SELECT|INSERT|UPDATE|DELETE).*\\$',
+    pattern: '(?:mysql_query\\s*\\(\\s*|mysqli_query\\s*\\(\\s*[^,]+,\\s*|\\$\\w+->query\\s*\\(\\s*)["\']\\s*(?:SELECT|INSERT|UPDATE|DELETE).*\\$',
     patternOptions: { regex: true, caseSensitive: false },
     fileFilter: PHP,
     confidence: 'medium',

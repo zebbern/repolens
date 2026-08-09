@@ -6,6 +6,7 @@ import type { CodeIndex, IndexedFile } from '../code-index'
 import { InMemoryContentStore } from '../content-store'
 import type { FullAnalysis, FileAnalysis } from '../parser/types'
 import type { ScanResults } from './types'
+import type { AsyncScanOptions } from './scanner'
 
 // ---------------------------------------------------------------------------
 // Serializable mirror types
@@ -54,18 +55,23 @@ export type SerializedScanResults = Omit<ScanResults, 'ruleOverflow' | 'scannedA
 // Worker message types
 // ---------------------------------------------------------------------------
 
-export interface ScanWorkerRequest {
-  id: number
-  codeIndex: SerializedCodeIndex
-  analysis: SerializedFullAnalysis | null
-  changedFiles?: string[]
-  /** When set, worker loads content from IDB instead of using serialized content. */
-  storeKey?: string
-}
+export type SerializedScanOptions = Omit<AsyncScanOptions, 'signal'>
+
+export type ScanWorkerRequest =
+  | {
+      type: 'scan'
+      id: number
+      codeIndex: SerializedCodeIndex
+      analysis: SerializedFullAnalysis | null
+      options?: SerializedScanOptions
+      /** When set, worker loads content from IDB instead of using serialized content. */
+      storeKey?: string
+    }
+  | { type: 'cancel'; id: number }
 
 export type ScanWorkerResponse =
   | { type: 'result'; id: number; results: SerializedScanResults }
-  | { type: 'error'; id: number; error: string }
+  | { type: 'error'; id: number; name?: string; error: string }
 
 // ---------------------------------------------------------------------------
 // CodeIndex

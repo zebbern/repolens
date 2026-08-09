@@ -194,7 +194,7 @@ func FetchStatus(url string) (string, error) {
       language: 'go',
     },
     expected: [
-      { ruleId: 'go-http-no-timeout', line: 9, verdict: 'tp' },
+      { ruleId: 'go-http-no-timeout', line: 9, expectation: 'present' },
     ],
   },
 
@@ -219,8 +219,8 @@ func PurgeTempFiles(paths []string) {
       language: 'go',
     },
     expected: [
-      { ruleId: 'go-error-discard', line: 7, verdict: 'tp' },
-      { ruleId: 'go-error-discard', line: 8, verdict: 'tp' },
+      { ruleId: 'go-error-discard', line: 7, expectation: 'present' },
+      { ruleId: 'go-error-discard', line: 8, expectation: 'present' },
     ],
   },
 
@@ -242,7 +242,7 @@ func SearchUsers(db *sql.DB, name string) (*sql.Rows, error) {
       language: 'go',
     },
     expected: [
-      { ruleId: 'go-sql-concat', line: 6, verdict: 'tp' },
+      { ruleId: 'go-sql-concat', line: 6, expectation: 'present' },
     ],
   },
 
@@ -270,7 +270,7 @@ func StartWorker(ch chan Task) {
       language: 'go',
     },
     expected: [
-      { ruleId: 'go-goroutine-no-recover', line: 6, verdict: 'tp' },
+      { ruleId: 'go-goroutine-no-recover', line: 6, expectation: 'present' },
     ],
   },
 
@@ -295,7 +295,7 @@ func init() {
       language: 'go',
     },
     expected: [
-      { ruleId: 'go-unused-import-comment', line: 4, verdict: 'tp' },
+      { ruleId: 'go-unused-import-comment', line: 4, expectation: 'present' },
     ],
   },
 
@@ -325,7 +325,7 @@ func SendWebhook(url string, payload string) error {
       language: 'go',
     },
     expected: [
-      { ruleId: 'go-http-no-timeout', line: 9, verdict: 'tp' },
+      { ruleId: 'go-http-no-timeout', line: 9, expectation: 'present' },
     ],
   },
 ]

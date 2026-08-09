@@ -23,7 +23,7 @@ public class SessionLoader {
       language: 'csharp',
     },
     expected: [
-      { ruleId: 'dotnet-binary-formatter', line: 7, verdict: 'tp' },
+      { ruleId: 'dotnet-binary-formatter', line: 7, expectation: 'present' },
     ],
   },
 ]

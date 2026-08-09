@@ -6,8 +6,6 @@ export type UntrustedContextKind =
   | 'structural-index'
   | 'pinned-files'
   | 'commit-data'
-  | 'pr-metadata'
-  | 'diff-summary'
   | 'tool-result'
 
 export interface UntrustedContextBlock {
@@ -25,8 +23,6 @@ function isUntrustedContextKind(value: unknown): value is UntrustedContextKind {
     case 'structural-index':
     case 'pinned-files':
     case 'commit-data':
-    case 'pr-metadata':
-    case 'diff-summary':
     case 'tool-result':
       return true
     default:

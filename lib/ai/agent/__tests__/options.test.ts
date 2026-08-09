@@ -297,7 +297,7 @@ describe('callOptionsSchema — shared validation', () => {
     }).success).toBe(false)
   })
 
-  it('enforces target path, refs, and PR SHA contracts at exact boundaries', () => {
+  it('enforces target path and refs at exact boundaries', () => {
     expect(callOptionsSchema.safeParse({
       ...BASE,
       mode: 'docs',
@@ -324,19 +324,5 @@ describe('callOptionsSchema — shared validation', () => {
     }
     expect(callOptionsSchema.safeParse(changelog).success).toBe(true)
     expect(callOptionsSchema.safeParse({ ...changelog, fromRef: 'f'.repeat(257) }).success).toBe(false)
-
-    const review = {
-      ...BASE,
-      mode: 'pr-review',
-      prNumber: 1,
-      prTitle: 'title',
-      baseSha: 'abcdef1',
-      headSha: 'a'.repeat(64),
-      diffSummary: '',
-    }
-    expect(callOptionsSchema.safeParse(review).success).toBe(true)
-    expect(callOptionsSchema.safeParse({ ...review, baseSha: 'abcdef' }).success).toBe(false)
-    expect(callOptionsSchema.safeParse({ ...review, headSha: 'g'.repeat(7) }).success).toBe(false)
-    expect(callOptionsSchema.safeParse({ ...review, headSha: 'a'.repeat(65) }).success).toBe(false)
   })
 })

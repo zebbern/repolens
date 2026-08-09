@@ -8,7 +8,6 @@ import { PRSelector } from "./pr-selector"
 import { PRHeader } from "./pr-header"
 import { FileNavigator } from "./file-navigator"
 import { DiffViewer } from "./diff-viewer"
-import { ReviewSummary } from "./review-comments"
 
 // ---------------------------------------------------------------------------
 // PRReviewPanel
@@ -16,7 +15,7 @@ import { ReviewSummary } from "./review-comments"
 
 export function PRReviewPanel() {
   const { repo } = useRepositoryData()
-  const { pr, files, findings, status, error, availablePRs, isFileTruncated } = usePRReviewState()
+  const { pr, files, status, error, availablePRs, isFileTruncated } = usePRReviewState()
   const { loadPRList, selectPR, reset } = usePRReviewActions()
 
   const [selectedFilename, setSelectedFilename] = useState<string | null>(null)
@@ -113,7 +112,6 @@ export function PRReviewPanel() {
   // PR selected — show header + sidebar + diff view
   const effectiveSelectedFilename = selectedFilename ?? files[0]?.filename ?? null
   const selectedFile = files.find((f) => f.filename === effectiveSelectedFilename) ?? files[0] ?? null
-  const fileFindings = findings.filter((f) => f.file === selectedFile?.filename)
 
   return (
     <div className="flex h-full flex-col">
@@ -123,13 +121,6 @@ export function PRReviewPanel() {
           <PRHeader pr={pr} onBack={handleBack} />
         </div>
       </div>
-
-      {/* Review summary bar */}
-      {findings.length > 0 && (
-        <div className="shrink-0 border-b px-4 py-2">
-          <ReviewSummary findings={findings} />
-        </div>
-      )}
 
       {/* Main content: sidebar + diff */}
       <div className="flex flex-1 overflow-hidden">
@@ -142,7 +133,7 @@ export function PRReviewPanel() {
         />
         <div className="flex-1 overflow-hidden">
           {selectedFile ? (
-            <DiffViewer file={selectedFile} findings={fileFindings} />
+            <DiffViewer file={selectedFile} />
           ) : (
             <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
               Select a file to view its diff

@@ -11,7 +11,6 @@ import {
   generateDiagramSchema,
   getProjectOverviewSchema,
   getGitHistorySchema,
-  reviewPRFileSchema,
 } from './tool-schemas'
 import { generateTourSchema } from './tour-schemas'
 
@@ -74,10 +73,5 @@ export const codeTools = {
     description:
       'Retrieve git history data from the repository. Three modes: (1) "commits" — list recent commits, optionally filtered to a file path; (2) "blame" — get line-by-line authorship for a file; (3) "commit-detail" — get full details of a single commit including changed files and diff stats. Requires a connected GitHub repository.',
     inputSchema: getGitHistorySchema,
-  }),
-  reviewPRFile: tool({
-    description:
-      'Review a single file from a pull request diff. Analyzes the patch for bugs, security issues, style problems, and improvement suggestions. Returns structured findings with severity, line numbers, and suggestions. This tool is only available during PR review mode.',
-    inputSchema: reviewPRFileSchema,
   }),
 }

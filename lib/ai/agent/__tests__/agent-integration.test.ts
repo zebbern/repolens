@@ -33,10 +33,10 @@ import { skillDiscoverySection } from '../prompts/shared'
 // ---------------------------------------------------------------------------
 
 describe('repoLensAgent — tool registration', () => {
-  it('has exactly 15 tools (13 code + 2 skill)', () => {
+  it('has exactly 14 tools (12 code + 2 skill)', () => {
     const tools = (repoLensAgent as unknown as { tools: Record<string, unknown> }).tools
     const toolNames = Object.keys(tools)
-    expect(toolNames).toHaveLength(15)
+    expect(toolNames).toHaveLength(14)
   })
 
   it('includes discoverSkills tool', () => {

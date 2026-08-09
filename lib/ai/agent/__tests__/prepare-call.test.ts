@@ -262,19 +262,6 @@ describe('buildPrepareCall', () => {
         commitData: attack,
         activeSkills: [maliciousSkillId, invalidSkillAttack],
       },
-      {
-        ...BASE_CHAT,
-        mode: 'pr-review',
-        repoContext: { name: attack, description: attack, structure: attack },
-        structuralIndex: attack,
-        prNumber: 7,
-        prTitle: attack,
-        prBody: attack,
-        baseSha: 'abcdef1',
-        headSha: '1234567',
-        diffSummary: attack,
-        activeSkills: [maliciousSkillId, invalidSkillAttack],
-      },
     ]
 
     it.each(maliciousOptions)('keeps $mode data out of system instructions', async options => {

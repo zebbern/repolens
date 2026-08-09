@@ -746,7 +746,7 @@ describe('F10: system prompt uses dynamic tool count', () => {
     const toolCount = Object.keys(codeTools).length
     // The count must match the number of tool definitions — not a hardcoded number.
     // If a tool is added or removed, this test documents the current count.
-    expect(toolCount).toBe(13)
+    expect(toolCount).toBe(12)
     // Verify the template interpolation produces a valid numeric string
     const promptFragment = `You have ${toolCount} tools`
     expect(promptFragment).toBe(`You have ${Object.keys(codeTools).length} tools`)

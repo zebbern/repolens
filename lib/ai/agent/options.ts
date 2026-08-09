@@ -1,6 +1,5 @@
 import * as z from 'zod'
 import { SKILL_ID_SCHEMA } from '@/lib/ai/skills/types'
-import { commitShaSchema } from '@/lib/ai/tool-schemas'
 
 const providerSchema = z.enum(['openai', 'google', 'anthropic', 'openrouter'])
 
@@ -50,26 +49,10 @@ const changelogOptionsSchema = z.object({
   activeSkills: z.array(SKILL_ID_SCHEMA).max(10).optional(),
 })
 
-const prReviewOptionsSchema = z.object({
-  ...baseFields,
-  mode: z.literal('pr-review'),
-  repoContext: repoContextSchema.optional(),
-  structuralIndex: z.string().max(500_000).optional(),
-  prNumber: z.number().int().min(1),
-  prTitle: z.string().max(500),
-  prBody: z.string().max(100_000).nullish(),
-  baseSha: commitShaSchema,
-  headSha: commitShaSchema,
-  diffSummary: z.string().max(500_000),
-  maxSteps: z.number().int().min(10).max(100).optional(),
-  activeSkills: z.array(SKILL_ID_SCHEMA).max(10).optional(),
-})
-
 export const callOptionsSchema = z.discriminatedUnion('mode', [
   chatOptionsSchema,
   docsOptionsSchema,
   changelogOptionsSchema,
-  prReviewOptionsSchema,
 ])
 
 export type CallOptions = z.infer<typeof callOptionsSchema>

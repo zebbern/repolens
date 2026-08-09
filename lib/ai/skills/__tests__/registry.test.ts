@@ -21,7 +21,6 @@ const KNOWN_SKILL_IDS = [
   'git-analysis',
   'migration-planning',
   'performance-analysis',
-  'pr-review',
   'security-audit',
   'state-management-review',
   'testing-quality',
@@ -40,9 +39,9 @@ describe('SkillRegistry — listSkills', () => {
     registry = new SkillRegistry()
   })
 
-  it('returns all 17 skill summaries', () => {
+  it('returns all 16 skill summaries', () => {
     const skills = registry.listSkills()
-    expect(skills).toHaveLength(17)
+    expect(skills).toHaveLength(16)
   })
 
   it('returns correct IDs for all skills', () => {
@@ -324,9 +323,9 @@ describe('SkillRegistry — lazy loading', () => {
 // ---------------------------------------------------------------------------
 
 describe('SkillRegistry — skill definition frontmatter', () => {
-  it('all 17 definition files exist on disk', () => {
+  it('all 16 definition files exist on disk', () => {
     const files = fs.readdirSync(DEFINITIONS_DIR).filter((f) => f.endsWith('.md'))
-    expect(files).toHaveLength(17)
+    expect(files).toHaveLength(16)
   })
 
   it('all definitions have valid parseable frontmatter', () => {
@@ -334,8 +333,8 @@ describe('SkillRegistry — skill definition frontmatter', () => {
     const skills = registry.listSkills()
 
     // If frontmatter were invalid, the skill would be skipped.
-    // We verify all 17 are loaded.
-    expect(skills).toHaveLength(17)
+    // We verify all 16 are loaded.
+    expect(skills).toHaveLength(16)
     for (const skill of skills) {
       expect(skill.id).toMatch(/^[a-z0-9-]+$/)
       expect(skill.name.length).toBeLessThanOrEqual(200)
@@ -346,11 +345,11 @@ describe('SkillRegistry — skill definition frontmatter', () => {
   })
 
   it('all definition filenames match their frontmatter ID', () => {
-    // All 17 skills loading successfully implies every filename === ID,
+    // All 16 skills loading successfully implies every filename === ID,
     // because the registry now rejects mismatches.
     const registry = new SkillRegistry()
     const skills = registry.listSkills()
-    expect(skills).toHaveLength(17)
+    expect(skills).toHaveLength(16)
 
     const files = fs.readdirSync(DEFINITIONS_DIR).filter((f) => f.endsWith('.md'))
     const filenameIds = files.map((f) => path.basename(f, '.md')).sort()

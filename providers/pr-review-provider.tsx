@@ -10,7 +10,6 @@ import {
 import type {
   PRMetadata,
   PRFile,
-  ReviewFinding,
   PRReviewStatus,
 } from "@/types/pr-review"
 import {
@@ -27,7 +26,6 @@ import { toast } from "sonner"
 interface PRReviewStateContextType {
   pr: PRMetadata | null
   files: PRFile[]
-  findings: ReviewFinding[]
   status: PRReviewStatus
   error: string | null
   availablePRs: PRMetadata[]
@@ -43,9 +41,6 @@ const PRReviewStateContext = createContext<PRReviewStateContextType | null>(null
 interface PRReviewActionsContextType {
   loadPRList: (owner: string, name: string, state?: 'open' | 'closed' | 'all') => Promise<void>
   selectPR: (owner: string, name: string, number: number) => Promise<void>
-  addFinding: (finding: ReviewFinding) => void
-  addFindings: (findings: ReviewFinding[]) => void
-  clearFindings: () => void
   reset: () => void
 }
 
@@ -58,7 +53,6 @@ const PRReviewActionsContext = createContext<PRReviewActionsContextType | null>(
 export function PRReviewProvider({ children }: { children: ReactNode }) {
   const [pr, setPr] = useState<PRMetadata | null>(null)
   const [files, setFiles] = useState<PRFile[]>([])
-  const [findings, setFindings] = useState<ReviewFinding[]>([])
   const [status, setStatus] = useState<PRReviewStatus>('idle')
   const [error, setError] = useState<string | null>(null)
   const [availablePRs, setAvailablePRs] = useState<PRMetadata[]>([])
@@ -87,7 +81,6 @@ export function PRReviewProvider({ children }: { children: ReactNode }) {
   const selectPR = useCallback(async (owner: string, name: string, number: number) => {
     setStatus('loading-pr')
     setError(null)
-    setFindings([])
 
     try {
       const prData = await fetchPullRequestViaProxy(owner, name, number)
@@ -107,22 +100,9 @@ export function PRReviewProvider({ children }: { children: ReactNode }) {
     }
   }, [])
 
-  const addFinding = useCallback((finding: ReviewFinding) => {
-    setFindings((prev) => [...prev, finding])
-  }, [])
-
-  const addFindings = useCallback((newFindings: ReviewFinding[]) => {
-    setFindings((prev) => [...prev, ...newFindings])
-  }, [])
-
-  const clearFindings = useCallback(() => {
-    setFindings([])
-  }, [])
-
   const reset = useCallback(() => {
     setPr(null)
     setFiles([])
-    setFindings([])
     setStatus('idle')
     setError(null)
     setIsFileTruncated(false)
@@ -130,10 +110,10 @@ export function PRReviewProvider({ children }: { children: ReactNode }) {
 
   return (
     <PRReviewStateContext.Provider
-      value={{ pr, files, findings, status, error, availablePRs, isFileTruncated }}
+      value={{ pr, files, status, error, availablePRs, isFileTruncated }}
     >
       <PRReviewActionsContext.Provider
-        value={{ loadPRList, selectPR, addFinding, addFindings, clearFindings, reset }}
+        value={{ loadPRList, selectPR, reset }}
       >
         {children}
       </PRReviewActionsContext.Provider>

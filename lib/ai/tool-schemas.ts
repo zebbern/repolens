@@ -77,11 +77,3 @@ export const getGitHistorySchema = z.discriminatedUnion('mode', [
 
 // Re-export tour schema for convenience
 export { generateTourSchema } from './tour-schemas'
-
-// ── PR Review tool schema ──
-
-export const reviewPRFileSchema = z.object({
-  file: pathSchema.describe('File path from the PR diff to review'),
-  patch: z.string().describe('The unified diff patch content for this file'),
-  context: z.string().optional().describe('Optional additional context about the file (e.g., its role in the codebase)'),
-})

@@ -13,8 +13,6 @@ const KINDS: UntrustedContextKind[] = [
   'structural-index',
   'pinned-files',
   'commit-data',
-  'pr-metadata',
-  'diff-summary',
   'tool-result',
 ]
 

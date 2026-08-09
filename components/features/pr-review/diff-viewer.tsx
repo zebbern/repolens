@@ -5,10 +5,8 @@ import { FileCode } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import type { PRFile } from "@/types/pr-review"
-import type { ReviewFinding } from "@/types/pr-review"
 import { parsePatch } from "@/lib/git-history"
 import type { DiffHunk, DiffLine } from "@/lib/git-history/types"
-import { ReviewAnnotation } from "./review-comments"
 
 // ---------------------------------------------------------------------------
 // Props
@@ -16,27 +14,14 @@ import { ReviewAnnotation } from "./review-comments"
 
 interface DiffViewerProps {
   file: PRFile
-  findings: ReviewFinding[]
 }
 
 // ---------------------------------------------------------------------------
 // DiffViewer
 // ---------------------------------------------------------------------------
 
-export function DiffViewer({ file, findings }: DiffViewerProps) {
+export function DiffViewer({ file }: DiffViewerProps) {
   const parsed = useMemo(() => parsePatch(file.patch), [file.patch])
-
-  const findingsByLine = useMemo(() => {
-    const map = new Map<number, ReviewFinding[]>()
-    for (const f of findings) {
-      if (f.file === file.filename && f.line != null) {
-        const existing = map.get(f.line) ?? []
-        existing.push(f)
-        map.set(f.line, existing)
-      }
-    }
-    return map
-  }, [findings, file.filename])
 
   return (
     <div className="flex h-full flex-col">
@@ -75,7 +60,7 @@ export function DiffViewer({ file, findings }: DiffViewerProps) {
             </thead>
             <tbody>
               {parsed.hunks.map((hunk, hunkIdx) => (
-                <HunkSection key={hunkIdx} hunk={hunk} findingsByLine={findingsByLine} />
+                <HunkSection key={hunkIdx} hunk={hunk} />
               ))}
             </tbody>
           </table>
@@ -89,13 +74,7 @@ export function DiffViewer({ file, findings }: DiffViewerProps) {
 // HunkSection
 // ---------------------------------------------------------------------------
 
-function HunkSection({
-  hunk,
-  findingsByLine,
-}: {
-  hunk: DiffHunk
-  findingsByLine: Map<number, ReviewFinding[]>
-}) {
+function HunkSection({ hunk }: { hunk: DiffHunk }) {
   return (
     <>
       {/* Hunk header */}
@@ -109,29 +88,18 @@ function HunkSection({
       </tr>
 
       {/* Diff lines */}
-      {hunk.lines.map((line, lineIdx) => {
-        const lineNumber = line.newLineNumber ?? line.oldLineNumber
-        const lineFindings = lineNumber != null ? findingsByLine.get(lineNumber) : undefined
-
-        return (
-          <DiffLineGroup key={lineIdx} line={line} findings={lineFindings} />
-        )
-      })}
+      {hunk.lines.map((line, lineIdx) => (
+        <DiffLine key={lineIdx} line={line} />
+      ))}
     </>
   )
 }
 
 // ---------------------------------------------------------------------------
-// DiffLineGroup — diff line + optional review annotations
+// DiffLine
 // ---------------------------------------------------------------------------
 
-function DiffLineGroup({
-  line,
-  findings,
-}: {
-  line: DiffLine
-  findings?: ReviewFinding[]
-}) {
+function DiffLine({ line }: { line: DiffLine }) {
   const bgClass =
     line.type === "add"
       ? "bg-green-500/15"
@@ -149,26 +117,17 @@ function DiffLineGroup({
   const prefix = line.type === "add" ? "+" : line.type === "remove" ? "-" : " "
 
   return (
-    <>
-      <tr className={bgClass}>
-        <td className="w-12 px-2 py-0 text-right text-muted-foreground/50 select-none align-top leading-5 border-r border-border/30">
-          {line.oldLineNumber ?? ""}
-        </td>
-        <td className="w-12 px-2 py-0 text-right text-muted-foreground/50 select-none align-top leading-5 border-r border-border/30">
-          {line.newLineNumber ?? ""}
-        </td>
-        <td className={`px-3 py-0 whitespace-pre leading-5 ${textClass}`}>
-          {prefix}
-          {line.content}
-        </td>
-      </tr>
-      {findings?.map((finding, idx) => (
-        <tr key={`finding-${idx}`}>
-          <td colSpan={3} className="px-0 py-0">
-            <ReviewAnnotation finding={finding} />
-          </td>
-        </tr>
-      ))}
-    </>
+    <tr className={bgClass}>
+      <td className="w-12 px-2 py-0 text-right text-muted-foreground/50 select-none align-top leading-5 border-r border-border/30">
+        {line.oldLineNumber ?? ""}
+      </td>
+      <td className="w-12 px-2 py-0 text-right text-muted-foreground/50 select-none align-top leading-5 border-r border-border/30">
+        {line.newLineNumber ?? ""}
+      </td>
+      <td className={`px-3 py-0 whitespace-pre leading-5 ${textClass}`}>
+        {prefix}
+        {line.content}
+      </td>
+    </tr>
   )
 }

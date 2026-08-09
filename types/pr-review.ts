@@ -1,16 +1,4 @@
-// PR Review Types
-
-export type ReviewSeverity = 'critical' | 'warning' | 'suggestion' | 'praise'
-
-export interface ReviewFinding {
-  file: string
-  line?: number
-  endLine?: number
-  severity: ReviewSeverity
-  category: string
-  message: string
-  suggestion?: string
-}
+// Pull Request Types
 
 export interface PRMetadata {
   number: number
@@ -60,13 +48,4 @@ export interface PRComment {
   inReplyToId?: number
 }
 
-export type PRReviewStatus = 'idle' | 'loading-list' | 'loading-pr' | 'loading-files' | 'reviewing' | 'complete' | 'error'
-
-export interface PRReviewState {
-  pr: PRMetadata | null
-  files: PRFile[]
-  comments: PRComment[]
-  findings: ReviewFinding[]
-  status: PRReviewStatus
-  error: string | null
-}
+export type PRReviewStatus = 'idle' | 'loading-list' | 'loading-pr' | 'loading-files' | 'error'

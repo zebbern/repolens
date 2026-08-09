@@ -34,6 +34,7 @@ export function IssueSummary({
   const projectRiskColor = results.projectRiskScore != null ? getRiskScoreColor(results.projectRiskScore) : null
   const riskDist = results.riskDistribution
   const riskDistTotal = riskDist ? riskDist.critical + riskDist.high + riskDist.medium + riskDist.low : 0
+  const batchInProgress = validationProgress.inProgress || fixProgress.inProgress
 
   return (
     <>
@@ -180,7 +181,7 @@ export function IssueSummary({
           <TooltipTrigger asChild>
             <button
               onClick={onBatchValidate}
-              disabled={!hasValidApiKey || criticalCount === 0 || validationProgress.inProgress}
+              disabled={!hasValidApiKey || criticalCount === 0 || batchInProgress}
               className={cn(
                 'flex items-center gap-1.5 px-2.5 py-1.5 rounded-md border text-[11px] font-medium transition-colors',
                 'border-foreground/6 bg-foreground/2',
@@ -214,7 +215,7 @@ export function IssueSummary({
           <TooltipTrigger asChild>
             <button
               onClick={onBatchGenerateFixes}
-              disabled={filteredIssueCount === 0 || fixProgress.inProgress}
+              disabled={filteredIssueCount === 0 || batchInProgress}
               className={cn(
                 'flex items-center gap-1.5 px-2.5 py-1.5 rounded-md border text-[11px] font-medium transition-colors',
                 'border-foreground/6 bg-foreground/2',
@@ -242,7 +243,7 @@ export function IssueSummary({
         </Tooltip>
 
         {/* Cancel button (shown only during batch operations) */}
-        {validationProgress.inProgress && (
+        {batchInProgress && (
           <button
             onClick={onCancelBatch}
             className="flex items-center gap-1 px-2 py-1.5 rounded-md border border-red-500/20 bg-red-500/5 text-[11px] font-medium text-red-400 hover:bg-red-500/10 transition-colors"
@@ -253,7 +254,17 @@ export function IssueSummary({
         )}
 
         {/* Completion summary badges */}
-        {!validationProgress.inProgress && validationProgress.completed > 0 && (
+        {!validationProgress.inProgress && validationProgress.cancelled && (
+          <span className="text-[10px] text-text-muted tabular-nums">
+            Validation cancelled at {validationProgress.completed}/{validationProgress.total}
+          </span>
+        )}
+        {!fixProgress.inProgress && fixProgress.cancelled && (
+          <span className="text-[10px] text-text-muted tabular-nums">
+            Fix generation cancelled at {fixProgress.completed}/{fixProgress.total}
+          </span>
+        )}
+        {!validationProgress.inProgress && !validationProgress.cancelled && validationProgress.completed > 0 && (
           <span className="text-[10px] text-text-muted tabular-nums">
             Validated {validationProgress.completed}
             {validationProgress.failed > 0 && (
@@ -261,7 +272,7 @@ export function IssueSummary({
             )}
           </span>
         )}
-        {!fixProgress.inProgress && fixProgress.completed > 0 && (
+        {!fixProgress.inProgress && !fixProgress.cancelled && fixProgress.completed > 0 && (
           <span className="text-[10px] text-text-muted tabular-nums">
             {fixProgress.completed - fixProgress.failed} fixes found
           </span>

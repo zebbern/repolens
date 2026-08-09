@@ -16,6 +16,7 @@ export interface BatchProgress {
   total: number
   failed: number
   inProgress: boolean
+  cancelled: boolean
 }
 
 export interface BatchOperationsOptions {
@@ -37,6 +38,22 @@ export interface BatchOperationsOptions {
 }
 
 const MAX_CONCURRENCY = 3
+const IDLE_BATCH_PROGRESS: BatchProgress = {
+  completed: 0,
+  total: 0,
+  failed: 0,
+  inProgress: false,
+  cancelled: false,
+}
+
+type BatchOperationKind = 'validation' | 'fix'
+
+interface ActiveBatchOperation {
+  id: number
+  kind: BatchOperationKind
+  controller: AbortController
+  repositorySession: RepositorySession | null
+}
 
 // ---------------------------------------------------------------------------
 // Hook
@@ -55,26 +72,106 @@ export function useBatchOperations({
   repositorySession,
   isRepositorySessionCurrent,
 }: BatchOperationsOptions) {
-  const [validationProgress, setValidationProgress] = useState<BatchProgress>({
-    completed: 0, total: 0, failed: 0, inProgress: false,
-  })
-  const [fixProgress, setFixProgress] = useState<BatchProgress>({
-    completed: 0, total: 0, failed: 0, inProgress: false,
-  })
+  const [validationProgress, setValidationProgress] = useState<BatchProgress>(IDLE_BATCH_PROGRESS)
+  const [fixProgress, setFixProgress] = useState<BatchProgress>(IDLE_BATCH_PROGRESS)
+  const mountedRef = useRef(true)
+  const operationIdRef = useRef(0)
+  const activeOperationRef = useRef<ActiveBatchOperation | null>(null)
+  const previousRepositorySessionRef = useRef(repositorySession)
+  const lifecycleGenerationRef = useRef(0)
 
-  const abortRef = useRef(false)
+  const setOperationProgress = useCallback((
+    kind: BatchOperationKind,
+    progress: React.SetStateAction<BatchProgress>,
+  ) => {
+    if (kind === 'validation') setValidationProgress(progress)
+    else setFixProgress(progress)
+  }, [])
 
-  // Cancel in-flight work on unmount
-  useEffect(() => {
-    abortRef.current = true
-    let cancelled = false
-    queueMicrotask(() => {
-      if (cancelled) return
-      setValidationProgress({ completed: 0, total: 0, failed: 0, inProgress: false })
-      setFixProgress({ completed: 0, total: 0, failed: 0, inProgress: false })
+  const cancelActiveOperation = useCallback(() => {
+    const operation = activeOperationRef.current
+    if (!operation) return
+
+    operation.controller.abort()
+    activeOperationRef.current = null
+    setOperationProgress(operation.kind, previous => ({
+      ...previous,
+      inProgress: false,
+      cancelled: true,
+    }))
+  }, [setOperationProgress])
+
+  // Batch validation and fix generation intentionally share one global active slot.
+  const beginOperation = useCallback((
+    kind: BatchOperationKind,
+    total: number,
+    requestSession: RepositorySession | null,
+  ): ActiveBatchOperation | null => {
+    if (
+      !mountedRef.current
+      || activeOperationRef.current !== null
+      || !isRepositorySessionCurrent(requestSession)
+    ) return null
+
+    const operation: ActiveBatchOperation = {
+      id: ++operationIdRef.current,
+      kind,
+      controller: new AbortController(),
+      repositorySession: requestSession,
+    }
+    activeOperationRef.current = operation
+    setOperationProgress(kind, {
+      completed: 0,
+      total,
+      failed: 0,
+      inProgress: true,
+      cancelled: false,
     })
-    return () => { cancelled = true; abortRef.current = true }
-  }, [repositorySession])
+    return operation
+  }, [isRepositorySessionCurrent, setOperationProgress])
+
+  const isOperationCurrent = useCallback((operation: ActiveBatchOperation) => (
+    mountedRef.current
+    && activeOperationRef.current?.id === operation.id
+    && !operation.controller.signal.aborted
+    && isRepositorySessionCurrent(operation.repositorySession)
+  ), [isRepositorySessionCurrent])
+
+  const finishOperation = useCallback((operation: ActiveBatchOperation) => {
+    if (activeOperationRef.current?.id !== operation.id) return
+    activeOperationRef.current = null
+    if (!mountedRef.current) return
+
+    setOperationProgress(operation.kind, previous => ({
+      ...previous,
+      inProgress: false,
+      cancelled: operation.controller.signal.aborted
+        || !isRepositorySessionCurrent(operation.repositorySession),
+    }))
+  }, [isRepositorySessionCurrent, setOperationProgress])
+
+  // Repository replacement and final unmount cancel the single active operation.
+  useEffect(() => {
+    mountedRef.current = true
+    const lifecycleGeneration = ++lifecycleGenerationRef.current
+    if (previousRepositorySessionRef.current !== repositorySession) {
+      previousRepositorySessionRef.current = repositorySession
+      queueMicrotask(() => {
+        if (
+          !mountedRef.current
+          || lifecycleGenerationRef.current !== lifecycleGeneration
+          || activeOperationRef.current !== null
+        ) return
+        setValidationProgress(IDLE_BATCH_PROGRESS)
+        setFixProgress(IDLE_BATCH_PROGRESS)
+      })
+    }
+
+    return () => {
+      mountedRef.current = false
+      cancelActiveOperation()
+    }
+  }, [repositorySession, cancelActiveOperation])
 
   // -----------------------------------------------------------------------
   // Batch validation (async, concurrency-limited)
@@ -92,70 +189,67 @@ export function useBatchOperations({
     )
     if (criticalHigh.length === 0) return
 
-    abortRef.current = false
-    setValidationProgress({ completed: 0, total: criticalHigh.length, failed: 0, inProgress: true })
+    const operation = beginOperation('validation', criticalHigh.length, requestSession)
+    if (!operation) return
 
     let completed = 0
     let failed = 0
 
-    const uniquePaths = [...new Set(criticalHigh.map(issue => issue.file))]
-    let resolvedContents = new Map<string, string>()
-    let resolutionError: unknown
     try {
-      resolvedContents = (await resolveFileContents(codeIndex, uniquePaths)).contents
-    } catch (error) {
-      resolutionError = error
-    }
-    if (abortRef.current || !isRepositorySessionCurrent(requestSession)) return
-
-    // Semaphore-based concurrency limiter
-    const queue = [...criticalHigh]
-    const workers = Array.from({ length: Math.min(MAX_CONCURRENCY, queue.length) }, async () => {
-      while (queue.length > 0 && !abortRef.current && isRepositorySessionCurrent(requestSession)) {
-        const issue = queue.shift()!
-        try {
-          if (resolutionError) {
-            throw new Error(`File content loading failed for ${issue.file}: ${resolutionError instanceof Error ? resolutionError.message : 'Unknown error'}`)
-          }
-          const content = resolvedContents.get(issue.file)
-          if (typeof content !== 'string') {
-            throw new Error(`File content unavailable for ${issue.file}`)
-          }
-          if (!isRepositorySessionCurrent(requestSession)) return
-          const result = await validateFinding(issue, content, {
-            provider: selectedProvider,
-            model: selectedModel.id,
-            apiKey,
-          })
-          if (abortRef.current || !isRepositorySessionCurrent(requestSession)) return
-          setValidationResults((prev) => new Map(prev).set(issue.id, result))
-        } catch (err) {
-          failed++
-          if (abortRef.current || !isRepositorySessionCurrent(requestSession)) return
-          setValidationResults((prev) =>
-            new Map(prev).set(issue.id, {
-              issueId: issue.id,
-              verdict: 'uncertain',
-              confidence: 'low',
-              reasoning: err instanceof Error ? err.message : 'Validation failed',
-            }),
-          )
-        } finally {
-          completed++
-          if (abortRef.current || !isRepositorySessionCurrent(requestSession)) return
-          setValidationProgress((prev) => ({
-            ...prev,
-            completed,
-            failed,
-          }))
-        }
+      const uniquePaths = [...new Set(criticalHigh.map(issue => issue.file))]
+      let resolvedContents = new Map<string, string>()
+      let resolutionError: unknown
+      try {
+        resolvedContents = (await resolveFileContents(codeIndex, uniquePaths)).contents
+      } catch (error) {
+        resolutionError = error
       }
-    })
+      if (!isOperationCurrent(operation)) return
 
-    await Promise.all(workers)
-    if (abortRef.current || !isRepositorySessionCurrent(requestSession)) return
-    setValidationProgress((prev) => ({ ...prev, inProgress: false }))
-  }, [selectedProvider, selectedModel, apiKeys, codeIndex, validateFinding, setValidationResults, repositorySession, isRepositorySessionCurrent])
+      // Semaphore-based concurrency limiter
+      const queue = [...criticalHigh]
+      const workers = Array.from({ length: Math.min(MAX_CONCURRENCY, queue.length) }, async () => {
+        while (queue.length > 0 && isOperationCurrent(operation)) {
+          const issue = queue.shift()!
+          try {
+            if (resolutionError) {
+              throw new Error(`File content loading failed for ${issue.file}: ${resolutionError instanceof Error ? resolutionError.message : 'Unknown error'}`)
+            }
+            const content = resolvedContents.get(issue.file)
+            if (typeof content !== 'string') {
+              throw new Error(`File content unavailable for ${issue.file}`)
+            }
+            const result = await validateFinding(issue, content, {
+              provider: selectedProvider,
+              model: selectedModel.id,
+              apiKey,
+            })
+            if (!isOperationCurrent(operation)) return
+            setValidationResults((prev) => new Map(prev).set(issue.id, result))
+          } catch (err) {
+            if (!isOperationCurrent(operation)) return
+            failed++
+            setValidationResults((prev) =>
+              new Map(prev).set(issue.id, {
+                issueId: issue.id,
+                verdict: 'uncertain',
+                confidence: 'low',
+                reasoning: err instanceof Error ? err.message : 'Validation failed',
+              }),
+            )
+          } finally {
+            if (!isOperationCurrent(operation)) return
+            completed++
+            setValidationProgress((prev) => ({ ...prev, completed, failed }))
+          }
+        }
+      })
+
+      await Promise.all(workers)
+    } finally {
+      finishOperation(operation)
+    }
+  }, [selectedProvider, selectedModel, apiKeys, codeIndex, validateFinding, setValidationResults, repositorySession, isRepositorySessionCurrent, beginOperation, finishOperation, isOperationCurrent])
 
   // -----------------------------------------------------------------------
   // Batch fix generation (async — fetches content from contentStore)
@@ -166,60 +260,66 @@ export function useBatchOperations({
     if (!isRepositorySessionCurrent(requestSession)) return
     if (issues.length === 0) return
 
-    abortRef.current = false
-    setFixProgress({ completed: 0, total: issues.length, failed: 0, inProgress: true })
-
-    // Pre-fetch all unique file contents in one batch
-    const uniquePaths = [...new Set(issues.map(i => i.file))]
-    let contentMap: Map<string, string>
-    try {
-      contentMap = (await resolveFileContents(codeIndex, uniquePaths)).contents
-    } catch {
-      contentMap = new Map()
-    }
-    if (abortRef.current || !isRepositorySessionCurrent(requestSession)) return
+    const operation = beginOperation('fix', issues.length, requestSession)
+    if (!operation) return
 
     let completed = 0
     let failed = 0
-    const newFixes = new Map<string, FixSuggestion | null>()
-    const idsWithFix = new Set<string>()
 
-    for (const issue of issues) {
-      if (abortRef.current || !isRepositorySessionCurrent(requestSession)) return
-      const content = contentMap.get(issue.file)
-      if (typeof content === 'string') {
-        const fix = generateFix(issue, content)
-        newFixes.set(issue.id, fix)
-        if (fix) idsWithFix.add(issue.id)
-      } else {
-        newFixes.set(issue.id, null)
-        failed++
+    try {
+      // Pre-fetch all unique file contents in one batch
+      const uniquePaths = [...new Set(issues.map(i => i.file))]
+      let contentMap: Map<string, string>
+      try {
+        contentMap = (await resolveFileContents(codeIndex, uniquePaths)).contents
+      } catch {
+        contentMap = new Map()
       }
-      completed++
+      if (!isOperationCurrent(operation)) return
+
+      const newFixes = new Map<string, FixSuggestion | null>()
+      const idsWithFix = new Set<string>()
+
+      for (const issue of issues) {
+        if (!isOperationCurrent(operation)) return
+        const content = contentMap.get(issue.file)
+        try {
+          if (typeof content !== 'string') throw new Error('File content unavailable')
+          const fix = generateFix(issue, content)
+          newFixes.set(issue.id, fix)
+          if (fix) idsWithFix.add(issue.id)
+        } catch {
+          newFixes.set(issue.id, null)
+          failed++
+        }
+        completed++
+        setFixProgress(previous => ({ ...previous, completed, failed }))
+      }
+
+      if (!isOperationCurrent(operation)) return
+      // Merge into state in one batch
+      setFixCache((prev) => {
+        const next = new Map(prev)
+        for (const [id, fix] of newFixes) next.set(id, fix)
+        return next
+      })
+      setShowFix((prev) => {
+        const next = new Set(prev)
+        for (const id of idsWithFix) next.add(id)
+        return next
+      })
+    } finally {
+      finishOperation(operation)
     }
-
-    // Merge into state in one batch
-    setFixCache((prev) => {
-      const next = new Map(prev)
-      for (const [id, fix] of newFixes) next.set(id, fix)
-      return next
-    })
-    setShowFix((prev) => {
-      const next = new Set(prev)
-      for (const id of idsWithFix) next.add(id)
-      return next
-    })
-
-    setFixProgress({ completed, total: issues.length, failed, inProgress: false })
-  }, [codeIndex, generateFix, setFixCache, setShowFix, repositorySession, isRepositorySessionCurrent])
+  }, [codeIndex, generateFix, setFixCache, setShowFix, repositorySession, isRepositorySessionCurrent, beginOperation, finishOperation, isOperationCurrent])
 
   // -----------------------------------------------------------------------
   // Cancel
   // -----------------------------------------------------------------------
 
   const cancelBatch = useCallback(() => {
-    abortRef.current = true
-  }, [])
+    cancelActiveOperation()
+  }, [cancelActiveOperation])
 
   // -----------------------------------------------------------------------
   // API key check

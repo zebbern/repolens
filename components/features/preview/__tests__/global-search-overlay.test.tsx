@@ -142,6 +142,16 @@ function createLazyIndex() {
   return { codeIndex, fetchFile }
 }
 
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  let reject!: (reason?: unknown) => void
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise
+    reject = rejectPromise
+  })
+  return { promise, resolve, reject }
+}
+
 const defaultFiles = [
   { path: 'src/utils.ts', name: 'utils.ts', lineCount: 42 },
   { path: 'src/index.ts', name: 'index.ts', lineCount: 10 },
@@ -308,6 +318,93 @@ describe('GlobalSearchOverlay', () => {
 
       await waitFor(() => expect(mockExtractSymbols).toHaveBeenCalledWith('', undefined))
       expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    })
+
+    it('clears successful results when a repository switch fails on lazy source', async () => {
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+      mockSearchInWorker.mockResolvedValueOnce([{
+        file: 'src/old.ts',
+        language: 'typescript',
+        matches: [{ line: 1, content: 'needle from old repo', column: 0, length: 6 }],
+      }])
+      const initialIndex = createCodeIndex([{ path: 'src/old.ts', content: 'needle from old repo' }])
+      const { props, rerender } = renderOverlay({ codeIndex: initialIndex })
+
+      await user.click(screen.getByText('Code Search'))
+      await user.type(screen.getByPlaceholderText('Search in file contents...'), 'needle')
+      await act(async () => { await vi.advanceTimersByTimeAsync(350) })
+      expect(await screen.findByText('src/old.ts')).toBeInTheDocument()
+
+      const { codeIndex: lazyIndex, fetchFile } = createLazyIndex()
+      mockSearchInWorker.mockImplementation((index, query, options) => (
+        searchIndexAsync(index, query, options)
+      ))
+      rerender(<GlobalSearchOverlay {...props} codeIndex={lazyIndex} />)
+
+      await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(
+        'Source unavailable for this repository search',
+      ))
+      expect(screen.queryByText('src/old.ts')).not.toBeInTheDocument()
+      expect(screen.queryByText(/matches in/)).not.toBeInTheDocument()
+      expect(fetchFile).not.toHaveBeenCalled()
+    })
+
+    it('preserves a newer repository result when the older search rejects later', async () => {
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+      const oldSearch = deferred<SearchResult[]>()
+      mockSearchInWorker
+        .mockReturnValueOnce(oldSearch.promise)
+        .mockResolvedValueOnce([{
+          file: 'src/new.ts',
+          language: 'typescript',
+          matches: [{ line: 2, content: 'needle from new repo', column: 0, length: 6 }],
+        }])
+      const initialIndex = createCodeIndex([{ path: 'src/old.ts', content: 'needle from old repo' }])
+      const { props, rerender } = renderOverlay({ codeIndex: initialIndex })
+
+      await user.click(screen.getByText('Code Search'))
+      await user.type(screen.getByPlaceholderText('Search in file contents...'), 'needle')
+      await act(async () => { await vi.advanceTimersByTimeAsync(350) })
+      await waitFor(() => expect(mockSearchInWorker).toHaveBeenCalledTimes(1))
+
+      const newIndex = createCodeIndex([{ path: 'src/new.ts', content: 'needle from new repo' }])
+      rerender(<GlobalSearchOverlay {...props} codeIndex={newIndex} />)
+      expect(await screen.findByText('src/new.ts')).toBeInTheDocument()
+
+      oldSearch.reject(new Error('Old repository search failed'))
+      await act(async () => { await Promise.resolve() })
+
+      expect(screen.getByText('src/new.ts')).toBeInTheDocument()
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    })
+
+    it('clears prior results while a new debounced query is pending', async () => {
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+      const nextSearch = deferred<SearchResult[]>()
+      mockSearchInWorker
+        .mockResolvedValueOnce([{
+          file: 'src/first.ts',
+          language: 'typescript',
+          matches: [{ line: 1, content: 'first result', column: 0, length: 5 }],
+        }])
+        .mockReturnValueOnce(nextSearch.promise)
+      renderOverlay({ codeIndex: createCodeIndex([{ path: 'src/first.ts', content: 'first result' }]) })
+
+      await user.click(screen.getByText('Code Search'))
+      const input = screen.getByPlaceholderText('Search in file contents...')
+      await user.type(input, 'first')
+      await act(async () => { await vi.advanceTimersByTimeAsync(350) })
+      expect(await screen.findByText('src/first.ts')).toBeInTheDocument()
+
+      await user.clear(input)
+      await user.type(input, 'second')
+      await act(async () => { await vi.advanceTimersByTimeAsync(350) })
+
+      expect(screen.queryByText('src/first.ts')).not.toBeInTheDocument()
+      expect(screen.queryByText(/matches in/)).not.toBeInTheDocument()
+
+      nextSearch.resolve([])
+      await act(async () => { await nextSearch.promise })
     })
   })
 

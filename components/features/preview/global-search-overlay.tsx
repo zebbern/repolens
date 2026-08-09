@@ -334,10 +334,13 @@ export function GlobalSearchOverlay({
   const [totalCodeMatches, setTotalCodeMatches] = useState(0)
   const [isSearching, setIsSearching] = useState(false)
   const [codeSearchError, setCodeSearchError] = useState<string | null>(null)
+  const codeSearchGenerationRef = useRef(0)
 
   useEffect(() => {
+    const searchGeneration = ++codeSearchGenerationRef.current
     if (activeTab !== 'code' || !debouncedQuery.trim()) {
       queueMicrotask(() => {
+        if (codeSearchGenerationRef.current !== searchGeneration) return
         setCodeResults([])
         setTotalCodeMatches(0)
         setCodeSearchError(null)
@@ -346,18 +349,18 @@ export function GlobalSearchOverlay({
       return
     }
 
-    let stale = false
     queueMicrotask(() => {
-      if (!stale) {
-        setCodeSearchError(null)
-        setIsSearching(true)
-      }
+      if (codeSearchGenerationRef.current !== searchGeneration) return
+      setCodeResults([])
+      setTotalCodeMatches(0)
+      setCodeSearchError(null)
+      setIsSearching(true)
     })
     cancelPendingSearches()
 
     searchInWorker(codeIndex, debouncedQuery, codeSearchOptions)
       .then(results => {
-        if (stale) return
+        if (codeSearchGenerationRef.current !== searchGeneration) return
         const filtered = excludeGenerated
           ? results.filter(r => !GENERATED_FILE_PATTERNS.some(p => p.test(r.file)))
           : results
@@ -373,16 +376,21 @@ export function GlobalSearchOverlay({
         setTotalCodeMatches(total)
       })
       .catch(err => {
-        if (!stale && err?.message !== 'Search cancelled') {
-          console.warn('[search-worker] Search failed:', err)
-          setCodeSearchError(`Source unavailable for this repository search. ${err instanceof Error ? err.message : 'Search failed.'}`)
-        }
+        if (codeSearchGenerationRef.current !== searchGeneration || err?.message === 'Search cancelled') return
+        console.warn('[search-worker] Search failed:', err)
+        setCodeResults([])
+        setTotalCodeMatches(0)
+        setCodeSearchError(`Source unavailable for this repository search. ${err instanceof Error ? err.message : 'Search failed.'}`)
       })
       .finally(() => {
-        if (!stale) setIsSearching(false)
+        if (codeSearchGenerationRef.current === searchGeneration) setIsSearching(false)
       })
 
-    return () => { stale = true }
+    return () => {
+      if (codeSearchGenerationRef.current === searchGeneration) {
+        codeSearchGenerationRef.current += 1
+      }
+    }
   }, [debouncedQuery, codeIndex, codeSearchOptions, activeTab, excludeGenerated])
 
   // Cancel pending worker searches on unmount

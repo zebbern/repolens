@@ -80,6 +80,16 @@ const MOCK_API_KEYS: APIKeysState = {
 }
 const DEFAULT_SESSION = { id: 1, signal: new AbortController().signal }
 
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  let reject!: (reason?: unknown) => void
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise
+    reject = rejectPromise
+  })
+  return { promise, resolve, reject }
+}
+
 describe('useBatchOperations', () => {
   let setFixCache: Mock<BatchOperationsOptions['setFixCache']>
   let setShowFix: Mock<BatchOperationsOptions['setShowFix']>
@@ -105,19 +115,23 @@ describe('useBatchOperations', () => {
     let current = sessionA
     let resolve!: (result: ValidationResult) => void
     validateFinding.mockReturnValue(new Promise(done => { resolve = done }))
-    const { result } = renderBatchHook({
+    const overrides: Record<string, unknown> = {
       repositorySession: sessionA,
       isRepositorySessionCurrent: (session: unknown) => session === current,
-    })
+    }
+    const { result, rerender } = renderBatchHook(overrides)
     const issue = createIssue()
 
     let pending!: Promise<void>
     act(() => { pending = result.current.batchValidate([issue]) })
     current = sessionB
+    overrides.repositorySession = sessionB
+    rerender()
     resolve(createValidationResult(issue.id))
     await act(async () => pending)
 
     expect(setValidationResults).not.toHaveBeenCalled()
+    expect(result.current.validationProgress.inProgress).toBe(false)
   })
 
   it('suppresses batch fix publication after a repository session switch', async () => {
@@ -126,19 +140,23 @@ describe('useBatchOperations', () => {
     let current = sessionA
     let resolve!: (content: Map<string, string>) => void
     codeIndex.contentStore.getBatch = vi.fn(() => new Promise<Map<string, string>>(done => { resolve = done }))
-    const { result } = renderBatchHook({
+    const overrides: Record<string, unknown> = {
       repositorySession: sessionA,
       isRepositorySessionCurrent: (session: unknown) => session === current,
-    })
+    }
+    const { result, rerender } = renderBatchHook(overrides)
 
     let pending!: Promise<void>
     act(() => { pending = result.current.batchGenerateFixes([createIssue()]) })
     current = sessionB
+    overrides.repositorySession = sessionB
+    rerender()
     resolve(new Map([['src/utils.ts', 'eval(x)']]))
     await act(async () => pending)
 
     expect(setFixCache).not.toHaveBeenCalled()
     expect(setShowFix).not.toHaveBeenCalled()
+    expect(result.current.fixProgress.inProgress).toBe(false)
   })
 
   function renderBatchHook(overrides: Record<string, unknown> = {}) {
@@ -168,12 +186,14 @@ describe('useBatchOperations', () => {
         total: 0,
         failed: 0,
         inProgress: false,
+        cancelled: false,
       })
       expect(result.current.fixProgress).toEqual({
         completed: 0,
         total: 0,
         failed: 0,
         inProgress: false,
+        cancelled: false,
       })
     })
 
@@ -228,6 +248,7 @@ describe('useBatchOperations', () => {
         total: 1,
         failed: 0,
         inProgress: false,
+        cancelled: false,
       })
     })
 
@@ -275,6 +296,20 @@ describe('useBatchOperations', () => {
 
       expect(generateFix).toHaveBeenCalledWith(issue, '')
       expect(result.current.fixProgress.failed).toBe(0)
+    })
+
+    it('settles fix progress when generation throws', async () => {
+      generateFix.mockImplementation(() => { throw new Error('Generator failed') })
+      const { result } = renderBatchHook()
+
+      await act(async () => result.current.batchGenerateFixes([createIssue()]))
+
+      expect(result.current.fixProgress).toMatchObject({
+        completed: 1,
+        failed: 1,
+        inProgress: false,
+        cancelled: false,
+      })
     })
   })
 
@@ -335,6 +370,7 @@ describe('useBatchOperations', () => {
 
       expect(result.current.validationProgress.failed).toBe(1)
       expect(result.current.validationProgress.completed).toBe(1)
+      expect(result.current.validationProgress.inProgress).toBe(false)
       // Should still call setValidationResults with uncertain result
       expect(setValidationResults).toHaveBeenCalled()
     })
@@ -405,34 +441,120 @@ describe('useBatchOperations', () => {
   })
 
   describe('cancelBatch', () => {
-    it('stops in-flight validation when cancelBatch is called', async () => {
-      // Create many issues to ensure some are pending when cancel fires
-      const issues = Array.from({ length: 10 }, (_, i) =>
-        createIssue({ id: `i${i}`, severity: 'critical', file: 'src/utils.ts' }),
-      )
-
-      // Each validation takes a bit of time
-      let callCount = 0
-      validateFinding.mockImplementation(async () => {
-        callCount++
-        await new Promise((r) => setTimeout(r, 10))
-        return createValidationResult('')
-      })
-
+    it('immediately settles validation as cancelled and ignores its stale completion', async () => {
+      const issue = createIssue({ id: 'cancel-validation' })
+      const validation = deferred<ValidationResult>()
+      validateFinding.mockReturnValue(validation.promise)
       const { result } = renderBatchHook()
 
-      // Don't await — cancel mid-flight
-      const promise = act(async () => {
-        const batchPromise = result.current.batchValidate(issues)
-        // Cancel immediately after starting
+      let pending!: Promise<void>
+      act(() => { pending = result.current.batchValidate([issue]) })
+      await vi.waitFor(() => expect(validateFinding).toHaveBeenCalledOnce())
+      act(() => {
         result.current.cancelBatch()
-        await batchPromise
       })
 
-      await promise
+      expect(result.current.validationProgress).toMatchObject({
+        completed: 0,
+        total: 1,
+        inProgress: false,
+        cancelled: true,
+      })
 
-      // Some calls may have started before cancel, but not all 10
-      expect(callCount).toBeLessThanOrEqual(10)
+      validation.resolve(createValidationResult(issue.id))
+      await act(async () => pending)
+
+      expect(setValidationResults).not.toHaveBeenCalled()
+      expect(result.current.validationProgress).toMatchObject({ inProgress: false, cancelled: true })
+    })
+
+    it('immediately settles fix-only work as cancelled', async () => {
+      const content = deferred<Map<string, string>>()
+      codeIndex.files.get('src/utils.ts')!.content = undefined
+      codeIndex.contentStore.getBatch = vi.fn(() => content.promise)
+      const { result } = renderBatchHook()
+
+      let pending!: Promise<void>
+      act(() => { pending = result.current.batchGenerateFixes([createIssue()]) })
+      await vi.waitFor(() => expect(codeIndex.contentStore.getBatch).toHaveBeenCalled())
+      act(() => result.current.cancelBatch())
+
+      expect(result.current.fixProgress).toMatchObject({
+        completed: 0,
+        total: 1,
+        inProgress: false,
+        cancelled: true,
+      })
+
+      content.resolve(new Map([['src/utils.ts', 'eval(x)']]))
+      await act(async () => pending)
+      expect(setFixCache).not.toHaveBeenCalled()
+    })
+
+    it('rejects a programmatic fix overlap without resetting active validation', async () => {
+      const issue = createIssue({ id: 'active-validation' })
+      const validation = deferred<ValidationResult>()
+      validateFinding.mockReturnValue(validation.promise)
+      const { result } = renderBatchHook()
+
+      let validationPending!: Promise<void>
+      act(() => { validationPending = result.current.batchValidate([issue]) })
+      await vi.waitFor(() => expect(validateFinding).toHaveBeenCalledOnce())
+      await act(async () => result.current.batchGenerateFixes([issue]))
+
+      expect(generateFix).not.toHaveBeenCalled()
+      expect(result.current.validationProgress.inProgress).toBe(true)
+      expect(result.current.fixProgress.inProgress).toBe(false)
+
+      act(() => result.current.cancelBatch())
+      validation.resolve(createValidationResult(issue.id))
+      await act(async () => validationPending)
+    })
+
+    it('does not let cancelled validation completion settle a newer fix operation', async () => {
+      const issue = createIssue({ id: 'old-validation' })
+      const validation = deferred<ValidationResult>()
+      validateFinding.mockReturnValue(validation.promise)
+      const { result } = renderBatchHook()
+
+      let validationPending!: Promise<void>
+      act(() => { validationPending = result.current.batchValidate([issue]) })
+      await vi.waitFor(() => expect(validateFinding).toHaveBeenCalledOnce())
+      act(() => result.current.cancelBatch())
+
+      const content = deferred<Map<string, string>>()
+      codeIndex.files.get('src/utils.ts')!.content = undefined
+      codeIndex.contentStore.getBatch = vi.fn(() => content.promise)
+      let fixPending!: Promise<void>
+      act(() => { fixPending = result.current.batchGenerateFixes([issue]) })
+      await vi.waitFor(() => expect(codeIndex.contentStore.getBatch).toHaveBeenCalled())
+
+      validation.resolve(createValidationResult(issue.id))
+      await act(async () => validationPending)
+
+      expect(result.current.fixProgress.inProgress).toBe(true)
+      expect(result.current.validationProgress.cancelled).toBe(true)
+
+      content.resolve(new Map([['src/utils.ts', 'eval(x)']]))
+      await act(async () => fixPending)
+      expect(result.current.fixProgress.inProgress).toBe(false)
+    })
+
+    it('cancels active work on unmount and suppresses its completion', async () => {
+      const issue = createIssue({ id: 'unmounted-validation' })
+      const validation = deferred<ValidationResult>()
+      validateFinding.mockReturnValue(validation.promise)
+      const { result, unmount } = renderBatchHook()
+
+      let pending!: Promise<void>
+      act(() => { pending = result.current.batchValidate([issue]) })
+      await vi.waitFor(() => expect(validateFinding).toHaveBeenCalledOnce())
+      unmount()
+
+      validation.resolve(createValidationResult(issue.id))
+      await act(async () => pending)
+
+      expect(setValidationResults).not.toHaveBeenCalled()
     })
   })
 })

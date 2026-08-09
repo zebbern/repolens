@@ -47,6 +47,7 @@ const idleProgress: BatchProgress = {
   total: 0,
   failed: 0,
   inProgress: false,
+  cancelled: false,
 }
 
 const baseProps = {
@@ -151,7 +152,7 @@ describe('IssueSummary', () => {
   it('shows validation progress text when validation is in progress', () => {
     const progressProps = {
       ...baseProps,
-      validationProgress: { completed: 2, total: 5, failed: 0, inProgress: true },
+      validationProgress: { ...idleProgress, completed: 2, total: 5, inProgress: true },
     }
     render(<IssueSummary results={createResults()} {...progressProps} />)
     expect(screen.getByText('Validating 2/5…')).toBeInTheDocument()
@@ -160,7 +161,7 @@ describe('IssueSummary', () => {
   it('shows fix progress text when fix generation is in progress', () => {
     const progressProps = {
       ...baseProps,
-      fixProgress: { completed: 3, total: 10, failed: 0, inProgress: true },
+      fixProgress: { ...idleProgress, completed: 3, total: 10, inProgress: true },
     }
     render(<IssueSummary results={createResults()} {...progressProps} />)
     expect(screen.getByText('Generating 3/10…')).toBeInTheDocument()
@@ -169,7 +170,7 @@ describe('IssueSummary', () => {
   it('shows Cancel button during validation', () => {
     const progressProps = {
       ...baseProps,
-      validationProgress: { completed: 1, total: 5, failed: 0, inProgress: true },
+      validationProgress: { ...idleProgress, completed: 1, total: 5, inProgress: true },
     }
     render(<IssueSummary results={createResults()} {...progressProps} />)
     expect(screen.getByText('Cancel')).toBeInTheDocument()
@@ -180,10 +181,50 @@ describe('IssueSummary', () => {
     expect(screen.queryByText('Cancel')).not.toBeInTheDocument()
   })
 
+  it('shows Cancel and disables both starts during fix-only work', () => {
+    render(
+      <IssueSummary
+        results={createResults()}
+        {...baseProps}
+        fixProgress={{ ...idleProgress, total: 5, inProgress: true }}
+      />,
+    )
+
+    expect(screen.getByText('Cancel')).toBeInTheDocument()
+    expect(screen.getByText('Validate Critical').closest('button')).toBeDisabled()
+    expect(screen.getByText('Generating 0/5…').closest('button')).toBeDisabled()
+  })
+
+  it('disables both starts during validation', () => {
+    render(
+      <IssueSummary
+        results={createResults()}
+        {...baseProps}
+        validationProgress={{ ...idleProgress, total: 5, inProgress: true }}
+      />,
+    )
+
+    expect(screen.getByText('Validating 0/5…').closest('button')).toBeDisabled()
+    expect(screen.getByText('Show All Fixes').closest('button')).toBeDisabled()
+  })
+
+  it('shows a clear cancelled terminal state', () => {
+    render(
+      <IssueSummary
+        results={createResults()}
+        {...baseProps}
+        fixProgress={{ ...idleProgress, completed: 2, total: 5, cancelled: true }}
+      />,
+    )
+
+    expect(screen.getByText('Fix generation cancelled at 2/5')).toBeInTheDocument()
+    expect(screen.queryByText(/fixes found/)).not.toBeInTheDocument()
+  })
+
   it('shows completion summary with failed count after validation', () => {
     const progressProps = {
       ...baseProps,
-      validationProgress: { completed: 5, total: 5, failed: 2, inProgress: false },
+      validationProgress: { ...idleProgress, completed: 5, total: 5, failed: 2 },
     }
     render(<IssueSummary results={createResults()} {...progressProps} />)
     expect(screen.getByText('Validated 5')).toBeInTheDocument()
@@ -193,7 +234,7 @@ describe('IssueSummary', () => {
   it('shows fixes found count after fix generation', () => {
     const progressProps = {
       ...baseProps,
-      fixProgress: { completed: 10, total: 10, failed: 3, inProgress: false },
+      fixProgress: { ...idleProgress, completed: 10, total: 10, failed: 3 },
     }
     render(<IssueSummary results={createResults()} {...progressProps} />)
     expect(screen.getByText('7 fixes found')).toBeInTheDocument()

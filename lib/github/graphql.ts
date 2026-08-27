@@ -1,3 +1,5 @@
+import { fetchGitHub } from './request-signal'
+
 // GitHub GraphQL API utility
 
 const GITHUB_GRAPHQL_ENDPOINT = 'https://api.github.com/graphql'
@@ -15,14 +17,16 @@ export async function githubGraphQL<T>(
   query: string,
   variables: Record<string, unknown>,
   token: string,
+  signal?: AbortSignal,
 ): Promise<T> {
-  const response = await fetch(GITHUB_GRAPHQL_ENDPOINT, {
+  const response = await fetchGitHub(GITHUB_GRAPHQL_ENDPOINT, {
     method: 'POST',
     headers: {
       'Authorization': `Bearer ${token}`,
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({ query, variables }),
+    signal,
   })
 
   if (response.status === 401) {

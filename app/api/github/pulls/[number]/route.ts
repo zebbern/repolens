@@ -40,7 +40,7 @@ export const GET = withGitHubCachePolicy(async function GET(
   const { owner, name } = query.data
 
   try {
-    const pr = await fetchPullRequest(owner, name, prNumber, { token })
+    const pr = await fetchPullRequest(owner, name, prNumber, { token, signal: request.signal })
     return NextResponse.json(pr)
   } catch (error) {
     const message = error instanceof Error ? error.message : "Failed to fetch pull request"

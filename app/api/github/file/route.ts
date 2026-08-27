@@ -2,7 +2,7 @@ import { NextResponse } from "next/server"
 import type { NextRequest } from "next/server"
 import { z } from "zod"
 import { withGitHubCachePolicy } from "@/lib/api/github-cache"
-import { fetchFileContent } from "@/lib/github/fetcher"
+import { fetchFileContent, GitHubResponseTooLargeError } from "@/lib/github/fetcher"
 import { apiError } from "@/lib/api/error"
 import { GITHUB_NAME_RE } from "@/lib/github/validation"
 import { applyRateLimit } from "@/lib/api/rate-limit"
@@ -36,10 +36,14 @@ export const GET = withGitHubCachePolicy(async function GET(request: NextRequest
   try {
     const content = await fetchFileContent(owner, name, branch, path, {
       token,
+      signal: request.signal,
     })
 
     return NextResponse.json({ content })
   } catch (error) {
+    if (error instanceof GitHubResponseTooLargeError) {
+      return apiError('RESPONSE_TOO_LARGE', 'File exceeds the maximum response size', 413)
+    }
     const message = error instanceof Error ? error.message : "Failed to fetch file"
     return apiError('GITHUB_ERROR', message, 500)
   }

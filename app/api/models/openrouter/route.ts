@@ -2,6 +2,10 @@ import { NextResponse } from 'next/server'
 import { z } from 'zod'
 import { apiKeyRequestSchema } from '@/types/types'
 import { apiError } from '@/lib/api/error'
+import {
+  MAX_API_KEY_REQUEST_BODY_BYTES,
+  readBoundedJsonBody,
+} from '@/lib/api/json-body'
 import { applyRateLimit } from '@/lib/api/rate-limit'
 
 const openRouterModelsResponseSchema = z.object({
@@ -20,22 +24,27 @@ export async function POST(request: Request): Promise<NextResponse> {
   if (rateLimited) return rateLimited
 
   try {
-    const body: unknown = await request.json()
-    const parsed = apiKeyRequestSchema.safeParse(body)
+    const body = await readBoundedJsonBody(request, MAX_API_KEY_REQUEST_BODY_BYTES)
+    if (!body.success) return body.response
+
+    const parsed = apiKeyRequestSchema.safeParse(body.data)
 
     if (!parsed.success) {
       return apiError('API_KEY_REQUIRED', 'API key required', 400)
     }
 
-    // Fetch available models from OpenRouter
-    const response = await fetch('https://openrouter.ai/api/v1/models', {
+    // This user-scoped catalog authenticates the key and returns its available models.
+    const response = await fetch('https://openrouter.ai/api/v1/models/user', {
       headers: {
         'Authorization': `Bearer ${parsed.data.apiKey}`,
       },
     })
 
+    if (response.status === 401 || response.status === 403) {
+      return apiError('INVALID_API_KEY', 'Invalid API key', response.status)
+    }
     if (!response.ok) {
-      return apiError('INVALID_API_KEY', 'Invalid API key', 401)
+      return apiError('MODELS_FETCH_ERROR', 'Failed to fetch models', response.status)
     }
 
     const data: unknown = await response.json()

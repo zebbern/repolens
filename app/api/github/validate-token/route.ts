@@ -2,6 +2,7 @@ import { NextResponse } from "next/server"
 import type { NextRequest } from "next/server"
 import { apiError } from "@/lib/api/error"
 import { applyRateLimit } from "@/lib/api/rate-limit"
+import { fetchGitHub } from "@/lib/github/request-signal"
 
 export const runtime = 'edge'
 
@@ -28,11 +29,12 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const response = await fetch(`${GITHUB_API_BASE}/user`, {
+    const response = await fetchGitHub(`${GITHUB_API_BASE}/user`, {
       headers: {
         Accept: "application/vnd.github.v3+json",
         Authorization: `Bearer ${token}`,
       },
+      signal: request.signal,
     })
 
     if (!response.ok) {

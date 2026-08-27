@@ -33,8 +33,8 @@ export const GET = withGitHubCachePolicy(async function GET(request: NextRequest
 
   try {
     const [tags, branches] = await Promise.all([
-      fetchTags(owner, name, { token, perPage: per_page }),
-      fetchBranches(owner, name, { token, perPage: per_page }),
+      fetchTags(owner, name, { token, perPage: per_page, signal: request.signal }),
+      fetchBranches(owner, name, { token, perPage: per_page, signal: request.signal }),
     ])
 
     return NextResponse.json({ tags, branches })

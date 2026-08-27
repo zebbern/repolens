@@ -21,6 +21,7 @@ vi.stubGlobal('fetch', mockFetch)
 
 import {
   setGitHubPAT,
+  setGitHubOAuthPrincipal,
   fetchRepoViaProxy,
   fetchTreeViaProxy,
   fetchFileViaProxy,
@@ -31,6 +32,7 @@ import {
   fetchCommitDetailViaProxy,
   fetchRateLimitViaProxy,
   fetchBlameViaProxy,
+  clearGitHubCache,
 } from './client'
 
 // ---------------------------------------------------------------------------
@@ -168,6 +170,7 @@ describe('Direct GitHub API calls (PAT mode)', () => {
     cacheMock.getCached.mockReturnValue(null)
     cacheMock.getStale.mockReturnValue(null)
     setGitHubPAT(null)
+    setGitHubOAuthPrincipal(null)
   })
 
   describe('URL mapping via proxyFetch', () => {
@@ -234,6 +237,107 @@ describe('Direct GitHub API calls (PAT mode)', () => {
   })
 
   describe('Path selection (PAT vs no PAT)', () => {
+    it('isolates OAuth cache entries by stable account identity', async () => {
+      setGitHubOAuthPrincipal('github-user-a')
+      mockFetch.mockResolvedValueOnce(jsonResponse({ owner: 'a', name: 'repo' }))
+      await fetchRepoViaProxy('owner', 'repo')
+      const firstKey = cacheMock.setCache.mock.calls[0][0] as string
+
+      setGitHubOAuthPrincipal('github-user-b')
+      mockFetch.mockResolvedValueOnce(jsonResponse({ owner: 'b', name: 'repo' }))
+      await fetchRepoViaProxy('owner', 'repo')
+      const secondKey = cacheMock.setCache.mock.calls[1][0] as string
+
+      expect(firstKey).toMatch(/repo:owner\/repo:principal:oauth:github-user-a:epoch:\d+/)
+      expect(secondKey).toMatch(/repo:owner\/repo:principal:oauth:github-user-b:epoch:\d+/)
+      expect(secondKey).not.toBe(firstKey)
+    })
+
+    it('does not cache a response after the GitHub credential changes', async () => {
+      setGitHubPAT('ghp_before')
+      let resolveResponse!: (response: Response) => void
+      mockFetch.mockReturnValueOnce(new Promise<Response>(resolve => { resolveResponse = resolve }))
+
+      const pending = fetchRepoViaProxy('X', 'Y')
+      await Promise.resolve()
+      setGitHubPAT('ghp_after')
+      resolveResponse(jsonResponse(RAW_REPO))
+
+      await expect(pending).rejects.toThrow('stale')
+      expect(cacheMock.setCache).not.toHaveBeenCalled()
+    })
+
+    it('does not cache a response after clearGitHubCache invalidates the cache epoch', async () => {
+      let resolveResponse!: (response: Response) => void
+      mockFetch.mockReturnValueOnce(new Promise<Response>(resolve => { resolveResponse = resolve }))
+
+      const pending = fetchRepoViaProxy('X', 'Y')
+      await Promise.resolve()
+      clearGitHubCache()
+      resolveResponse(jsonResponse(RAW_REPO))
+
+      await expect(pending).rejects.toThrow('stale')
+      expect(cacheMock.setCache).not.toHaveBeenCalled()
+    })
+
+    it('rejects a stale direct tree response after the PAT changes', async () => {
+      setGitHubPAT('ghp_before')
+      let resolveResponse!: (response: Response) => void
+      mockFetch.mockReturnValueOnce(new Promise<Response>(resolve => { resolveResponse = resolve }))
+
+      const pending = fetchTreeViaProxy('X', 'Y', 'main')
+      await Promise.resolve()
+      setGitHubPAT('ghp_after')
+      resolveResponse(jsonResponse({ sha: 'root', tree: [], truncated: false }))
+
+      await expect(pending).rejects.toThrow('stale')
+      expect(cacheMock.setCache).not.toHaveBeenCalled()
+    })
+
+    it('rejects a stale proxy tree response after the OAuth principal changes', async () => {
+      setGitHubOAuthPrincipal('github-user-a')
+      let resolveResponse!: (response: Response) => void
+      mockFetch.mockReturnValueOnce(new Promise<Response>(resolve => { resolveResponse = resolve }))
+
+      const pending = fetchTreeViaProxy('X', 'Y', 'main')
+      await Promise.resolve()
+      setGitHubOAuthPrincipal('github-user-b')
+      resolveResponse(jsonResponse({ sha: 'root', tree: [], truncated: false }))
+
+      await expect(pending).rejects.toThrow('stale')
+      expect(cacheMock.setCache).not.toHaveBeenCalled()
+    })
+
+    it('rejects a stale blame response after clearGitHubCache', async () => {
+      setGitHubPAT('ghp_before')
+      let resolveResponse!: (response: Response) => void
+      mockFetch.mockReturnValueOnce(new Promise<Response>(resolve => { resolveResponse = resolve }))
+
+      const pending = fetchBlameViaProxy('X', 'Y', 'main', 'src/index.ts')
+      await Promise.resolve()
+      clearGitHubCache()
+      resolveResponse(jsonResponse(RAW_BLAME_GRAPHQL))
+
+      await expect(pending).rejects.toThrow('stale')
+      expect(cacheMock.setCache).not.toHaveBeenCalled()
+    })
+
+    it('does not publish stale SWR revalidation after an OAuth rotation', async () => {
+      setGitHubOAuthPrincipal('github-user-a')
+      const stale = { owner: 'stale', name: 'repo' }
+      cacheMock.getStale.mockReturnValueOnce({ data: stale, isStale: true })
+      let resolveResponse!: (response: Response) => void
+      mockFetch.mockReturnValueOnce(new Promise<Response>(resolve => { resolveResponse = resolve }))
+
+      await expect(fetchRepoViaProxy('X', 'Y')).resolves.toEqual(stale)
+      setGitHubOAuthPrincipal('github-user-b')
+      resolveResponse(jsonResponse({ owner: 'fresh', name: 'repo' }))
+      await Promise.resolve()
+      await Promise.resolve()
+
+      expect(cacheMock.setCache).not.toHaveBeenCalled()
+    })
+
     it('uses direct GitHub API URL when PAT is set', async () => {
       setGitHubPAT('ghp_direct')
       mockFetch.mockResolvedValueOnce(jsonResponse(RAW_REPO))
@@ -270,7 +374,7 @@ describe('Direct GitHub API calls (PAT mode)', () => {
 
       const first = await fetchTreeViaProxy('X', 'Y', 'main')
       const [cacheKey, cachedValue] = cacheMock.setCache.mock.calls[0]
-      expect(cacheKey).toMatch(/^tree:pat:\d+:X\/Y:main$/)
+      expect(cacheKey).toMatch(/^tree:X\/Y:main:principal:pat:\d+:epoch:\d+$/)
       expect(cacheKey).not.toContain('ghp_complete')
       cacheMock.getCached.mockImplementation((key: string) => key === cacheKey ? cachedValue : null)
 
@@ -288,6 +392,52 @@ describe('Direct GitHub API calls (PAT mode)', () => {
 
       expect(mockFetch).toHaveBeenCalledTimes(2)
       expect(cacheMock.setCache).not.toHaveBeenCalled()
+    })
+
+    it('returns a partial result and cancels a declared oversized direct-PAT tree response', async () => {
+      setGitHubPAT('ghp_tree_large')
+      const cancel = vi.fn()
+      mockFetch.mockResolvedValueOnce(new Response(new ReadableStream<Uint8Array>({ cancel }), {
+        status: 200,
+        headers: { 'Content-Length': String(8 * 1024 * 1024 + 1) },
+      }))
+
+      const result = await fetchTreeViaProxy('X', 'Y', 'main')
+
+      expect(result).toMatchObject({ status: 'partial', reasons: ['limit-exceeded'] })
+      expect(cancel).toHaveBeenCalled()
+    })
+
+    it('returns a partial result and cancels a chunked oversized direct-PAT tree response', async () => {
+      setGitHubPAT('ghp_tree_chunked')
+      const cancel = vi.fn()
+      mockFetch.mockResolvedValueOnce(new Response(new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode('{"sha":"root","tree":[],"truncated":false}'))
+          controller.enqueue(new Uint8Array(8 * 1024 * 1024))
+        },
+        cancel,
+      }), { status: 200 }))
+
+      const result = await fetchTreeViaProxy('X', 'Y', 'main')
+
+      expect(result).toMatchObject({ status: 'partial', reasons: ['limit-exceeded'] })
+      expect(cancel).toHaveBeenCalled()
+    })
+
+    it('bounds and cancels an oversized direct-PAT tree error response', async () => {
+      setGitHubPAT('ghp_tree_error_large')
+      const cancel = vi.fn()
+      mockFetch.mockResolvedValueOnce(new Response(new ReadableStream<Uint8Array>({ cancel }), {
+        status: 500,
+        statusText: 'Server Error',
+        headers: { 'Content-Length': String(8 * 1024 * 1024 + 1) },
+      }))
+
+      const result = await fetchTreeViaProxy('X', 'Y', 'main')
+
+      expect(result).toMatchObject({ status: 'partial', reasons: ['limit-exceeded'] })
+      expect(cancel).toHaveBeenCalled()
     })
 
     it('does not reuse a complete tree after the PAT identity changes', async () => {
@@ -417,6 +567,22 @@ describe('Direct GitHub API calls (PAT mode)', () => {
         forks: 40000, language: 'JavaScript', topics: ['ui', 'frontend'],
         isPrivate: false, url: 'https://github.com/facebook/react',
         size: 300000, openIssuesCount: 800, pushedAt: '2026-01-15T00:00:00Z', license: 'MIT',
+        isFork: false, parentFullName: null,
+      })
+    })
+
+    it('preserves fork metadata in PAT mode', async () => {
+      mockFetch.mockResolvedValueOnce(jsonResponse({
+        ...RAW_REPO,
+        fork: true,
+        parent: { full_name: 'upstream/react' },
+      }))
+
+      const result = await fetchRepoViaProxy('facebook', 'react')
+
+      expect(result).toMatchObject({
+        isFork: true,
+        parentFullName: 'upstream/react',
       })
     })
 

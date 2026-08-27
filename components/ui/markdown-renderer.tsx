@@ -411,6 +411,32 @@ function MermaidDiagramBlock({ children }: { children: string }) {
 const REMARK_PLUGINS = [remarkGfm]
 
 const MARKDOWN_COMPONENTS: Components = {
+  img({ src, alt }) {
+    const imageSource = typeof src === "string" ? src : ""
+    let remote = true
+    try {
+      const localBase = new URL('https://markdown.local/')
+      const resolved = new URL(imageSource, localBase)
+      remote = ['http:', 'https:'].includes(resolved.protocol) && resolved.origin !== localBase.origin
+    } catch {
+      // Malformed URLs must not fall through to an automatically loaded image.
+    }
+
+    if (remote) {
+      return (
+        <a
+          href={imageSource}
+          target="_blank"
+          rel="noopener noreferrer"
+          aria-label={`Remote image blocked${alt ? `: ${alt}` : ""}`}
+        >
+          Remote image blocked — open to view{alt ? ` (${alt})` : ""}
+        </a>
+      )
+    }
+
+    return <img src={imageSource} alt={alt ?? ""} loading="lazy" />
+  },
   code({ className: codeClassName, children }) {
     const match = /language-(\w+)/.exec(codeClassName || "")
 

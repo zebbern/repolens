@@ -51,6 +51,7 @@ export const GET = withGitHubCachePolicy(async function GET(request: NextRequest
       perPage: per_page,
       page,
       path,
+      signal: request.signal,
     })
 
     return NextResponse.json(commits)

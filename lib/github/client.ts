@@ -8,7 +8,11 @@ import {
   clearCache as clearMemoryCache,
   invalidatePattern,
 } from "@/lib/cache/memory-cache"
-import { resolveRepoTree } from '@/lib/github/tree-resolver'
+import {
+  resolveRepoTree,
+  TREE_RESOLUTION_MAX_RESPONSE_BYTES,
+} from '@/lib/github/tree-resolver'
+import { readBoundedJsonResponse, type BoundedJsonResponse } from '@/lib/api/json-body'
 
 // ---------------------------------------------------------------------------
 // TTL constants (milliseconds)
@@ -33,19 +37,87 @@ const CACHE_TTL_LANGUAGES     = 600_000  // 10 minutes
 
 let _githubPAT: string | null = null
 let _githubPATIdentity = 0
+let _githubOAuthPrincipal: string | null = null
+let _githubCacheEpoch = 0
 
 export function setGitHubPAT(token: string | null): void {
-  if (token !== _githubPAT) _githubPATIdentity++
+  if (token !== _githubPAT) {
+    _githubPATIdentity++
+    _githubCacheEpoch++
+  }
   _githubPAT = token
+}
+
+/**
+ * Set the stable OAuth account identity used to scope proxy responses.
+ * This must be an account identifier (for example, NextAuth token.sub),
+ * never an OAuth access token.
+ */
+export function setGitHubOAuthPrincipal(principal: string | null): void {
+  if (principal !== _githubOAuthPrincipal) _githubCacheEpoch++
+  _githubOAuthPrincipal = principal
 }
 
 export function getGitHubPAT(): string | null {
   return _githubPAT
 }
 
+function credentialFingerprint(token: string): string {
+  // Keep persistent cache records free of the PAT while retaining a stable
+  // namespace across browser reloads.
+  let hash = 2166136261
+  for (let i = 0; i < token.length; i++) {
+    hash ^= token.charCodeAt(i)
+    hash = Math.imul(hash, 16777619)
+  }
+  return (hash >>> 0).toString(16).padStart(8, '0')
+}
+
+export function getGitHubCredentialPrincipal(): string | null {
+  if (_githubPAT) return `pat:${credentialFingerprint(_githubPAT)}`
+  if (_githubOAuthPrincipal) return `oauth:${encodeURIComponent(_githubOAuthPrincipal)}`
+  return null
+}
+
 // ---------------------------------------------------------------------------
 // Internal helpers
 // ---------------------------------------------------------------------------
+
+interface CacheContext {
+  key: string
+  principalIdentity: string
+  epoch: number
+}
+
+/** Scope every response to the credential principal and cache lifecycle. */
+function createCacheContext(baseKey: string): CacheContext {
+  const principal = _githubPAT
+    ? `pat:${_githubPATIdentity}`
+    : _githubOAuthPrincipal
+      ? `oauth:${encodeURIComponent(_githubOAuthPrincipal)}`
+      : 'anonymous'
+
+  return {
+    key: `${baseKey}:principal:${principal}:epoch:${_githubCacheEpoch}`,
+    principalIdentity: principal,
+    epoch: _githubCacheEpoch,
+  }
+}
+
+function isCurrentCacheContext(context: CacheContext): boolean {
+  const currentPrincipal = _githubPAT
+    ? `pat:${_githubPATIdentity}`
+    : _githubOAuthPrincipal
+      ? `oauth:${encodeURIComponent(_githubOAuthPrincipal)}`
+      : 'anonymous'
+  return context.principalIdentity === currentPrincipal && context.epoch === _githubCacheEpoch
+}
+
+function throwIfCacheContextStale(context: CacheContext): void {
+  if (!isCurrentCacheContext(context)) {
+    throw new DOMException('GitHub response is stale after a credential change', 'AbortError')
+  }
+}
 
 /** Build headers for proxy requests, attaching the PAT when available. */
 function buildProxyHeaders(): HeadersInit {
@@ -194,7 +266,23 @@ function getRequestSignal(options: ProxyRequestOptions): AbortSignal | undefined
   return AbortSignal.any(signals)
 }
 
-async function directFetch(url: string, pat: string, options: ProxyRequestOptions = {}): Promise<unknown> {
+async function directFetch<T>(
+  url: string,
+  pat: string,
+  options?: ProxyRequestOptions,
+): Promise<T>
+async function directFetch<T>(
+  url: string,
+  pat: string,
+  options: ProxyRequestOptions,
+  maxResponseBytes: number,
+): Promise<BoundedJsonResponse<T>>
+async function directFetch<T = unknown>(
+  url: string,
+  pat: string,
+  options: ProxyRequestOptions = {},
+  maxResponseBytes?: number,
+): Promise<T | BoundedJsonResponse<T>> {
   const fetchOptions: RequestInit = {
     headers: {
       'Accept': 'application/vnd.github.v3+json',
@@ -206,7 +294,14 @@ async function directFetch(url: string, pat: string, options: ProxyRequestOption
   const response = await fetch(url, fetchOptions)
 
   if (!response.ok) {
-    const body = await response.json().catch(() => ({}))
+    let body: unknown = {}
+    try {
+      body = maxResponseBytes === undefined
+        ? await response.json()
+        : (await readBoundedJsonResponse<Record<string, unknown>>(response, maxResponseBytes)).data
+    } catch (error) {
+      if (error instanceof Error && error.name === 'ResponseBodyTooLargeError') throw error
+    }
     const ghMessage = (body as { message?: string }).message
     if (response.status === 404) {
       throw new Error(ghMessage ?? 'Not found. Make sure the repository exists.')
@@ -223,7 +318,10 @@ async function directFetch(url: string, pat: string, options: ProxyRequestOption
     throw new Error(ghMessage ?? `Request failed: ${response.statusText}`)
   }
 
-  return response.json()
+  if (maxResponseBytes !== undefined) {
+    return readBoundedJsonResponse<T>(response, maxResponseBytes)
+  }
+  return response.json() as Promise<T>
 }
 
 /**
@@ -274,6 +372,8 @@ interface GitHubApiRepoResponse {
   open_issues_count?: number
   pushed_at?: string
   license?: { spdx_id?: string } | null
+  fork?: boolean
+  parent?: { full_name?: string } | null
 }
 
 interface GitHubApiTagResponse {
@@ -355,6 +455,8 @@ function normalizeRepo(data: GitHubApiRepoResponse): GitHubRepo {
     openIssuesCount: data.open_issues_count ?? 0,
     pushedAt: data.pushed_at ?? '',
     license: data.license?.spdx_id ?? null,
+    isFork: data.fork ?? false,
+    parentFullName: data.parent?.full_name ?? null,
   }
 }
 
@@ -583,11 +685,14 @@ async function proxyFetch<T>(url: string, options: ProxyRequestOptions = {}): Pr
  * while revalidating in the background, or fetches on a complete miss.
  */
 async function cachedProxyFetch<T>(
-  cacheKey: string,
+  baseCacheKey: string,
   url: string,
   ttl: number,
   options: ProxyRequestOptions = {},
 ): Promise<T> {
+  const cacheContext = createCacheContext(baseCacheKey)
+  const cacheKey = cacheContext.key
+
   // 1. Fresh cache hit — return immediately
   const fresh = getCached<T>(cacheKey)
   if (fresh !== null) return fresh
@@ -598,7 +703,7 @@ async function cachedProxyFetch<T>(
     // Fire-and-forget background revalidation
     proxyFetch<T>(url, options)
       .then((data) => {
-        if (!options.signal?.aborted) setCache(cacheKey, data, ttl)
+        if (!options.signal?.aborted && isCurrentCacheContext(cacheContext)) setCache(cacheKey, data, ttl)
       })
       .catch((err) => {
         if (options.signal?.aborted) return
@@ -612,6 +717,7 @@ async function cachedProxyFetch<T>(
   if (options.signal?.aborted) {
     throw options.signal.reason ?? new DOMException('The operation was aborted', 'AbortError')
   }
+  throwIfCacheContextStale(cacheContext)
   setCache(cacheKey, data, ttl)
   return data
 }
@@ -643,9 +749,8 @@ export async function fetchTreeViaProxy(
   options: { signal?: AbortSignal } = {},
 ): Promise<ResolvedRepoTree> {
   const pat = getGitHubPAT()
-  const key = pat
-    ? `tree:pat:${_githubPATIdentity}:${owner}/${name}:${sha}`
-    : `tree:${owner}/${name}:${sha}`
+  const cacheContext = createCacheContext(`tree:${owner}/${name}:${sha}`)
+  const key = cacheContext.key
   const cached = getCached<ResolvedRepoTree>(key)
   if (cached?.status === 'complete') return cached
 
@@ -654,8 +759,16 @@ export async function fetchTreeViaProxy(
     resolved = await resolveRepoTree(sha, async ({ sha: treeSha, recursive, signal }) => {
       const e = encodeURIComponent
       const base = `${GITHUB_API_BASE}/repos/${e(owner)}/${e(name)}/git/trees/${e(treeSha)}`
-      const raw = await directFetch(recursive ? `${base}?recursive=1` : base, pat, { signal })
-      return raw as RepoTree
+      const bounded = await directFetch<RepoTree>(
+        recursive ? `${base}?recursive=1` : base,
+        pat,
+        { signal },
+        TREE_RESOLUTION_MAX_RESPONSE_BYTES,
+      )
+      if (!('data' in bounded) || typeof bounded.bytes !== 'number') {
+        throw new Error('GitHub tree response was not bounded')
+      }
+      return { tree: bounded.data, bytes: bounded.bytes }
     }, { signal: options.signal })
   } else {
     const url = `/api/github/tree?owner=${encodeURIComponent(owner)}&name=${encodeURIComponent(name)}&sha=${encodeURIComponent(sha)}`
@@ -676,7 +789,10 @@ export async function fetchTreeViaProxy(
       }
     }
   }
-  if (resolved.status === 'complete' && !options.signal?.aborted) setCache(key, resolved, CACHE_TTL_TREE)
+  throwIfCacheContextStale(cacheContext)
+  if (resolved.status === 'complete' && !options.signal?.aborted && isCurrentCacheContext(cacheContext)) {
+    setCache(key, resolved, CACHE_TTL_TREE)
+  }
   return resolved
 }
 
@@ -774,7 +890,7 @@ export async function fetchBranchesViaProxy(
 export async function fetchCommitsViaProxy(
   owner: string,
   name: string,
-  opts?: { sha?: string; since?: string; until?: string; perPage?: number },
+  opts?: { sha?: string; since?: string; until?: string; perPage?: number; signal?: AbortSignal },
 ): Promise<GitHubCommit[]> {
   const params = new URLSearchParams({ owner, name })
   if (opts?.sha) params.set('sha', opts.sha)
@@ -784,7 +900,7 @@ export async function fetchCommitsViaProxy(
 
   const key = `commits:${owner}/${name}:${params.toString()}`
   const url = `/api/github/commits?${params.toString()}`
-  return cachedProxyFetch<GitHubCommit[]>(key, url, CACHE_TTL_COMMITS)
+  return cachedProxyFetch<GitHubCommit[]>(key, url, CACHE_TTL_COMMITS, { signal: opts?.signal })
 }
 
 /**
@@ -830,9 +946,11 @@ export async function fetchBlameViaProxy(
   name: string,
   ref: string,
   path: string,
+  options: ProxyRequestOptions = {},
 ): Promise<BlameData> {
   const safePath = path.replace(/:/g, '%3A')
-  const key = `blame:${owner}/${name}:${ref}:${safePath}`
+  const cacheContext = createCacheContext(`blame:${owner}/${name}:${ref}:${safePath}`)
+  const key = cacheContext.key
 
   // Check fresh cache
   const fresh = getCached<BlameData>(key)
@@ -842,16 +960,23 @@ export async function fetchBlameViaProxy(
   const stale = getStale<BlameData>(key)
   if (stale !== null && stale.isStale) {
     // Fire-and-forget background revalidation
-    fetchBlameFromApi(owner, name, ref, path)
-      .then((data) => setCache(key, data, CACHE_TTL_BLAME))
+    fetchBlameFromApi(owner, name, ref, path, options)
+      .then((data) => {
+        if (!options.signal?.aborted && isCurrentCacheContext(cacheContext)) setCache(key, data, CACHE_TTL_BLAME)
+      })
       .catch((err) => {
+        if (options.signal?.aborted) return
         console.warn('[fetchBlameViaProxy] Background revalidation failed:', key, err)
       })
     return stale.data
   }
 
   // Cache miss — fetch, cache, return
-  const data = await fetchBlameFromApi(owner, name, ref, path)
+  const data = await fetchBlameFromApi(owner, name, ref, path, options)
+  if (options.signal?.aborted) {
+    throw options.signal.reason ?? new DOMException('The operation was aborted', 'AbortError')
+  }
+  throwIfCacheContextStale(cacheContext)
   setCache(key, data, CACHE_TTL_BLAME)
   return data
 }
@@ -862,6 +987,7 @@ async function fetchBlameFromApi(
   name: string,
   ref: string,
   path: string,
+  options: ProxyRequestOptions = {},
 ): Promise<BlameData> {
   // Direct mode: PAT available — call GitHub GraphQL API directly
   const pat = getGitHubPAT()
@@ -878,6 +1004,7 @@ async function fetchBlameFromApi(
         query: BLAME_QUERY,
         variables: { owner, name, expression },
       }),
+      signal: getRequestSignal(options),
     })
 
     if (response.status === 401) {
@@ -913,6 +1040,7 @@ async function fetchBlameFromApi(
     method: 'POST',
     headers,
     body: JSON.stringify({ owner, name, ref, path }),
+    signal: getRequestSignal(options),
   })
 
   if (!response.ok) {
@@ -935,14 +1063,14 @@ export async function fetchFileCommitsViaProxy(
   owner: string,
   name: string,
   path: string,
-  opts?: { perPage?: number },
+  opts?: { perPage?: number; signal?: AbortSignal },
 ): Promise<GitHubCommit[]> {
   const params = new URLSearchParams({ owner, name, path })
   if (opts?.perPage !== undefined) params.set('per_page', String(opts.perPage))
 
   const key = `file-commits:${owner}/${name}:${path}:${params.toString()}`
   const url = `/api/github/commits?${params.toString()}`
-  return cachedProxyFetch<GitHubCommit[]>(key, url, CACHE_TTL_COMMITS)
+  return cachedProxyFetch<GitHubCommit[]>(key, url, CACHE_TTL_COMMITS, { signal: opts?.signal })
 }
 
 /**
@@ -952,10 +1080,11 @@ export async function fetchCommitDetailViaProxy(
   owner: string,
   name: string,
   sha: string,
+  options: ProxyRequestOptions = {},
 ): Promise<CommitDetail> {
   const key = `commit-detail:${owner}/${name}:${sha}`
   const url = `/api/github/commit/${encodeURIComponent(sha)}?owner=${encodeURIComponent(owner)}&name=${encodeURIComponent(name)}`
-  return cachedProxyFetch<CommitDetail>(key, url, CACHE_TTL_COMMIT_DETAIL)
+  return cachedProxyFetch<CommitDetail>(key, url, CACHE_TTL_COMMIT_DETAIL, options)
 }
 
 // ---------------------------------------------------------------------------
@@ -968,7 +1097,7 @@ export async function fetchCommitDetailViaProxy(
 export async function fetchPullsViaProxy(
   owner: string,
   name: string,
-  opts?: { state?: string; perPage?: number; page?: number; sort?: string; direction?: string },
+  opts?: { state?: string; perPage?: number; page?: number; sort?: string; direction?: string; signal?: AbortSignal },
 ): Promise<PRMetadata[]> {
   const params = new URLSearchParams()
   params.set('owner', owner)
@@ -981,7 +1110,7 @@ export async function fetchPullsViaProxy(
 
   const key = `pulls:${owner}/${name}:${params.toString()}`
   const url = `/api/github/pulls?${params.toString()}`
-  return cachedProxyFetch<PRMetadata[]>(key, url, CACHE_TTL_PULLS)
+  return cachedProxyFetch<PRMetadata[]>(key, url, CACHE_TTL_PULLS, { signal: opts?.signal })
 }
 
 /**
@@ -991,10 +1120,11 @@ export async function fetchPullRequestViaProxy(
   owner: string,
   name: string,
   number: number,
+  options: ProxyRequestOptions = {},
 ): Promise<PRMetadata> {
   const key = `pr:${owner}/${name}:${number}`
   const url = `/api/github/pulls/${number}?owner=${encodeURIComponent(owner)}&name=${encodeURIComponent(name)}`
-  return cachedProxyFetch<PRMetadata>(key, url, CACHE_TTL_PULLS)
+  return cachedProxyFetch<PRMetadata>(key, url, CACHE_TTL_PULLS, options)
 }
 
 /**
@@ -1004,7 +1134,7 @@ export async function fetchPullRequestFilesViaProxy(
   owner: string,
   name: string,
   number: number,
-  opts?: { perPage?: number; page?: number },
+  opts?: { perPage?: number; page?: number; signal?: AbortSignal },
 ): Promise<PRFile[]> {
   const params = new URLSearchParams()
   params.set('owner', owner)
@@ -1014,7 +1144,7 @@ export async function fetchPullRequestFilesViaProxy(
 
   const key = `pr-files:${owner}/${name}:${number}:${params.toString()}`
   const url = `/api/github/pulls/${number}/files?${params.toString()}`
-  return cachedProxyFetch<PRFile[]>(key, url, CACHE_TTL_PULLS)
+  return cachedProxyFetch<PRFile[]>(key, url, CACHE_TTL_PULLS, { signal: opts?.signal })
 }
 
 /**
@@ -1024,7 +1154,7 @@ export async function fetchPullRequestCommentsViaProxy(
   owner: string,
   name: string,
   number: number,
-  opts?: { perPage?: number; page?: number },
+  opts?: { perPage?: number; page?: number; signal?: AbortSignal },
 ): Promise<PRComment[]> {
   const params = new URLSearchParams()
   params.set('owner', owner)
@@ -1034,7 +1164,7 @@ export async function fetchPullRequestCommentsViaProxy(
 
   const key = `pr-comments:${owner}/${name}:${number}:${params.toString()}`
   const url = `/api/github/pulls/${number}/comments?${params.toString()}`
-  return cachedProxyFetch<PRComment[]>(key, url, CACHE_TTL_PULLS)
+  return cachedProxyFetch<PRComment[]>(key, url, CACHE_TTL_PULLS, { signal: opts?.signal })
 }
 
 // ---------------------------------------------------------------------------
@@ -1043,6 +1173,7 @@ export async function fetchPullRequestCommentsViaProxy(
 
 /** Clear all cached GitHub API responses. */
 export function clearGitHubCache(): void {
+  _githubCacheEpoch++
   clearMemoryCache()
 }
 

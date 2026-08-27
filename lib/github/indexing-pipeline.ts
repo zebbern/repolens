@@ -1,7 +1,7 @@
 import type { Dispatch, SetStateAction } from 'react'
 import type { GitHubRepo, FileNode, RepositoryCoverage } from '@/types/repository'
 import { detectLanguage } from '@/lib/github/fetcher'
-import { fetchFileViaProxy } from '@/lib/github/client'
+import { fetchFileViaProxy, getGitHubCredentialPrincipal } from '@/lib/github/client'
 import type { CodeIndex } from '@/lib/code/code-index'
 import { createEmptyIndex, createEmptyIndexWithStore, batchIndexFiles, batchIndexMetadataOnly, flattenFiles } from '@/lib/code/code-index'
 import { IDBContentStore, LazyContentStore } from '@/lib/code/content-store'
@@ -42,7 +42,7 @@ function warnNotCached(error: unknown): void {
 /**
  * Downloads, indexes, and caches repository files.
  *
- * Tries a zipball download first (for repos < 200 MB), then falls back to
+ * Tries a zipball download first (for repos < 250 MB), then falls back to
  * per-file fetching with concurrency control.
  */
 export async function startIndexing(
@@ -51,9 +51,10 @@ export async function startIndexing(
   treeSha: string,
   signal: AbortSignal,
   callbacks: IndexingCallbacks,
-  options: { token?: string; coverage?: RepositoryCoverage } = {},
+  options: { token?: string; coverage?: RepositoryCoverage; principal?: string } = {},
 ): Promise<void> {
   const { setIndexingProgress, setLoadingStage, setCodeIndex, setFailedFiles, setCoverage } = callbacks
+  const principal = options.principal ?? getGitHubCredentialPrincipal()
 
   // Get all indexable files from tree metadata
   const indexableFiles = flattenFiles(fileTree).filter(f =>
@@ -75,7 +76,9 @@ export async function startIndexing(
     const coverage = updateRepositoryCoverage(initialCoverage, 0, 0, [])
     const emptyIndex = createEmptyIndex()
     emptyIndex.coverage = coverage
-    try {
+    if (repoData.isPrivate && !principal) {
+      warnNotCached(new Error('Private repository cache requires a credential principal'))
+    } else try {
       await withCacheMutationLock(signal, async lease => {
         await emptyIndex.contentStore.flush()
         if (signal.aborted) return
@@ -83,6 +86,8 @@ export async function startIndexing(
           description: repoData.description,
           stars: repoData.stars,
           language: repoData.language,
+          visibility: repoData.isPrivate ? 'private' : 'public',
+          ...(repoData.isPrivate && principal ? { principal } : {}),
         })
       })
     } catch (error) {
@@ -98,7 +103,7 @@ export async function startIndexing(
     return
   }
 
-  // Phase 4: Lazy content loading for repos >= 200 MB
+  // Phase 4: Lazy content loading for repos >= 250 MB
   if (repoData.size != null && repoData.size >= LAZY_CONTENT_THRESHOLD_KB) {
     setLoadingStage('lazy-indexing')
 
@@ -155,7 +160,7 @@ export async function startIndexing(
 
   const useIDB = repoData.size != null && repoData.size >= getIdbThresholdKB()
 
-  // B1: Try streaming zipball for repos under 200 MB
+  // B1: Try streaming zipball for repos under 250 MB
   if (repoData.size != null && repoData.size < LAZY_CONTENT_THRESHOLD_KB) {
     try {
       setLoadingStage('downloading')
@@ -276,8 +281,11 @@ export async function startIndexing(
     errors,
   )
   let finalIndex: CodeIndex | undefined
-  if (!isCoverageComplete(coverage)) {
+  if (!isCoverageComplete(coverage) || (repoData.isPrivate && !principal)) {
     finalIndex = batchIndexFiles(createEmptyIndex(), accumulated)
+    if (repoData.isPrivate && !principal) {
+      warnNotCached(new Error('Private repository cache requires a credential principal'))
+    }
   } else try {
     await withCacheMutationLock(signal, async lease => {
       requireCrossContextCacheCoordination(lease)
@@ -313,6 +321,8 @@ export async function startIndexing(
         description: repoData.description,
         stars: repoData.stars,
         language: repoData.language,
+        visibility: repoData.isPrivate ? 'private' : 'public',
+        ...(repoData.isPrivate && principal ? { principal } : {}),
       })
     })
   } catch (error) {

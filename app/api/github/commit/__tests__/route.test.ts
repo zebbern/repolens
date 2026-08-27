@@ -79,7 +79,7 @@ describe('GET /api/github/commit/[sha]', () => {
     expect(body).toEqual(commitData)
     expect(mockFetchCommitDetail).toHaveBeenCalledWith(
       'facebook', 'react', 'abc123def456',
-      { token: 'mock-token' },
+      expect.objectContaining({ token: 'mock-token', signal: expect.any(AbortSignal) }),
     )
   })
 

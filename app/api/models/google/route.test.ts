@@ -59,6 +59,10 @@ describe('POST /api/models/google', () => {
     expect(ids).toContain('gemini-1.5-flash')
     expect(ids).not.toContain('text-bison')
     expect(ids).not.toContain('embedding-001')
+    expect(mockFetch).toHaveBeenCalledWith(
+      'https://generativelanguage.googleapis.com/v1beta/models?pageSize=1000',
+      { headers: { 'x-goog-api-key': 'AIvalid-key' } },
+    )
   })
 
   it('returns 400 when API key is missing', async () => {
@@ -81,6 +85,63 @@ describe('POST /api/models/google', () => {
 
     expect(response.status).toBe(401)
     expect(data.error.message).toBe('Invalid API key')
+  })
+
+  it('normalizes Google\'s structured 400 invalid-key response to 401', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 400,
+      json: async () => ({
+        error: {
+          code: 400,
+          status: 'INVALID_ARGUMENT',
+          details: [{
+            '@type': 'type.googleapis.com/google.rpc.ErrorInfo',
+            reason: 'API_KEY_INVALID',
+            domain: 'googleapis.com',
+          }],
+        },
+      }),
+    })
+
+    const response = await POST(createRequest({ apiKey: 'bad-key' }))
+    const data = await response.json()
+
+    expect(response.status).toBe(401)
+    expect(data.error.message).toBe('Invalid API key')
+  })
+
+  it('preserves a generic upstream 400 without invalidating credentials', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 400,
+      json: async () => ({
+        error: {
+          code: 400,
+          status: 'INVALID_ARGUMENT',
+          details: [],
+        },
+      }),
+    })
+
+    const response = await POST(createRequest({ apiKey: 'AIvalid-key' }))
+    const data = await response.json()
+
+    expect(response.status).toBe(400)
+    expect(data.error.message).toBe('Failed to fetch models')
+  })
+
+  it('propagates an upstream service outage instead of reporting invalid credentials', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 503,
+    })
+
+    const response = await POST(createRequest({ apiKey: 'AIvalid-key' }))
+    const data = await response.json()
+
+    expect(response.status).toBe(503)
+    expect(data.error.message).toBe('Failed to fetch models')
   })
 
   it('returns 500 when fetch throws an error', async () => {
@@ -112,6 +173,16 @@ describe('POST /api/models/google', () => {
 
     expect(response.status).toBe(400)
     expect(data.error.message).toBe('API key required')
+  })
+
+  it('rejects an oversized JSON body before calling Google', async () => {
+    const response = await POST(createRequest({
+      apiKey: 'AIvalid-key',
+      padding: 'x'.repeat(5_000),
+    }))
+
+    expect(response.status).toBe(413)
+    expect(mockFetch).not.toHaveBeenCalled()
   })
 
   it('includes contextLength from upstream data', async () => {

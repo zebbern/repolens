@@ -88,10 +88,17 @@ export async function streamUnzipFiles(
     if (slashIndex === -1) return
     const relativePath = file.name.substring(slashIndex + 1)
     if (!relativePath) return
-    if (relativePath.split('/').includes('..')) return
+      if (relativePath.split('/').includes('..')) return
 
-    // Skip non-indexable files (don't call start → fflate skips decompression)
-    if (!isFileIndexable(relativePath, 0)) return
+      // Skip non-indexable files (don't call start → fflate skips decompression)
+      if (!isFileIndexable(relativePath, 0)) return
+
+      if (typeof file.originalSize === 'number' && file.originalSize > maxFileSize) {
+        totalSize = Math.min(maxTotalSize, totalSize + file.originalSize)
+        onSkipped?.(relativePath, 'oversized')
+        if (totalSize >= maxTotalSize) aborted = true
+        return
+      }
 
     const chunks: Uint8Array[] = []
     let fileSize = 0
@@ -105,9 +112,19 @@ export async function streamUnzipFiles(
       if (aborted || skipped) return
 
       fileSize += data.length
+      const nextTotalSize = totalSize + data.length
+      if (nextTotalSize > maxTotalSize) {
+        totalSize = maxTotalSize
+        aborted = true
+        file.terminate()
+        console.warn(`Streaming zipball extraction exceeded ${maxTotalSize} bytes — stopping`)
+        return
+      }
+      totalSize = nextTotalSize
       if (fileSize > maxFileSize) {
         skipped = true
         onSkipped?.(relativePath, 'oversized')
+        file.terminate()
         return
       }
 
@@ -127,13 +144,6 @@ export async function streamUnzipFiles(
           onSkipped?.(relativePath, 'binary')
           return
         }
-        totalSize += content.length
-        if (totalSize > maxTotalSize) {
-          aborted = true
-          console.warn(`Streaming zipball extraction exceeded ${maxTotalSize} bytes — stopping`)
-          return
-        }
-
         count++
         onFile(relativePath, content)
       }

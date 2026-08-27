@@ -73,6 +73,19 @@ describe('POST /api/models/openai', () => {
     expect(data.error.message).toBe('Invalid API key')
   })
 
+  it('propagates an upstream rate limit instead of reporting invalid credentials', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 429,
+    })
+
+    const response = await POST(createRequest({ apiKey: 'sk-valid-key' }))
+    const data = await response.json()
+
+    expect(response.status).toBe(429)
+    expect(data.error.message).toBe('Failed to fetch models')
+  })
+
   it('returns 500 when fetch throws an error', async () => {
     mockFetch.mockRejectedValueOnce(new Error('Network failure'))
 
@@ -102,6 +115,23 @@ describe('POST /api/models/openai', () => {
 
     expect(response.status).toBe(400)
     expect(data.error.message).toBe('API key required')
+  })
+
+  it('returns 400 when the API key exceeds the supported length', async () => {
+    const response = await POST(createRequest({ apiKey: 'x'.repeat(501) }))
+
+    expect(response.status).toBe(400)
+    expect(mockFetch).not.toHaveBeenCalled()
+  })
+
+  it('rejects an oversized JSON body before calling OpenAI', async () => {
+    const response = await POST(createRequest({
+      apiKey: 'sk-valid-key',
+      padding: 'x'.repeat(5_000),
+    }))
+
+    expect(response.status).toBe(413)
+    expect(mockFetch).not.toHaveBeenCalled()
   })
 
   it('sorts models with gpt-4o first, then gpt-4-turbo, then gpt-4, then gpt-3.5', async () => {

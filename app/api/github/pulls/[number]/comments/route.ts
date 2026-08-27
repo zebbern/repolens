@@ -48,6 +48,7 @@ export const GET = withGitHubCachePolicy(async function GET(
       token,
       perPage: per_page,
       page,
+      signal: request.signal,
     })
     return NextResponse.json(comments)
   } catch (error) {

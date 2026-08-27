@@ -6,8 +6,10 @@ import { fetchRepoTree } from "@/lib/github/fetcher"
 import { apiError } from "@/lib/api/error"
 import { GITHUB_NAME_RE } from "@/lib/github/validation"
 import { applyRateLimit } from "@/lib/api/rate-limit"
+import { TREE_RESOLUTION_MAX_REQUESTS } from "@/lib/github/tree-resolver"
 
 export const runtime = 'edge'
+export const TREE_ROUTE_RATE_COST = TREE_RESOLUTION_MAX_REQUESTS
 
 const treeQuerySchema = z.object({
   owner: z.string().min(1).regex(GITHUB_NAME_RE, 'Invalid owner name'),
@@ -16,7 +18,10 @@ const treeQuerySchema = z.object({
 })
 
 export const GET = withGitHubCachePolicy(async function GET(request: NextRequest, token: string | undefined) {
-  const rateLimited = applyRateLimit(request, { bucket: '/api/github/tree' })
+  const rateLimited = applyRateLimit(request, {
+    bucket: '/api/github/tree',
+    cost: TREE_ROUTE_RATE_COST,
+  })
   if (rateLimited) return rateLimited
 
   const params = treeQuerySchema.safeParse({
@@ -39,6 +44,8 @@ export const GET = withGitHubCachePolicy(async function GET(request: NextRequest
 
     return NextResponse.json(tree)
   } catch (error) {
+    if (request.signal.aborted) throw request.signal.reason ?? error
+    if (error instanceof Error && error.name === 'AbortError') throw error
     const message = error instanceof Error ? error.message : "Failed to fetch tree"
     return apiError('GITHUB_ERROR', message, 500)
   }

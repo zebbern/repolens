@@ -67,7 +67,7 @@ describe('GitHub client — caching integration', () => {
       expect(result).toEqual(repoData)
       expect(mockFetch).toHaveBeenCalledOnce()
       expect(cacheMock.setCache).toHaveBeenCalledWith(
-        'repo:facebook/react',
+        expect.stringMatching(/^repo:facebook\/react:principal:(?:anonymous|pat:\d+|oauth:[^:]+):epoch:\d+$/),
         repoData,
         300_000, // 5 min TTL
       )
@@ -133,7 +133,7 @@ describe('GitHub client — caching integration', () => {
       // Background revalidation: wait for microtask queue to flush
       await vi.waitFor(() => {
         expect(cacheMock.setCache).toHaveBeenCalledWith(
-          'repo:stale/repo',
+          expect.stringMatching(/^repo:stale\/repo:principal:(?:anonymous|pat:\d+|oauth:[^:]+):epoch:\d+$/),
           freshData,
           300_000,
         )
@@ -199,19 +199,19 @@ describe('GitHub client — caching integration', () => {
     it('repo key uses "repo:" prefix', async () => {
       mockFetch.mockResolvedValueOnce(mockOkResponse({}))
       await fetchRepoViaProxy('facebook', 'react')
-      expect(cacheMock.getCached).toHaveBeenCalledWith('repo:facebook/react')
+      expect(cacheMock.getCached).toHaveBeenCalledWith(expect.stringMatching(/^repo:facebook\/react:principal:(?:anonymous|pat:\d+|oauth:[^:]+):epoch:\d+$/))
     })
 
     it('tree key includes SHA', async () => {
       mockFetch.mockResolvedValueOnce(mockOkResponse({}))
       await fetchTreeViaProxy('facebook', 'react', 'abc123')
-      expect(cacheMock.getCached).toHaveBeenCalledWith('tree:facebook/react:abc123')
+      expect(cacheMock.getCached).toHaveBeenCalledWith(expect.stringMatching(/^tree:facebook\/react:abc123:principal:(?:anonymous|pat:\d+|oauth:[^:]+):epoch:\d+$/))
     })
 
     it('file key includes branch and path', async () => {
       mockFetch.mockResolvedValueOnce(mockOkResponse({ content: '' }))
       await fetchFileViaProxy('owner', 'repo', 'main', 'src/index.ts')
-      expect(cacheMock.getCached).toHaveBeenCalledWith('file:owner/repo:main:src/index.ts')
+      expect(cacheMock.getCached).toHaveBeenCalledWith(expect.stringMatching(/^file:owner\/repo:main:src\/index\.ts:principal:(?:anonymous|pat:\d+|oauth:[^:]+):epoch:\d+$/))
     })
 
     it('rate-limit key is a constant string', async () => {
@@ -219,7 +219,7 @@ describe('GitHub client — caching integration', () => {
         mockOkResponse({ limit: 60, remaining: 59, reset: 0, authenticated: false }),
       )
       await fetchRateLimitViaProxy()
-      expect(cacheMock.getCached).toHaveBeenCalledWith('rate-limit')
+      expect(cacheMock.getCached).toHaveBeenCalledWith(expect.stringMatching(/^rate-limit:principal:(?:anonymous|pat:\d+|oauth:[^:]+):epoch:\d+$/))
     })
   })
 

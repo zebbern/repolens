@@ -1,4 +1,5 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+
 import { POST } from './route'
 
 const mockFetch = vi.fn()
@@ -12,42 +13,60 @@ function createRequest(body: unknown): Request {
   })
 }
 
+function modelsResponse(): Response {
+  return Response.json({
+    data: [
+      {
+        id: 'claude-opus-4-6',
+        display_name: 'Claude Opus 4.6',
+        max_input_tokens: 200_000,
+      },
+      {
+        id: 'claude-sonnet-4-6',
+        display_name: 'Claude Sonnet 4.6',
+        max_input_tokens: 1_000_000,
+      },
+    ],
+    first_id: 'claude-opus-4-6',
+    has_more: false,
+    last_id: 'claude-sonnet-4-6',
+  })
+}
+
 describe('POST /api/models/anthropic', () => {
   beforeEach(() => {
     vi.clearAllMocks()
   })
 
-  it('returns known Anthropic models when API key is valid (200 response)', async () => {
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      status: 200,
-    })
+  it('returns the models and context limits available to the API key', async () => {
+    mockFetch.mockResolvedValueOnce(modelsResponse())
 
     const response = await POST(createRequest({ apiKey: 'sk-ant-valid-key' }))
     const data = await response.json()
 
     expect(response.status).toBe(200)
-    expect(data.models).toBeDefined()
-    expect(data.models.length).toBe(3)
-
-    const ids = data.models.map((m: { id: string }) => m.id)
-    expect(ids).toContain('claude-sonnet-4-20250514')
-    expect(ids).toContain('claude-opus-4-20250514')
-    expect(ids).toContain('claude-3-haiku-20240307')
+    expect(data.models).toEqual([
+      {
+        id: 'claude-opus-4-6',
+        name: 'Claude Opus 4.6',
+        contextLength: 200_000,
+      },
+      {
+        id: 'claude-sonnet-4-6',
+        name: 'Claude Sonnet 4.6',
+        contextLength: 1_000_000,
+      },
+    ])
   })
 
-  it('returns known models when rate-limited (429 response)', async () => {
-    mockFetch.mockResolvedValueOnce({
-      ok: false,
-      status: 429,
-    })
+  it('returns the upstream rate-limit status instead of accepting the key as validated', async () => {
+    mockFetch.mockResolvedValueOnce(new Response(null, { status: 429 }))
 
     const response = await POST(createRequest({ apiKey: 'sk-ant-valid-key' }))
     const data = await response.json()
 
-    expect(response.status).toBe(200)
-    expect(data.models).toBeDefined()
-    expect(data.models.length).toBe(3)
+    expect(response.status).toBe(429)
+    expect(data.error.message).toBe('Failed to fetch models')
   })
 
   it('returns 400 when API key is missing', async () => {
@@ -69,15 +88,22 @@ describe('POST /api/models/anthropic', () => {
   })
 
   it('returns 401 when API key is invalid', async () => {
-    mockFetch.mockResolvedValueOnce({
-      ok: false,
-      status: 401,
-    })
+    mockFetch.mockResolvedValueOnce(new Response(null, { status: 401 }))
 
     const response = await POST(createRequest({ apiKey: 'sk-ant-invalid' }))
     const data = await response.json()
 
     expect(response.status).toBe(401)
+    expect(data.error.message).toBe('Invalid API key')
+  })
+
+  it('preserves a 403 invalid-credential response', async () => {
+    mockFetch.mockResolvedValueOnce(new Response(null, { status: 403 }))
+
+    const response = await POST(createRequest({ apiKey: 'sk-ant-invalid' }))
+    const data = await response.json()
+
+    expect(response.status).toBe(403)
     expect(data.error.message).toBe('Invalid API key')
   })
 
@@ -88,63 +114,54 @@ describe('POST /api/models/anthropic', () => {
     const data = await response.json()
 
     expect(response.status).toBe(500)
-    expect(data.error.message).toBe('Failed to validate key')
+    expect(data.error.message).toBe('Failed to fetch models')
   })
 
-  it('returns models for other non-401 error statuses', async () => {
-    mockFetch.mockResolvedValueOnce({
-      ok: false,
-      status: 500,
-    })
+  it('returns the upstream failure instead of stale hard-coded models', async () => {
+    mockFetch.mockResolvedValueOnce(new Response(null, { status: 500 }))
 
     const response = await POST(createRequest({ apiKey: 'sk-ant-valid-key' }))
     const data = await response.json()
 
-    expect(response.status).toBe(200)
-    expect(data.models).toBeDefined()
-    expect(data.models.length).toBe(3)
+    expect(response.status).toBe(500)
+    expect(data.error.message).toBe('Failed to fetch models')
+    expect(data.models).toBeUndefined()
   })
 
-  it('sends correct headers and body to Anthropic API', async () => {
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      status: 200,
-    })
+  it('lists models with the documented Anthropic authentication headers', async () => {
+    mockFetch.mockResolvedValueOnce(modelsResponse())
 
     await POST(createRequest({ apiKey: 'sk-ant-test-key' }))
 
     expect(mockFetch).toHaveBeenCalledOnce()
     expect(mockFetch).toHaveBeenCalledWith(
-      'https://api.anthropic.com/v1/messages',
-      expect.objectContaining({
-        method: 'POST',
+      'https://api.anthropic.com/v1/models?limit=1000',
+      {
         headers: {
-          'Content-Type': 'application/json',
           'x-api-key': 'sk-ant-test-key',
           'anthropic-version': '2023-06-01',
         },
-        body: JSON.stringify({
-          model: 'claude-3-haiku-20240307',
-          max_tokens: 1,
-          messages: [{ role: 'user', content: 'Hi' }],
-        }),
-      }),
+      },
     )
   })
 
-  it('includes contextLength in each returned model', async () => {
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      status: 200,
-    })
+  it('returns 500 when the models response does not match the documented schema', async () => {
+    mockFetch.mockResolvedValueOnce(Response.json({ data: 'not-an-array' }))
 
     const response = await POST(createRequest({ apiKey: 'sk-ant-valid-key' }))
     const data = await response.json()
 
-    for (const model of data.models) {
-      expect(model).toHaveProperty('contextLength', 200000)
-      expect(model).toHaveProperty('name')
-      expect(model).toHaveProperty('id')
-    }
+    expect(response.status).toBe(500)
+    expect(data.error.message).toBe('Failed to fetch models')
+  })
+
+  it('rejects an oversized JSON body before calling Anthropic', async () => {
+    const response = await POST(createRequest({
+      apiKey: 'sk-ant-valid-key',
+      padding: 'x'.repeat(5_000),
+    }))
+
+    expect(response.status).toBe(413)
+    expect(mockFetch).not.toHaveBeenCalled()
   })
 })

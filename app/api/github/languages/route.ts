@@ -30,7 +30,7 @@ export const GET = withGitHubCachePolicy(async function GET(request: NextRequest
   const { owner, name } = params.data
 
   try {
-    const languages = await fetchRepoLanguages(owner, name, { token })
+    const languages = await fetchRepoLanguages(owner, name, { token, signal: request.signal })
 
     return NextResponse.json(languages)
   } catch (error) {

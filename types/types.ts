@@ -2,7 +2,7 @@ import { z } from 'zod'
 
 // Shared API route schemas
 export const apiKeyRequestSchema = z.object({
-  apiKey: z.string().min(1),
+  apiKey: z.string().min(1).max(500),
 })
 
 export type ApiKeyRequest = z.infer<typeof apiKeyRequestSchema>
@@ -70,4 +70,3 @@ export interface ResizableLayoutProps {
     minSidebarWidth?: number
     maxSidebarWidth?: number
 }
-

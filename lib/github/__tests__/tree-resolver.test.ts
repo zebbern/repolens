@@ -190,4 +190,157 @@ describe('resolveRepoTree', () => {
     })
     await expect(resolveRepoTree('root', fetchTree, { signal: controller.signal })).rejects.toMatchObject({ name: 'AbortError' })
   })
+
+  it('returns a partial result when aggregate response bytes exceed the ceiling', async () => {
+    const fetchTree = vi.fn().mockResolvedValue({ tree: tree('root', [blob('known.ts')]), bytes: 11 })
+
+    const result = await resolveRepoTree('root', fetchTree, { maxTotalResponseBytes: 10 })
+
+    expect(result).toMatchObject({ status: 'partial', reasons: ['limit-exceeded'], tree: [] })
+  })
+
+  it('returns a partial result when unique entries exceed the ceiling', async () => {
+    const fetchTree = vi.fn().mockResolvedValue({
+      tree: tree('root', [blob('a.ts'), blob('b.ts')]),
+      bytes: 1,
+    })
+
+    const result = await resolveRepoTree('root', fetchTree, { maxEntries: 1 })
+
+    expect(result).toMatchObject({ status: 'partial', reasons: ['limit-exceeded'], tree: [{ path: 'a.ts' }] })
+  })
+
+  it('aborts concurrent tree work as soon as a response limit is reached', async () => {
+    const observedSignals: AbortSignal[] = []
+    const fetchTree = vi.fn(async ({ sha, recursive, signal }: { sha: string; recursive: boolean; signal: AbortSignal }) => {
+      observedSignals.push(signal)
+      if (sha === 'root' && recursive) return { tree: tree('root', [], true), bytes: 1 }
+      if (sha === 'root' && !recursive) return {
+        tree: tree('root', [dir('a', 'a'), dir('b', 'b')]),
+        bytes: 1,
+      }
+      if (sha === 'a') return { tree: tree('a', [blob('a.ts')]), bytes: 100 }
+      return new Promise<never>((_, reject) => {
+        const rejectAbort = () => reject(signal.reason ?? new DOMException('aborted', 'AbortError'))
+        if (signal.aborted) rejectAbort()
+        else signal.addEventListener('abort', rejectAbort, { once: true })
+      })
+    })
+
+    const result = await resolveRepoTree('root', fetchTree, { maxTotalResponseBytes: 10 })
+
+    expect(result).toMatchObject({ status: 'partial', reasons: ['limit-exceeded'] })
+    expect(observedSignals.some((signal) => signal.aborted)).toBe(true)
+  })
+
+  it('settles an in-flight request immediately when a limit aborts an uncooperative fetch', async () => {
+    vi.useFakeTimers()
+    try {
+      let resolveSlow!: (value: { tree: RepoTree; bytes: number }) => void
+      const slow = new Promise<{ tree: RepoTree; bytes: number }>((resolve) => { resolveSlow = resolve })
+      const fetchTree = vi.fn(async ({ sha, recursive }: { sha: string; recursive: boolean }) => {
+        if (sha === 'root' && recursive) return { tree: tree('root', [], true), bytes: 1 }
+        if (sha === 'root' && !recursive) return { tree: tree('root', [dir('a', 'a'), dir('b', 'b')]), bytes: 1 }
+        if (sha === 'a') return { tree: tree('a', [blob('a.ts')]), bytes: 100 }
+        return slow
+      })
+
+      const pending = resolveRepoTree('root', fetchTree, { maxTotalResponseBytes: 10, timeoutMs: 25_000 })
+      await expect(pending).resolves.toMatchObject({ status: 'partial', reasons: ['limit-exceeded'] })
+      resolveSlow({ tree: tree('slow', []), bytes: 1 })
+      expect(vi.getTimerCount()).toBe(0)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('limits normalized UTF-8 path growth caused by subtree prefixes', async () => {
+    const fetchTree = vi.fn(async ({ sha, recursive }: { sha: string; recursive: boolean }) => {
+      if (sha === 'root' && recursive) return { tree: tree('root-sha', [], true), bytes: 1 }
+      if (sha === 'root-sha' && !recursive) return {
+        tree: tree('root-sha', [dir('abcde', 'child')]),
+        bytes: 1,
+      }
+      return { tree: tree('child', [blob('界')]), bytes: 1 }
+    })
+
+    const result = await resolveRepoTree('root', fetchTree, { maxPathBytes: 5 })
+
+    expect(result).toMatchObject({ status: 'partial', reasons: ['limit-exceeded'] })
+    expect(result.tree).toEqual([{ path: 'abcde', sha: 'child', mode: '040000', type: 'tree' }])
+  })
+
+  it('limits aggregate normalized output bytes while merging entries', async () => {
+    const fetchTree = vi.fn().mockResolvedValue({
+      tree: tree('root', [blob('a.ts')]),
+      bytes: 1,
+    })
+
+    const result = await resolveRepoTree('root', fetchTree, { maxNormalizedOutputBytes: 1 })
+
+    expect(result).toMatchObject({ status: 'partial', reasons: ['limit-exceeded'], tree: [] })
+  })
+
+  it('accounts for JSON escaping in the normalized output ceiling', async () => {
+    const escapedPath = '\n'.repeat(50)
+    const item = blob(escapedPath, 'sha')
+    const serializedBytes = new TextEncoder().encode(JSON.stringify(item)).byteLength
+    const fetchTree = vi.fn().mockResolvedValue({
+      tree: tree('root', [item]),
+      bytes: 1,
+    })
+
+    const result = await resolveRepoTree('root', fetchTree, {
+      maxNormalizedOutputBytes: serializedBytes - 1,
+    })
+
+    expect(result).toMatchObject({ status: 'partial', reasons: ['limit-exceeded'], tree: [] })
+  })
+
+  it('stops inspecting the shallow root as soon as a normalized-output limit is hit', async () => {
+    let postLimitTypeReads = 0
+    const poison = {
+      path: 'poison',
+      sha: 'poison',
+      mode: '040000',
+      get type() {
+        postLimitTypeReads++
+        return 'tree' as const
+      },
+    } as RepoTree['tree'][number]
+    const fetchTree = vi.fn(async ({ recursive }: { recursive: boolean }) => (
+      recursive
+        ? { tree: tree('root-sha', [], true), bytes: 1 }
+        : { tree: tree('root-sha', [blob('too-large'), poison]), bytes: 1 }
+    ))
+
+    const result = await resolveRepoTree('root', fetchTree, { maxNormalizedOutputBytes: 1 })
+
+    expect(result).toMatchObject({ status: 'partial', reasons: ['limit-exceeded'] })
+    expect(postLimitTypeReads).toBe(0)
+  })
+
+  it('stops inspecting a shallow child as soon as a path limit is hit', async () => {
+    let postLimitTypeReads = 0
+    const poison = {
+      path: 'poison',
+      sha: 'poison',
+      mode: '040000',
+      get type() {
+        postLimitTypeReads++
+        return 'tree' as const
+      },
+    } as RepoTree['tree'][number]
+    const fetchTree = vi.fn(async ({ sha, recursive }: { sha: string; recursive: boolean }) => {
+      if (sha === 'root' && recursive) return { tree: tree('root-sha', [], true), bytes: 1 }
+      if (sha === 'root-sha' && !recursive) return { tree: tree('root-sha', [dir('a', 'a')]), bytes: 1 }
+      if (sha === 'a' && recursive) return { tree: tree('a', [], true), bytes: 1 }
+      return { tree: tree('a', [blob('too-long'), poison]), bytes: 1 }
+    })
+
+    const result = await resolveRepoTree('root', fetchTree, { maxPathBytes: 5 })
+
+    expect(result).toMatchObject({ status: 'partial', reasons: ['limit-exceeded'] })
+    expect(postLimitTypeReads).toBe(0)
+  })
 })

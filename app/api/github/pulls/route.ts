@@ -47,6 +47,7 @@ export const GET = withGitHubCachePolicy(async function GET(request: NextRequest
       page,
       sort,
       direction,
+      signal: request.signal,
     })
 
     return NextResponse.json(pulls)

@@ -45,7 +45,7 @@ const nextConfig = {
               "worker-src 'self' blob:",
               "connect-src 'self' data: blob: https://api.github.com https://raw.githubusercontent.com https://github.com https://cdn.jsdelivr.net",
               "style-src 'self' 'unsafe-inline'",
-              "img-src 'self' data: blob: https:",
+              "img-src 'self' data: blob: https://avatars.githubusercontent.com",
               "font-src 'self' data:",
               "frame-src 'self'",
               "object-src 'none'",

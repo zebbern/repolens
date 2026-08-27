@@ -42,7 +42,7 @@ export const GET = withGitHubCachePolicy(async function GET(
   const { owner, name } = query.data
 
   try {
-    const data = await fetchCommitDetail(owner, name, sha, { token })
+    const data = await fetchCommitDetail(owner, name, sha, { token, signal: request.signal })
 
     return NextResponse.json(data)
   } catch (error) {

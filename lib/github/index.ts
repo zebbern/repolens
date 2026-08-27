@@ -4,6 +4,8 @@ export {
   fetchFileViaProxy,
   fetchRateLimitViaProxy,
   fetchLanguagesViaProxy,
+  setGitHubOAuthPrincipal,
+  getGitHubCredentialPrincipal,
   clearGitHubCache,
   invalidateRepoCache,
 } from './client'

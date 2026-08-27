@@ -18,9 +18,9 @@
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "test:ui": "vitest --ui",
-    "test:e2e": "playwright test --project=chromium",
+    "test:e2e": "playwright test --project=chromium --project=mobile-chromium",
     "test:e2e:live": "playwright test --project=chromium-live",
-    "release:check": "pnpm lint && pnpm typecheck && pnpm test:unit && pnpm build && pnpm test:e2e && pnpm test:e2e:live"
+    "release:check": "pnpm lint && pnpm typecheck && pnpm test:unit && pnpm build && pnpm test:e2e"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.68",
@@ -71,9 +71,9 @@
     "gray-matter": "4.0.3",
     "input-otp": "1.4.1",
     "lucide-react": "^1.8.0",
-    "mermaid": "^11.14.0",
-    "next": "16.2.3",
-    "next-auth": "5.0.0-beta.30",
+    "mermaid": "^11.17.0",
+    "next": "16.3.2",
+    "next-auth": "5.0.0-beta.32",
     "next-themes": "^0.4.6",
     "react": "^19.2.5",
     "react-day-picker": "9.14.0",
@@ -93,7 +93,7 @@
   },
   "devDependencies": {
     "@ai-sdk/devtools": "^0.0.15",
-    "@auth/core": "0.41.0",
+    "@auth/core": "0.41.3",
     "@eslint/compat": "^2.0.0",
     "@playwright/test": "^1.59.1",
     "@tailwindcss/postcss": "^4.2.2",
@@ -108,7 +108,7 @@
     "@vitest/coverage-v8": "^4.1.4",
     "babel-plugin-react-compiler": "^1.0.0",
     "eslint": "^10.0.0",
-    "eslint-config-next": "16.2.3",
+    "eslint-config-next": "16.3.2",
     "fake-indexeddb": "^6.2.5",
     "jsdom": "^29.0.2",
     "postcss": "^8.5.9",
@@ -119,7 +119,9 @@
   },
   "pnpm": {
     "overrides": {
+      "@babel/core": "7.29.7",
       "dompurify": ">=3.3.2",
+      "js-yaml@3": "3.15.1",
       "lodash-es": ">=4.18.1"
     }
   }

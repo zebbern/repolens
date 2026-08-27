@@ -85,7 +85,7 @@ describe('POST /api/github/blame', () => {
     expect(body).toEqual(blameData)
     expect(mockFetchBlame).toHaveBeenCalledWith(
       'facebook', 'react', 'main', 'src/index.ts',
-      { token: 'mock-token' },
+      expect.objectContaining({ token: 'mock-token', signal: expect.any(AbortSignal) }),
     )
   })
 
@@ -126,6 +126,21 @@ describe('POST /api/github/blame', () => {
     expect(res.status).toBe(400)
     const body = await res.json()
     expect(body.error.code).toBe('VALIDATION_ERROR')
+  })
+
+  it('rejects an oversized JSON body before resolving credentials', async () => {
+    const req = createPostRequest({
+      owner: 'facebook',
+      name: 'react',
+      ref: 'main',
+      path: 'x'.repeat(33_000),
+    })
+
+    const res = await POST(req)
+
+    expect(res.status).toBe(413)
+    expect(mockGetAccessToken).not.toHaveBeenCalled()
+    expect(mockFetchBlame).not.toHaveBeenCalled()
   })
 
   it('returns 500 when fetcher throws an unexpected error', async () => {

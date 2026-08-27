@@ -172,6 +172,13 @@ export function sanitizeMermaidSource(source: string): string {
   s = s.replace(/<(?!\/?br\s*\/?>)[a-z][a-z0-9]*(?:\s[^>]*)?>/gi, '')
   s = s.replace(/<\/(?!br)[a-z][a-z0-9]*>/gi, '')
 
+  // Do not allow source directives or CSS/resource references to override
+  // Mermaid's strict renderer or load content outside the diagram.
+  s = s.replace(/^\s*%%\{[\s\S]*?\}%%\s*$/gm, '')
+  s = s.replace(/url\s*\([^)]*\)/gi, '')
+  s = s.replace(/^\s*(?:@import|click\s+\S+|href\s*[:=]|xlink:href\s*[:=]).*$/gim, '')
+  s = s.replace(/\b(?:background-image|content)\s*:\s*[^,;\n]+/gi, '')
+
   // 6. Fix broken arrow syntax
   s = s.replace(/- ->/g, '-->')
   s = s.replace(/<- -/g, '<--')

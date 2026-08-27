@@ -37,7 +37,7 @@ vi.mock('shiki', () => ({
 
 import mermaid from 'mermaid'
 import { MarkdownRenderer } from './markdown-renderer'
-import { parseMermaidError } from '@/components/features/diagrams/mermaid-diagram'
+import { parseMermaidError, sanitizeMermaidSource } from '@/components/features/diagrams/mermaid-diagram'
 
 describe('MarkdownRenderer', () => {
   beforeEach(() => {
@@ -48,6 +48,26 @@ describe('MarkdownRenderer', () => {
       svg: '<svg data-testid="mermaid-svg">mock diagram</svg>',
       diagramType: 'flowchart',
     })
+  })
+
+  it('blocks automatic remote images and offers an explicit link instead', () => {
+    render(<MarkdownRenderer content="![secret](https://attacker.invalid/leak)" />)
+
+    expect(screen.queryByRole('img')).not.toBeInTheDocument()
+    expect(screen.getByRole('link', { name: /remote image blocked/i })).toHaveAttribute(
+      'href',
+      'https://attacker.invalid/leak',
+    )
+  })
+
+  it('blocks protocol-relative remote images', () => {
+    render(<MarkdownRenderer content="![secret](//attacker.invalid/leak)" />)
+
+    expect(screen.queryByRole('img')).not.toBeInTheDocument()
+    expect(screen.getByRole('link', { name: /remote image blocked/i })).toHaveAttribute(
+      'href',
+      '//attacker.invalid/leak',
+    )
   })
 
   // -------------------------------------------------------------------------
@@ -375,5 +395,16 @@ describe('MarkdownRenderer', () => {
       const result = parseMermaidError(input)
       expect(result.raw).toBe(input)
     })
+  })
+
+  it('removes Mermaid CSS and external-resource directives while retaining diagrams', () => {
+    const sanitized = sanitizeMermaidSource(
+      'graph TD\nA-->B\nclassDef x fill:url(https://evil.invalid),color:red\n%%{init: {"theme":"base"}}%%',
+    )
+
+    expect(sanitized).toContain('graph TD')
+    expect(sanitized).toContain('A-->B')
+    expect(sanitized).not.toMatch(/url\s*\(/i)
+    expect(sanitized).not.toContain('%%{init:')
   })
 })

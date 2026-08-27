@@ -53,6 +53,7 @@ const mockCreateEmptyIndex = vi.fn(() => ({
 const mockFlattenFiles = vi.fn((tree) => tree)
 const mockSetCachedRepo = vi.fn().mockResolvedValue(undefined)
 const mockToastWarning = vi.fn()
+const mockGetGitHubCredentialPrincipal = vi.fn<() => string | null>(() => 'oauth:account-a')
 
 vi.mock('@/lib/github/zipball', () => ({
   MAX_FILE_SIZE: 500_000,
@@ -70,6 +71,7 @@ vi.mock('@/lib/github/fetcher', () => ({
 
 vi.mock('@/lib/github/client', () => ({
   fetchFileViaProxy: (...args: unknown[]) => mockFetchFileViaProxy(args[0], args[1], args[2], args[3]),
+  getGitHubCredentialPrincipal: () => mockGetGitHubCredentialPrincipal(),
 }))
 
 vi.mock('@/lib/code/code-index', () => ({
@@ -257,7 +259,7 @@ describe('startIndexing — streaming pipeline', () => {
 
   it('writes the final IDB batch once, flushes it, then publishes the manifest before ready', async () => {
     const callbacks = createCallbacks()
-    const repoData = createRepoData({ size: 60_000 })
+    const repoData = createRepoData({ size: 60_000, isPrivate: true })
     const fileTree = createFileTree([{ path: 'src/index.ts', name: 'index.ts' }])
 
     await startIndexing(repoData, fileTree, 'tree-sha', signal, callbacks)
@@ -286,6 +288,23 @@ describe('startIndexing — streaming pipeline', () => {
     expect(mockSetCachedRepo.mock.invocationCallOrder[0]).toBeLessThan(
       callbacks.setLoadingStage.mock.invocationCallOrder.at(-1)!,
     )
+    expect(mockSetCachedRepo.mock.calls[0][6]).toEqual(expect.objectContaining({ principal: 'oauth:account-a' }))
+  })
+
+  it('does not publish a private manifest when no credential principal is available', async () => {
+    mockGetGitHubCredentialPrincipal.mockReturnValueOnce(null)
+    const callbacks = createCallbacks()
+    const repoData = createRepoData({ isPrivate: true })
+    const fileTree = createFileTree([{ path: 'src/index.ts', name: 'index.ts' }])
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+    await startIndexing(repoData, fileTree, 'tree-sha', signal, callbacks)
+
+    expect(mockSetCachedRepo).not.toHaveBeenCalled()
+    expect(mockToastWarning).toHaveBeenCalledWith(
+      'Repository is ready, but it was not cached for future visits.',
+    )
+    warnSpy.mockRestore()
   })
 
   it('keeps the resident index in memory, warns, and skips the manifest when IDB flush fails', async () => {

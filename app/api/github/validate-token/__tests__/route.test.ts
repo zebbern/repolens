@@ -8,12 +8,13 @@ import { POST } from '../route'
 import type { NextRequest } from 'next/server'
 
 /** Build a mock NextRequest with an optional X-GitHub-Token header. */
-function mockRequest(token?: string): NextRequest {
+function mockRequest(token?: string, signal = new AbortController().signal): NextRequest {
   const headers = new Headers()
   if (token) headers.set('X-GitHub-Token', token)
 
   return {
     headers,
+    signal,
   } as unknown as NextRequest
 }
 
@@ -69,6 +70,30 @@ describe('POST /api/github/validate-token', () => {
         }),
       }),
     )
+  })
+
+  it('aborts the upstream request when the incoming request is aborted', async () => {
+    const caller = new AbortController()
+    const request = mockRequest('ghp_valid', caller.signal)
+    let upstreamSignal: AbortSignal | undefined
+    let resolveFetch: ((response: Response) => void) | undefined
+    mockFetch.mockImplementationOnce((_url: string, init: RequestInit) => {
+      upstreamSignal = init.signal ?? undefined
+      return new Promise<Response>(resolve => {
+        resolveFetch = resolve
+      })
+    })
+
+    const pending = POST(request)
+    await Promise.resolve()
+    expect(mockFetch).toHaveBeenCalled()
+    const reason = new DOMException('request cancelled', 'AbortError')
+    caller.abort(reason)
+    expect(upstreamSignal?.aborted).toBe(true)
+    expect(upstreamSignal?.reason).toBe(reason)
+
+    resolveFetch?.(githubOkResponse('octocat', ''))
+    await pending
   })
 
   it('returns valid=false for an invalid token (401)', async () => {

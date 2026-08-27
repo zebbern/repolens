@@ -11,6 +11,8 @@ export interface RateLimitPolicy {
   bucket: string
   limit?: number
   windowMs?: number
+  /** Cost charged for this request. Defaults to one unit. */
+  cost?: number
 }
 
 interface RateLimitResult {
@@ -64,12 +66,13 @@ export function rateLimit(
   // First request or window expired — start a new window
   if (!existing || existing.resetAt <= now) {
     const resetAt = now + windowMs
-    store.set(key, { count: 1, resetAt })
-    return { allowed: true, remaining: limit - 1, resetAt }
+    const cost = Math.max(1, policy.cost ?? 1)
+    store.set(key, { count: cost, resetAt })
+    return { allowed: cost <= limit, remaining: Math.max(0, limit - cost), resetAt }
   }
 
   // Within window — increment
-  existing.count++
+  existing.count += Math.max(1, policy.cost ?? 1)
 
   if (existing.count > limit) {
     return { allowed: false, remaining: 0, resetAt: existing.resetAt }

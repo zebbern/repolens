@@ -36,6 +36,7 @@ export const GET = withGitHubCachePolicy(async function GET(request: NextRequest
   try {
     const comparison = await fetchCompare(owner, name, base, head, {
       token,
+      signal: request.signal,
     })
 
     return NextResponse.json(comparison)

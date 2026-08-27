@@ -1,59 +1,64 @@
 import { NextResponse } from 'next/server'
-import { apiKeyRequestSchema } from '@/types/types'
+import { z } from 'zod'
+
 import { apiError } from '@/lib/api/error'
+import {
+  MAX_API_KEY_REQUEST_BODY_BYTES,
+  readBoundedJsonBody,
+} from '@/lib/api/json-body'
 import { applyRateLimit } from '@/lib/api/rate-limit'
+import { apiKeyRequestSchema } from '@/types/types'
 
-// Anthropic doesn't have a models endpoint, so we validate the key
-// and return known available models
-const ANTHROPIC_MODELS = [
-  { id: 'claude-sonnet-4-20250514', name: 'Claude Sonnet 4', contextLength: 200000 },
-  { id: 'claude-opus-4-20250514', name: 'Claude Opus 4', contextLength: 200000 },
-  { id: 'claude-3-haiku-20240307', name: 'Claude 3 Haiku', contextLength: 200000 },
-]
+const anthropicModelsResponseSchema = z.object({
+  data: z.array(z.object({
+    id: z.string(),
+    display_name: z.string(),
+    max_input_tokens: z.number().nonnegative().nullable().optional(),
+  })).default([]),
+})
 
-export async function POST(request: Request) {
+export async function POST(request: Request): Promise<NextResponse> {
   const rateLimited = applyRateLimit(request, { bucket: '/api/models/anthropic' })
   if (rateLimited) return rateLimited
 
   try {
-    const body: unknown = await request.json()
-    const parsed = apiKeyRequestSchema.safeParse(body)
+    const body = await readBoundedJsonBody(request, MAX_API_KEY_REQUEST_BODY_BYTES)
+    if (!body.success) return body.response
 
+    const parsed = apiKeyRequestSchema.safeParse(body.data)
     if (!parsed.success) {
       return apiError('API_KEY_REQUIRED', 'API key required', 400)
     }
 
-    const apiKey = parsed.data.apiKey
-
-    // Validate the API key by making a minimal request
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
+    const response = await fetch('https://api.anthropic.com/v1/models?limit=1000', {
       headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': apiKey,
+        'x-api-key': parsed.data.apiKey,
         'anthropic-version': '2023-06-01',
       },
-      body: JSON.stringify({
-        model: 'claude-3-haiku-20240307',
-        max_tokens: 1,
-        messages: [{ role: 'user', content: 'Hi' }],
-      }),
     })
 
-    // Even a successful response or a rate limit means the key is valid
-    if (response.ok || response.status === 429) {
-      return NextResponse.json({ models: ANTHROPIC_MODELS })
+    if (response.status === 401 || response.status === 403) {
+      return apiError('INVALID_API_KEY', 'Invalid API key', response.status)
+    }
+    if (!response.ok) {
+      return apiError('MODELS_FETCH_ERROR', 'Failed to fetch models', response.status)
     }
 
-    // Check for authentication error
-    if (response.status === 401) {
-      return apiError('INVALID_API_KEY', 'Invalid API key', 401)
+    const data: unknown = await response.json()
+    const modelsResult = anthropicModelsResponseSchema.safeParse(data)
+    if (!modelsResult.success) {
+      return apiError('MODELS_PARSE_ERROR', 'Failed to fetch models', 500)
     }
 
-    // For other errors, still return models if we got a response
-    return NextResponse.json({ models: ANTHROPIC_MODELS })
+    const models = modelsResult.data.data.map((model) => ({
+      id: model.id,
+      name: model.display_name,
+      contextLength: model.max_input_tokens ?? undefined,
+    }))
+
+    return NextResponse.json({ models })
   } catch (error) {
-    console.error('[models/anthropic] Failed to validate key:', error instanceof Error ? error.message : 'Unknown error')
-    return apiError('KEY_VALIDATION_ERROR', 'Failed to validate key', 500)
+    console.error('[models/anthropic] Failed to fetch models:', error instanceof Error ? error.message : 'Unknown error')
+    return apiError('MODELS_FETCH_ERROR', 'Failed to fetch models', 500)
   }
 }

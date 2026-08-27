@@ -32,6 +32,7 @@ export const GET = withGitHubCachePolicy(async function GET(request: NextRequest
   try {
     const repo = await fetchRepoMetadata(owner, name, {
       token,
+      signal: request.signal,
     })
 
     return NextResponse.json(repo)

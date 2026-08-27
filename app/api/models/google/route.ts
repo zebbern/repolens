@@ -2,6 +2,10 @@ import { NextResponse } from 'next/server'
 import { z } from 'zod'
 import { apiKeyRequestSchema } from '@/types/types'
 import { apiError } from '@/lib/api/error'
+import {
+  MAX_API_KEY_REQUEST_BODY_BYTES,
+  readBoundedJsonBody,
+} from '@/lib/api/json-body'
 import { applyRateLimit } from '@/lib/api/rate-limit'
 
 const googleModelsResponseSchema = z.object({
@@ -13,24 +17,48 @@ const googleModelsResponseSchema = z.object({
   })).default([]),
 })
 
+const googleErrorResponseSchema = z.object({
+  error: z.object({
+    details: z.array(z.object({
+      reason: z.string().optional(),
+    })).optional(),
+  }),
+})
+
 export async function POST(request: Request): Promise<NextResponse> {
   const rateLimited = applyRateLimit(request, { bucket: '/api/models/google' })
   if (rateLimited) return rateLimited
 
   try {
-    const body: unknown = await request.json()
-    const parsed = apiKeyRequestSchema.safeParse(body)
+    const body = await readBoundedJsonBody(request, MAX_API_KEY_REQUEST_BODY_BYTES)
+    if (!body.success) return body.response
+
+    const parsed = apiKeyRequestSchema.safeParse(body.data)
 
     if (!parsed.success) {
       return apiError('API_KEY_REQUIRED', 'API key required', 400)
     }
 
     const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models?key=${parsed.data.apiKey}`
+      'https://generativelanguage.googleapis.com/v1beta/models?pageSize=1000',
+      { headers: { 'x-goog-api-key': parsed.data.apiKey } },
     )
 
-    if (!response.ok) {
+    const hasInvalidKeyStatus = response.status === 401 || response.status === 403
+    const hasInvalidKeyReason = response.status === 400
+      && await response.json()
+        .then((data: unknown) => {
+          const result = googleErrorResponseSchema.safeParse(data)
+          return result.success
+            && result.data.error.details?.some(detail => detail.reason === 'API_KEY_INVALID') === true
+        })
+        .catch(() => false)
+
+    if (hasInvalidKeyStatus || hasInvalidKeyReason) {
       return apiError('INVALID_API_KEY', 'Invalid API key', 401)
+    }
+    if (!response.ok) {
+      return apiError('MODELS_FETCH_ERROR', 'Failed to fetch models', response.status)
     }
 
     const data: unknown = await response.json()

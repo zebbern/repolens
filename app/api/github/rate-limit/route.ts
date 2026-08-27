@@ -3,6 +3,7 @@ import type { NextRequest } from "next/server"
 import { withGitHubCachePolicy } from "@/lib/api/github-cache"
 import { apiError } from "@/lib/api/error"
 import { applyRateLimit } from "@/lib/api/rate-limit"
+import { fetchGitHub } from "@/lib/github/request-signal"
 
 export const runtime = 'edge'
 
@@ -22,7 +23,7 @@ export const GET = withGitHubCachePolicy(async function GET(request: NextRequest
       headers.Authorization = `Bearer ${token}`
     }
 
-    const response = await fetch(`${GITHUB_API_BASE}/rate_limit`, { headers })
+    const response = await fetchGitHub(`${GITHUB_API_BASE}/rate_limit`, { headers, signal: request.signal })
 
     if (!response.ok) {
       return apiError('RATE_LIMIT_FETCH_ERROR', 'Failed to fetch rate limit', response.status)

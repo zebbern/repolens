@@ -50,6 +50,30 @@ describe('POST /api/github/zipball', () => {
     mockApplyRateLimit.mockReturnValue(null) // no rate limit
   })
 
+  it('uses an explicit low quota for the high-amplification archive proxy', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      new Response('zip-data', { status: 200 }),
+    )
+
+    await POST(createRequest({ owner: 'acme', repo: 'project', ref: 'main' }))
+
+    expect(mockApplyRateLimit).toHaveBeenCalledWith(
+      expect.any(Request),
+      { bucket: '/api/github/zipball', limit: 5, windowMs: 60_000 },
+    )
+  })
+
+  it('rejects an oversized JSON body before resolving credentials', async () => {
+    const res = await POST(createRequest({
+      owner: 'acme',
+      repo: 'project',
+      ref: 'x'.repeat(5_000),
+    }))
+
+    expect(res.status).toBe(413)
+    expect(mockGetAccessToken).not.toHaveBeenCalled()
+  })
+
   it('returns a streaming response with body as ReadableStream', async () => {
     const fakeBody = new ReadableStream({
       start(ctrl) {
@@ -106,5 +130,67 @@ describe('POST /api/github/zipball', () => {
     const res = await POST(req)
 
     expect(res.headers.get('Content-Length')).toBeNull()
+  })
+
+  it('rejects a zipball whose declared response exceeds the byte ceiling', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      new Response('zip-data', {
+        status: 200,
+        headers: { 'Content-Length': String(50_000_001) },
+      }),
+    )
+
+    const req = createRequest({ owner: 'acme', repo: 'project', ref: 'main' })
+    const res = await POST(req)
+
+    expect(res.status).toBe(413)
+  })
+
+  it('errors downstream and cancels an unknown-length upstream after crossing the byte ceiling', async () => {
+    const cancelUpstream = vi.fn()
+    const upstream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        // Leave the body open after this chunk so reader.cancel() reaches the
+        // upstream source instead of becoming a no-op on a closed stream.
+        controller.enqueue(new Uint8Array(50_000_001))
+      },
+      cancel: cancelUpstream,
+    })
+
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      new Response(upstream, { status: 200 }),
+    )
+
+    const response = await POST(createRequest({ owner: 'acme', repo: 'project', ref: 'main' }))
+
+    expect(response.headers.get('Content-Length')).toBeNull()
+    await expect(response.arrayBuffer()).rejects.toThrow()
+    expect(cancelUpstream).toHaveBeenCalledTimes(1)
+  })
+
+  it('streams successfully when the Edge runtime does not provide AbortSignal.any', async () => {
+    const originalAny = Object.getOwnPropertyDescriptor(AbortSignal, 'any')
+    Object.defineProperty(AbortSignal, 'any', {
+      configurable: true,
+      value: undefined,
+    })
+
+    try {
+      vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+        new Response('zip-data', { status: 200 }),
+      )
+
+      const req = createRequest({ owner: 'acme', repo: 'project', ref: 'main' })
+      const res = await POST(req)
+
+      expect(res.status).toBe(200)
+      await expect(res.text()).resolves.toBe('zip-data')
+    } finally {
+      if (originalAny) {
+        Object.defineProperty(AbortSignal, 'any', originalAny)
+      } else {
+        Reflect.deleteProperty(AbortSignal, 'any')
+      }
+    }
   })
 })

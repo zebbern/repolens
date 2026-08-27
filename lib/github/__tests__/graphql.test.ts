@@ -48,7 +48,7 @@ describe('githubGraphQL', () => {
 
     expect(result).toEqual(responseData)
     expect(mockFetch).toHaveBeenCalledOnce()
-    expect(mockFetch).toHaveBeenCalledWith('https://api.github.com/graphql', {
+    expect(mockFetch).toHaveBeenCalledWith('https://api.github.com/graphql', expect.objectContaining({
       method: 'POST',
       headers: {
         'Authorization': 'Bearer ghp_test_token',
@@ -58,7 +58,8 @@ describe('githubGraphQL', () => {
         query: 'query { repository(owner: $o, name: $n) { name } }',
         variables: { o: 'facebook', n: 'react' },
       }),
-    })
+      signal: expect.any(AbortSignal),
+    }))
   })
 
   it('throws on 401 authentication error', async () => {

@@ -269,6 +269,15 @@ describe('streamUnzipFiles', () => {
     expect(result.totalSize).toBe(content1.length + content2.length)
   })
 
+  it('reports extracted UTF-8 byte size rather than JavaScript character count', async () => {
+    const content = '😀'.repeat(20)
+    const response = createZipResponse({ 'unicode.ts': content })
+
+    const result = await streamUnzipFiles(response, () => {})
+
+    expect(result.totalSize).toBe(new TextEncoder().encode(content).byteLength)
+  })
+
   // -- Empty zip ------------------------------------------------------------
 
   it('returns { count: 0, totalSize: 0 } for a zip with no indexable files', async () => {

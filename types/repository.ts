@@ -48,6 +48,7 @@ export type TreeResolutionReason =
   | 'request-budget-exceeded'
   | 'time-budget-exceeded'
   | 'fetch-failed'
+  | 'limit-exceeded'
 
 export interface PartialRepoTree extends RepoTree {
   status: 'partial'

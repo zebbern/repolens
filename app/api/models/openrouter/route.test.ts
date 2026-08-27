@@ -67,6 +67,70 @@ describe('POST /api/models/openrouter', () => {
     expect(data.error.message).toBe('Invalid API key')
   })
 
+  it('rejects bogus credentials even though the public model catalog is accessible', async () => {
+    mockFetch.mockImplementationOnce(async (input: RequestInfo | URL) => {
+      if (String(input).endsWith('/models/user')) {
+        return {
+          ok: false,
+          status: 401,
+        }
+      }
+
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          data: [{ id: 'public/model', name: 'Public Model' }],
+        }),
+      }
+    })
+
+    const response = await POST(createRequest({ apiKey: 'sk-or-bogus' }))
+    const data = await response.json()
+
+    expect(response.status).toBe(401)
+    expect(data.error.code).toBe('INVALID_API_KEY')
+  })
+
+  it('preserves a 403 invalid-credential response', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 403,
+    })
+
+    const response = await POST(createRequest({ apiKey: 'sk-or-bad' }))
+    const data = await response.json()
+
+    expect(response.status).toBe(403)
+    expect(data.error.message).toBe('Invalid API key')
+  })
+
+  it('propagates an upstream server error instead of reporting invalid credentials', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 500,
+    })
+
+    const response = await POST(createRequest({ apiKey: 'sk-or-valid' }))
+    const data = await response.json()
+
+    expect(response.status).toBe(500)
+    expect(data.error.message).toBe('Failed to fetch models')
+  })
+
+  it('preserves rate-limit failures as transient model-fetch errors', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 429,
+    })
+
+    const response = await POST(createRequest({ apiKey: 'sk-or-valid' }))
+    const data = await response.json()
+
+    expect(response.status).toBe(429)
+    expect(data.error.code).toBe('MODELS_FETCH_ERROR')
+  })
+
   it('returns 500 when fetch throws an error', async () => {
     mockFetch.mockRejectedValueOnce(new Error('Connection refused'))
 
@@ -96,6 +160,16 @@ describe('POST /api/models/openrouter', () => {
 
     expect(response.status).toBe(400)
     expect(data.error.message).toBe('API key required')
+  })
+
+  it('rejects an oversized JSON body before calling OpenRouter', async () => {
+    const response = await POST(createRequest({
+      apiKey: 'sk-or-valid',
+      padding: 'x'.repeat(5_000),
+    }))
+
+    expect(response.status).toBe(413)
+    expect(mockFetch).not.toHaveBeenCalled()
   })
 
   it('limits results to 50 models', async () => {

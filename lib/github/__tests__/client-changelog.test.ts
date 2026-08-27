@@ -96,7 +96,7 @@ describe('GitHub client — changelog proxy functions', () => {
 
       await fetchTagsViaProxy('owner', 'repo')
 
-      expect(cacheMock.getCached).toHaveBeenCalledWith('tags:owner/repo:30')
+      expect(cacheMock.getCached).toHaveBeenCalledWith(expect.stringMatching(/^tags:owner\/repo:30:principal:(?:anonymous|pat:\d+|oauth:[^:]+):epoch:\d+$/))
     })
 
     it('uses 10-minute (600,000ms) TTL', async () => {
@@ -156,7 +156,7 @@ describe('GitHub client — changelog proxy functions', () => {
 
       await fetchBranchesViaProxy('owner', 'repo')
 
-      expect(cacheMock.getCached).toHaveBeenCalledWith('branches:owner/repo:30')
+      expect(cacheMock.getCached).toHaveBeenCalledWith(expect.stringMatching(/^branches:owner\/repo:30:principal:(?:anonymous|pat:\d+|oauth:[^:]+):epoch:\d+$/))
     })
 
     it('uses 5-minute (300,000ms) TTL', async () => {
@@ -284,7 +284,7 @@ describe('GitHub client — changelog proxy functions', () => {
 
       await fetchCompareViaProxy('owner', 'repo', 'v1', 'v2')
 
-      expect(cacheMock.getCached).toHaveBeenCalledWith('compare:owner/repo:v1...v2')
+      expect(cacheMock.getCached).toHaveBeenCalledWith(expect.stringMatching(/^compare:owner\/repo:v1\.\.\.v2:principal:(?:anonymous|pat:\d+|oauth:[^:]+):epoch:\d+$/))
     })
 
     it('uses 10-minute (600,000ms) TTL', async () => {

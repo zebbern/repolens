@@ -84,7 +84,7 @@ describe('GitHub client — git history proxy functions', () => {
         }),
       })
       expect(cacheMock.setCache).toHaveBeenCalledWith(
-        'blame:facebook/react:main:src/index.ts',
+        expect.stringMatching(/^blame:facebook\/react:main:src\/index\.ts:principal:(?:anonymous|pat:\d+|oauth:[^:]+):epoch:\d+$/),
         blameData,
         600_000,
       )
@@ -191,7 +191,7 @@ describe('GitHub client — git history proxy functions', () => {
 
       await fetchCommitDetailViaProxy('owner', 'repo', 'sha456')
 
-      expect(cacheMock.getCached).toHaveBeenCalledWith('commit-detail:owner/repo:sha456')
+      expect(cacheMock.getCached).toHaveBeenCalledWith(expect.stringMatching(/^commit-detail:owner\/repo:sha456:principal:(?:anonymous|pat:\d+|oauth:[^:]+):epoch:\d+$/))
     })
   })
 

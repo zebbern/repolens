@@ -35,10 +35,10 @@ graph LR
 
 1. **URL entry** — The user enters a GitHub URL or navigates to `/:owner/:repo`.
 2. **Middleware rewrite** — Next.js middleware rewrites `/:owner/:repo` to `/?repo=https://github.com/owner/repo`, preserving query params. Reserved segments (`api`, `_next`, `compare`, etc.) are excluded.
-3. **Metadata fetch** — `RepositoryProvider.connectRepository()` parses the URL, calls `fetchRepoMetadata()` via the GitHub REST API.
+3. **Metadata fetch** — `RepositoryProvider.connectRepository()` parses the URL and calls `fetchRepoViaProxy()` through the authenticated GitHub client.
 4. **Tree fetch** — The adaptive resolver retrieves the recursive tree and splits truncated subtrees within request/time budgets. Partial discovery remains usable and is represented explicitly in repository coverage.
 5. **Cache check** — The provider checks IndexedDB (`getCachedRepo`) for a cached entry matching the tree SHA. On hit, the `CodeIndex` is hydrated immediately from cache.
-6. **Content fetch** — On cache miss, the provider attempts a streaming zipball download for repos under 200 MB. The server streams the GitHub zipball response body directly (no buffering), and the client uses fflate's streaming `Unzip` + `UnzipInflate` to extract and index files as chunks arrive, reducing peak memory from ~3–4× zip size to ~1×. If streaming extraction fails or the repo is larger, it falls back to per-file fetching with a concurrency limit of 10.
+6. **Content fetch** — On cache miss, the provider attempts a streaming zipball download for repos under 250 MB. The server streams the GitHub zipball response body directly (no buffering), and the client uses fflate's streaming `Unzip` + `UnzipInflate` to extract and index files as chunks arrive, reducing peak memory from ~3–4× zip size to ~1×. If streaming extraction fails or the repo is larger, it falls back to per-file fetching with concurrency.
 7. **Indexing** — `batchIndexFiles()` builds the `CodeIndex` — a `Map<string, IndexedFile>` with split lines, language detection, and file metadata.
 8. **Cache persist** — Complete, failure-free indexed data is written to IndexedDB with LRU eviction (max 5 repos). Partial sessions are not reused as complete caches.
 9. **Structural index** — On chat/docs requests, `buildStructuralIndexAsync()` extracts exports, imports, and symbol signatures from the `CodeIndex` into a compact JSON string sized to ~15% of the model's context window.
@@ -46,15 +46,15 @@ graph LR
 
 ## ContentStore (Tiered Content Storage)
 
-File content storage uses a three-tier routing strategy based on repository size. All tiers implement the `ContentStore` interface defined in `lib/code/content-store.ts`. The `CodeIndex` always holds `CodeIndexMeta` records (path, name, language, lineCount) in-memory for fast metadata access regardless of which store backs the content.
+File content storage uses a three-tier routing strategy based on repository size. All tiers implement the `ContentStore` interface defined in `lib/code/content-store.ts`. The `CodeIndex` always holds `CodeIndexMeta` records (path, name, language, line count, and whether that count is known) in memory for fast metadata access regardless of which store backs the content. Aggregate line totals are explicitly partial while any source-derived count is unavailable.
 
 ### Three-Tier Size-Based Routing
 
 ```mermaid
 graph TD
-  A["Repo fetched"] --> B{"size ≥ 200 MB?"}
+  A["Repo fetched"] --> B{"size ≥ 250 MB?"}
   B -->|Yes| C["LazyContentStore"]
-  B -->|No| D{"size ≥ 50 MB?"}
+  B -->|No| D{"size ≥ effective IDB threshold?"}
   D -->|Yes| E["IDBContentStore"]
   D -->|No| F["InMemoryContentStore"]
   C --> G["Metadata-only CodeIndex + on-demand fetch"]
@@ -66,11 +66,11 @@ graph TD
 
 | Tier | Store | Size Range | Content Strategy |
 | ---- | ----- | ---------- | ---------------- |
-| In-Memory | `InMemoryContentStore` | < 50 MB | Zero-overhead `Map<string, string>` wrapper. All content in JS heap |
-| IDB | `IDBContentStore` | 50–200 MB | Content in IndexedDB (`repolens-content`), metadata in heap |
-| Lazy | `LazyContentStore` | > 200 MB | Metadata indexed immediately, content fetched on demand via `FetchQueue` |
+| In-Memory | `InMemoryContentStore` | Below effective IDB threshold | Zero-overhead `Map<string, string>` wrapper. All content in JS heap |
+| IDB | `IDBContentStore` | Effective IDB threshold to < 250 MB | Content in IndexedDB (`repolens-content`), metadata in heap |
+| Lazy | `LazyContentStore` | ≥ 250 MB | Metadata indexed immediately, content fetched on demand via `FetchQueue` |
 
-- Thresholds are configured via `IDB_CONTENT_STORE_THRESHOLD_KB` (50,000 KB) and `LAZY_CONTENT_THRESHOLD_KB` (200,000 KB) in `config/constants.ts`.
+- Thresholds are configured via `IDB_CONTENT_STORE_THRESHOLD_KB` (50,000 KB by default; 25,000 KB on devices reporting at most 4 GB of memory) and `LAZY_CONTENT_THRESHOLD_KB` (250,000 KB) in `config/constants.ts`.
 - `indexing-pipeline.ts` checks repo size to choose the store tier.
 - During indexing, content is written to the chosen store. `CodeIndex.files` holds metadata-only `CodeIndexMeta` entries when IDB or Lazy is active.
 - For IDB-tier repos, `IndexedFile.content` is set during indexing but stripped from the JS heap afterward — consumers access content via `contentStore.get()` or the async helpers in `code-index.ts` (see [Content Stripping (Phase 6)](#content-stripping-phase-6)).
@@ -84,9 +84,9 @@ Search and scanner workers use `IDBContentStore` directly for large repos, readi
 | Type | Location | Purpose |
 | ---- | -------- | ------- |
 | `ContentStore` | `lib/code/content-store.ts` | Interface for content storage (get, getSync, getBatch, put, has, delete) |
-| `InMemoryContentStore` | `lib/code/content-store.ts` | Map-backed store for small repos (< 50 MB) |
-| `IDBContentStore` | `lib/code/content-store.ts` | IndexedDB-backed store for medium repos (50–200 MB) |
-| `LazyContentStore` | `lib/code/content-store.ts` | On-demand fetch store for large repos (> 200 MB) |
+| `InMemoryContentStore` | `lib/code/content-store.ts` | Map-backed store below the effective IDB threshold |
+| `IDBContentStore` | `lib/code/content-store.ts` | IndexedDB-backed store below the 250 MB lazy threshold |
+| `LazyContentStore` | `lib/code/content-store.ts` | On-demand fetch store for repos 250 MB or larger |
 | `FetchQueue` | `lib/code/fetch-queue.ts` | Priority-based concurrency-limited fetch queue |
 | `CodeIndexMeta` | `lib/code/content-store.ts` | Metadata-only file record (path, name, language, lineCount) |
 | `ContentAvailability` | `lib/repository/repo-state.ts` | UI state: `'full'` or `'metadata-only'` |
@@ -222,7 +222,7 @@ The scanner detects security vulnerabilities, code quality issues, and supply ch
 
 ```mermaid
 graph TD
-  A["scanIssues()"] --> B["1. Regex Rules (single-pass)"]
+  A["scanIssuesAsync()"] --> B["1. Regex Rules (single-pass)"]
   A --> C["2. AST Analysis"]
   A --> D["2b. Taint Tracking"]
   A --> E["3. Composite Rules"]
@@ -260,7 +260,7 @@ graph LR
 - **Extension grouping**: Rules with a `fileFilter` are indexed under each applicable extension (e.g., `.ts`, `.py`). Rules with no `fileFilter` go into `universalRules` and apply to every file.
 - **Dead-rule pruning**: Rules whose `fileFilter` extensions don't appear in the codebase's `presentExtensions` set are skipped entirely.
 - **Single iteration**: `runRegexRules()` iterates each file once, merging universal rules with extension-specific rules, and tests each line against all applicable compiled regexes.
-- **Unscanned files**: `countUnscannedFiles()` uses `!file.content` to identify files without loaded content (IDB/Lazy tier), reported as `unscannedFileCount` in results.
+- **Unscanned files**: The async scanner resolves source in bounded batches and reports paths that the backing store could not supply as `unscannedFileCount`. A loaded empty file remains distinct from unavailable source.
 
 ### Rule Types
 
@@ -297,7 +297,7 @@ The scanner uses context classification (`context-classifier.ts`) to reduce fals
 
 ### Memoization
 
-`scanIssues()` is memoized by `CodeIndex` reference using `WeakRef`. Multiple components (code browser, issues panel) calling with the same index get cached results.
+`scanIssuesAsync()` is the authoritative scanner path. It memoizes successful complete scans by `CodeIndex` reference, analysis reference, and options using `WeakRef`, and deduplicates matching in-flight scans. Partial or failed scans are not cached.
 
 ## Docs Generation
 
@@ -391,7 +391,7 @@ A hover action bar appears on code symbols (functions, classes) in the code brow
 
 ## Dependency Health Dashboard
 
-Scores npm dependencies on four axes graded A–F, rendered in a sortable table with download sparklines and a detail drawer.
+Assesses npm dependencies on four weighted axes and renders the results in a sortable table with download sparklines and a detail drawer. A dependency receives an A–F grade only when its registry metadata, installed version, and vulnerability lookup are known; incomplete inputs remain ungraded.
 
 ### Scoring
 
@@ -404,12 +404,13 @@ Scores npm dependencies on four axes graded A–F, rendered in a sortable table 
 
 ### Pipeline
 
-1. **API route** — `/api/deps` receives the dependency list from `package.json`, calls npm registry and OSV.dev APIs with `mapWithConcurrency(10)` to limit parallel requests.
-2. **Rate limiting** — 429 responses trigger automatic retry with exponential backoff.
-3. **Scoring** — `health-scorer.ts` computes per-axis scores and a weighted overall grade (A–F).
-4. **UI** — `DepsPanel` renders a summary bar, sortable `DepsTable`, download `DownloadSparkline` charts, and a `DepsDetailDrawer` for per-package deep dives.
+1. **Extraction** — `parseDependenciesAsyncWithCoverage()` hydrates package manifests and supported lockfiles in bounded batches. It preserves requested ranges, resolves exact installed versions from lockfiles, canonicalizes aliases, includes required peers, and reports unreadable or unsupported inputs as coverage gaps.
+2. **Registry metadata** — `DepsPanel` sends uncached package names to `/api/deps` in batches of at most 20, with at most 60 packages enriched per analysis window. The route queries bounded npm registry, search, and download endpoints under request, byte, timeout, concurrency, and cancellation limits.
+3. **Vulnerability data** — Exact package versions are sent through `/api/deps/cve`, which validates and bounds the request before querying OSV.dev. The Issues scan covers production dependencies only and labels that boundary; the dependency table can assess both production and development dependencies.
+4. **Truthful scoring** — `health-scorer.ts` computes the weighted grade only from complete signals. Missing npm metadata, unresolved lockfile versions, truncated coverage, and failed vulnerability requests remain visible as unknown rather than becoming healthy defaults.
+5. **UI** — `DepsPanel` renders a summary bar, sortable `DepsTable`, download `DownloadSparkline` charts, and a `DepsDetailDrawer` for per-package details. Loads, cached publications, and aborts remain bound to the active repository source.
 
-CVE lookups use a server-side proxy (`/api/deps/cve`) to avoid CSP/CORS issues with direct browser calls to `api.osv.dev`.
+Both dependency proxy routes enforce weighted rate limits and bounded request bodies. Upstream failures produce partial results or explicit errors; the client does not retry automatically.
 
 ## Repository Comparison
 
@@ -438,13 +439,13 @@ Interactive code tours are stored in IndexedDB. Each tour has ordered stops — 
 
 ### Data model
 
-- **Tour**: `{ id, repoFullName, title, description, stops[], createdAt }`
-- **Stop**: `{ file, startLine, endLine, title, annotation }`
+- **Tour**: `{ id, name, description, repoKey, visibility?, principal?, stops[], createdAt, updatedAt }`
+- **Stop**: `{ id, filePath, startLine, endLine, title?, annotation }`
 - Types are defined in `types/tours.ts`.
 
 ### Tour Lifecycle
 
-1. **CRUD** — `ToursProvider` manages tour state. Create, update, and delete operations persist to IndexedDB via `tour-cache.ts`.
+1. **CRUD** — `ToursProvider` manages repository-scoped tour state. Create, update, and delete operations persist to IndexedDB via `tour-cache.ts`; private tours are bound to the current credential principal. Credential cleanup removes private and legacy unknown-visibility tours while preserving explicitly public tours.
 2. **Playback** — The provider tracks `activeTour`, `currentStopIndex`, and `isPlaying`. Navigation (next/prev stop) updates the code browser's selected file and scroll position.
 3. **Local generation** — The Tours tab invokes the local `generateTour` executor directly. A focus path/topic prioritizes deterministic path and symbol matches; it is not sent as an AI prompt.
 4. **Rendering** — The tour player highlights the target line range in the code editor with a `bg-blue-500/10` overlay and displays the stop annotation in a side panel.
@@ -645,7 +646,7 @@ graph TD
 
 ## Streaming Zipball Extraction (Phase 5)
 
-For repos under 200 MB, the zipball is downloaded and extracted via streaming to minimize peak memory.
+For repos under 250 MB, the zipball is downloaded and extracted via streaming to minimize peak memory.
 
 ### Streaming Architecture
 
@@ -666,46 +667,46 @@ graph LR
 | --------- | -------- | ---- |
 | Zipball API route | `app/api/github/zipball/route.ts` | Streams GitHub zipball response body to client without buffering |
 | `streamUnzipFiles()` | `lib/github/zipball.ts` | Uses fflate's streaming `Unzip` API to extract files as chunks arrive |
-| `indexing-pipeline.ts` | `lib/repository/indexing-pipeline.ts` | Indexes files during streaming via the `onFile` callback |
+| `indexing-pipeline.ts` | `lib/github/indexing-pipeline.ts` | Indexes files during streaming via the `onFile` callback |
 
 ### Protection Mechanisms
 
 - **MAX_FILE_SIZE** (500 KB): Files exceeding this limit are skipped during extraction.
 - **MAX_TOTAL_EXTRACTED_SIZE** (200 MB): Extraction aborts when cumulative extracted size exceeds this limit.
 - **Path traversal rejection**: File paths containing `..` or absolute paths are rejected.
-- **30-second fetch timeout**: The zipball fetch is aborted if it takes too long.
+- **120-second fetch timeout**: The zipball fetch is aborted if it takes too long.
 - **AbortSignal support**: Callers can cancel extraction mid-stream.
 - **Fallback**: On any failure, the pipeline falls back to per-file fetching with concurrency.
 
 ## Lazy Content Loading (Phase 4)
 
-For repositories exceeding 200 MB, downloading all file content upfront is impractical. Phase 4 introduces **lazy content loading**: the tree structure and file metadata are indexed immediately, and file content is fetched on demand as consumers request it.
+For repositories at least 250 MB, downloading all file content upfront is impractical. Phase 4 introduces **lazy content loading**: the tree structure and file metadata are indexed immediately, and file content is fetched on demand as consumers request it.
 
 ### Lazy Loading Architecture
 
 ```mermaid
 graph TD
-  A["indexing-pipeline detects repo > 200MB"] --> B["Create FetchQueue + LazyContentStore"]
-  B --> C["batchIndexMetadataOnly: files with content=''"]
+  A["indexing-pipeline detects repo ≥ 250 MB"] --> B["Create FetchQueue + LazyContentStore"]
+  B --> C["batchIndexMetadataOnly: files with content omitted"]
   C --> D["CodeIndex ready (metadata-only)"]
   D --> E{"Consumer requests content"}
   E -->|"AI readFile"| F["LazyContentStore.get() → FetchQueue.enqueue(high)"]
   E -->|"Code browser"| G["LazyContentStore.get() → FetchQueue.enqueue(normal)"]
   E -->|"Search"| H["searchIndexPartial: search loaded files, report unsearched"]
   E -->|"Scanner"| I["metadataOnly mode: structural rules only"]
-  F --> J["Fetched content persisted to IDB via inner IDBContentStore"]
+  F --> J["Fetched content retained in session memory"]
   G --> J
 ```
 
 ### LazyContentStore
 
-`LazyContentStore` uses composition over inheritance: it wraps a private `IDBContentStore` for persistence and a `FetchQueue` for on-demand fetching.
+`LazyContentStore` uses composition over inheritance: it wraps a private `InMemoryContentStore` and a `FetchQueue` for on-demand fetching. SHA-less lazy content remains session-local and is not published to shared IndexedDB.
 
-- `get(path)` checks IDB first; on miss, enqueues a fetch via `FetchQueue` and persists the result to IDB.
-- `getBatch(paths)` reads from IDB only — does not trigger fetches (avoids uncontrolled concurrency).
+- `get(path)` checks resident memory first; on miss, enqueues a fetch via `FetchQueue` and retains the result for the session.
+- `getBatch(paths)` reads resident content only — it does not trigger fetches (avoids uncontrolled concurrency).
 - `getSync()` always returns `null` (async-only store).
 - `registerPaths(paths)` records all known file paths from the Git tree for metadata tracking.
-- `hasContent(path)` reports whether content has been fetched and stored.
+- `hasContent(path)` reports whether content has been fetched and retained in the session.
 - `getContentStatus()` returns `{ total, loaded, pending }` for UI progress indicators.
 
 ### FetchQueue
@@ -723,14 +724,14 @@ Priority-based, concurrency-limited queue for fetching file content from GitHub'
 
 ### Metadata-Only Indexing
 
-`batchIndexMetadataOnly()` creates `CodeIndex` entries with `content: ''` (empty string matches nothing in search). The `meta` map holds `CodeIndexMeta` entries for fast metadata access. This preserves `totalFiles` count for UI display while avoiding content download.
+`batchIndexMetadataOnly()` creates `CodeIndex` entries with content omitted. The `meta` map holds `CodeIndexMeta` entries for fast metadata access. This preserves `totalFiles` count for UI display while distinguishing unavailable source from a real empty file.
 
 ### Consumer Adaptations
 
 | Consumer | Adaptation |
 | -------- | ---------- |
-| **Search** | `searchIndexPartial()` separates results from unsearched files (content=''). UI shows count of unsearchable files |
-| **Scanner** | `metadataOnly` mode runs structural rules only (circular deps, coupling, dead modules) without file content |
+| **Search** | Worker-backed async search reports unavailable paths and truncation when source is absent or bounded work is skipped. The UI shows partial coverage. |
+| **Scanner** | Resolves source in bounded batches, reports unavailable source as unscanned, and uses `metadataOnly` mode for structural-only analysis without file content |
 | **AI tools** | `readFile` / `readFiles` call `contentStore.get()` which triggers on-demand fetch via `FetchQueue` |
 | **Code browser** | On file selection, content is fetched lazily. Loading indicator shown while pending |
 | **UI state** | `ContentAvailability` (`'full'` or `'metadata-only'`) in `RepositoryProvider` drives conditional UI |
@@ -743,9 +744,9 @@ Priority-based, concurrency-limited queue for fetching file content from GitHub'
 
 ## Content Stripping (Phase 6)
 
-For IDB-tier repos (50–200 MB), `IndexedFile.content` is populated during indexing but stripped from the JS heap afterward — content lives only in IndexedDB via `IDBContentStore`. This reduces main-thread memory by keeping only `CodeIndexMeta` records (path, name, language, lineCount) in the `CodeIndex` map, while full file content is accessed on demand through `contentStore.get()`.
+For IDB-tier repos (from the effective IDB threshold to below 250 MB), `IndexedFile.content` is populated during indexing but stripped from the JS heap afterward — content lives only in IndexedDB via `IDBContentStore`. This reduces main-thread memory by keeping only `CodeIndexMeta` records (path, name, language, line count, and count availability) in the `CodeIndex` map, while full file content is accessed on demand through `contentStore.get()`.
 
-For InMemory-tier repos (< 50 MB), `file.content` remains populated as before, providing a synchronous fast path with no behavioral change.
+For repositories below the effective IDB threshold, `file.content` remains populated, providing a synchronous fast path.
 
 ### Async Content Access Helpers
 
@@ -769,7 +770,7 @@ The most distinctive pattern in the codebase. AI tool definitions on the server 
 
 ### IndexedDB Caching with LRU Eviction
 
-Repository data is cached in IndexedDB (`repolens-cache` database, `repos` object store) keyed by `owner/repo`. Cache freshness is determined by tree SHA comparison. LRU eviction keeps at most 5 repos, sorting by last-access timestamp. Cache writes are fire-and-forget (non-critical path). For repos ≥ 50 MB, file content is stored separately in `repolens-content` via `IDBContentStore` to reduce heap memory usage.
+Repository data is cached in IndexedDB (`repolens-cache` database, `repos` object store) keyed by `owner/repo`. Cache freshness is determined by tree SHA comparison. LRU eviction keeps at most 5 repos, sorting by last-access timestamp. Complete cache publication finishes under the cross-context mutation lock before the indexing pipeline returns; a cache failure remains non-fatal to the current analysis. Private records require a matching credential principal, and legacy records without explicit visibility fail closed. From the effective IDB threshold to below 250 MB, file content is stored separately in `repolens-content` via `IDBContentStore` to reduce heap memory usage.
 
 ### Provider Composition with Ref-Based Stability
 
@@ -781,7 +782,7 @@ The initial repository context built by `buildStructuralIndexAsync()` favors a c
 
 ### Memoized Scanning
 
-`scanIssues()` uses `WeakRef<CodeIndex>` to cache results. When multiple components request a scan of the same `CodeIndex` instance, the cached result is returned immediately. The cache is invalidated when the `CodeIndex` reference changes.
+`scanIssuesAsync()` uses `WeakRef<CodeIndex>` to cache successful complete results and reuse matching in-flight work. A changed index, analysis, or option set bypasses the cache; partial and failed results are not retained.
 
 ### Multi-Phase Code Analysis
 

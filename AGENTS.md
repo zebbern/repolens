@@ -2,33 +2,33 @@
 
 ## PROJECT_IDENTITY
 
-**RepoLens** is an AI-powered GitHub repository analysis tool built with Next.js. Users paste a GitHub URL (or navigate to `mgithub.com/owner/repo`) to instantly browse code, scan for issues, generate documentation, create architecture diagrams, and chat with AI about any codebase. All processing happens client-side against an in-browser code index; users bring their own API keys.
+**RepoLens** is an AI-powered GitHub repository analysis tool built with Next.js. Users paste a GitHub URL (or navigate to `mgithub.com/owner/repo`) to instantly browse code, scan for issues, generate documentation, create architecture diagrams, and chat with AI about any codebase. Repository indexing and most analysis run locally against an in-browser code index. GitHub data is fetched through RepoLens proxy routes, and selected or pinned content plus local tool results can pass through the server to the selected AI provider; users bring their own API keys.
 
 ## TECH_STACK
 
 | Category | Technology | Version |
 | -------- | --------- | ------- |
-| Framework | Next.js (App Router) | 16.1.6 |
+| Framework | Next.js (App Router) | 16.3.2 |
 | Language | TypeScript | ^5 |
 | UI Library | React | ^19 |
-| Styling | Tailwind CSS | ^4.2.1 |
+| Styling | Tailwind CSS | ^4.2.2 |
 | Component Library | shadcn/ui + Radix UI | Multiple primitives |
-| AI SDK | Vercel AI SDK (`ai`) | ^6.0.108 |
+| AI SDK | Vercel AI SDK (`ai`) | ^6.0.158 |
 | AI Providers | `@ai-sdk/openai`, `@ai-sdk/anthropic`, `@ai-sdk/google` | ^3.x |
-| Auth | NextAuth (next-auth) | 5.0.0-beta.30 |
+| Auth | NextAuth (next-auth) | 5.0.0-beta.32 |
 | AST Parsing | `@babel/parser`, `@babel/traverse` | ^7.29.x |
-| Diagrams | Mermaid.js | ^11.4.0 |
+| Diagrams | Mermaid.js | ^11.17.0 |
 | Syntax Highlighting | Shiki | ^4.0.1 |
 | Markdown | react-markdown | ^10.1.0 |
 | Markdown plugins | remark-gfm, rehype-raw | ^4.0.1 / ^7.0.0 |
-| Forms | react-hook-form + zod | ^7.60 / ^4.0 |
+| Forms | react-hook-form + zod | ^7.72.1 / ^4.0 |
 | Charts | Recharts | ^3.8.0 |
-| Icons | lucide-react | ^0.454.0 |
+| Icons | lucide-react | ^1.8.0 |
 | Archive Handling | fflate | ^0.8.2 |
 | Package Manager | pnpm | — |
-| Unit Testing | Vitest + Testing Library | ^4.0.18 |
-| E2E Testing | Playwright | ^1.58.2 |
-| Analytics | @vercel/analytics | ^1.6.1 |
+| Unit Testing | Vitest + Testing Library | ^4.1.4 |
+| E2E Testing | Playwright | ^1.59.1 |
+| Analytics | @vercel/analytics | ^2.0.1 |
 
 ## STRUCTURE
 
@@ -222,12 +222,13 @@ workproject/                    # Next.js application root
 ├── test/
 │   └── setup.ts                # Vitest global setup
 ├── e2e/
-│   └── app.spec.ts             # Playwright E2E tests
+│   ├── trustworthy-analysis.spec.ts # Deterministic desktop and mobile flows
+│   └── live.spec.ts            # Opt-in live GitHub flows
 ├── proxy.ts                    # URL rewriting (owner/repo → /?repo=...) + security headers
 ├── next.config.mjs             # Next.js config (CSP, image optimization, package imports)
 ├── tsconfig.json                # TypeScript config (strict, path alias @/*)
 ├── vitest.config.ts             # Vitest config (jsdom, path alias, coverage)
-└── playwright.config.ts         # Playwright config (chromium, localhost:3000)
+└── playwright.config.ts         # Desktop, mobile, and live projects (default port 3100)
 ```
 
 ## CONVENTIONS
@@ -271,7 +272,7 @@ workproject/                    # Next.js application root
 
 ### Client-Side Tool Execution
 
-AI tools (file reading, search, symbol lookup, issue scanning, diagram generation) are defined without `execute` functions in the Vercel AI SDK. The server streams tool call requests; the client executes them locally against the in-memory `CodeIndex`. This keeps all repository data client-side and avoids sending source code to the server.
+AI tools (file reading, search, symbol lookup, issue scanning, diagram generation) are defined without `execute` functions in the Vercel AI SDK. The server streams tool call requests, and the client executes them locally against the in-memory `CodeIndex`. This avoids server-side repository indexing. Selected or pinned repository content and local tool results can still pass through the RepoLens server to the selected AI provider.
 
 ### ToolLoopAgent Architecture
 
@@ -311,13 +312,13 @@ Each provider has a clear dependency chain. `RepositoryProvider` depends on no A
 
 ### Repository Loading Pipeline
 
-1. Parse GitHub URL → fetch metadata → fetch tree via API or zipball download (zipball for repos under 200 MB)
+1. Parse GitHub URL → fetch metadata → fetch tree via API or zipball download (zipball for repos under 250 MB)
 2. Extract files → build `CodeIndex` (in-memory search index) → cache in IndexedDB
 3. On repeat visits, compare tree SHA to serve from cache (LRU, max 5 repos)
 
 ### Streaming Zipball Extraction
 
-The zipball pipeline uses streaming extraction to reduce peak memory. The server route (`app/api/github/zipball/route.ts`) streams the GitHub zipball response body directly to the client without buffering. On the client, `streamUnzipFiles()` in `lib/github/zipball.ts` uses fflate's streaming `Unzip` + `UnzipInflate` API to extract files as chunks arrive, and `indexing-pipeline.ts` indexes files during streaming. This reduces peak memory from ~3–4× zip size to ~1×. Protection mechanisms include `MAX_FILE_SIZE` (500 KB), `MAX_TOTAL_EXTRACTED_SIZE` (200 MB), path traversal rejection, a 30-second fetch timeout, and `AbortSignal` support. On failure, the pipeline falls back to per-file fetching.
+The zipball pipeline uses streaming extraction to reduce peak memory. The server route (`app/api/github/zipball/route.ts`) streams the GitHub zipball response body directly to the client without buffering. On the client, `streamUnzipFiles()` in `lib/github/zipball.ts` uses fflate's streaming `Unzip` + `UnzipInflate` API to extract files as chunks arrive, and `indexing-pipeline.ts` indexes files during streaming. This reduces peak memory from ~3–4× zip size to ~1×. Protection mechanisms include `MAX_FILE_SIZE` (500 KB), `MAX_TOTAL_EXTRACTED_SIZE` (200 MB), path traversal rejection, a 120-second fetch timeout, and `AbortSignal` support. On failure, the pipeline falls back to per-file fetching.
 
 ### URL Rewriting
 
@@ -329,9 +330,9 @@ Security headers (`X-Frame-Options`, `X-Content-Type-Options`, `Referrer-Policy`
 
 ### ContentStore (Tiered Content Storage)
 
-Three-tier content storage routes repos by size: <50 MB → `InMemoryContentStore` (zero-overhead `Map`), 50–200 MB → `IDBContentStore` (IndexedDB-backed), >200 MB → `LazyContentStore` (on-demand fetching via `FetchQueue`). All three implement the `ContentStore` interface (`lib/code/content-store.ts`). `CodeIndex` holds `CodeIndexMeta` records (path, name, language, lineCount) for all files regardless of store type. Thresholds are configured via `IDB_CONTENT_STORE_THRESHOLD_KB` (50 MB) and `LAZY_CONTENT_THRESHOLD_KB` (200 MB) in `config/constants.ts`. Search and scanner workers use IDB directly for large repos. For lazy repos, `batchIndexMetadataOnly()` creates a metadata-only `CodeIndex` with `content: ''`, and `searchIndexPartial()` separates searched vs. unsearched files.
+Three-tier content storage routes repos by size: below the effective IDB threshold → `InMemoryContentStore` (zero-overhead `Map`), from that threshold to 250 MB → `IDBContentStore` (IndexedDB-backed), and 250 MB or larger → `LazyContentStore` (on-demand fetching via `FetchQueue`). The default IDB threshold is 50 MB and drops to 25 MB on devices reporting at most 4 GB of memory. All three stores implement the `ContentStore` interface (`lib/code/content-store.ts`). `CodeIndex` holds `CodeIndexMeta` records (path, name, language, line count, and count availability) for all files regardless of store type; aggregate line totals remain explicitly partial until unavailable counts are resolved. Thresholds are configured via `IDB_CONTENT_STORE_THRESHOLD_KB` and `LAZY_CONTENT_THRESHOLD_KB` (250 MB) in `config/constants.ts`. Search and scanner workers use IDB directly for IDB-tier repositories. For lazy repositories, `batchIndexMetadataOnly()` creates records with content omitted; async search reports unsearched paths when source is not resident.
 
-**Content access pattern**: `IndexedFile.content` is optional — for IDB-tier repos, content is stripped from heap after indexing and lives only in IndexedDB. Main-thread consumers use the async helpers in `code-index.ts`: `getFileContent(index, path)` (async, works with all tiers), `getFileContentSync(index, path)` (sync fast path for InMemory-tier), and `getFileLinesAsync(index, path)` (async, returns split lines). Scanner files guard with `if (!file.content)` before accessing content directly.
+**Content access pattern**: `IndexedFile.content` is optional — for IDB-tier repos, content is stripped from heap after indexing and lives only in IndexedDB. Main-thread consumers use the async helpers in `code-index.ts`: `getFileContent(index, path)` (async, works with all tiers), `getFileContentSync(index, path)` (sync fast path for InMemory-tier), and `getFileLinesAsync(index, path)` (async, returns split lines). Search, scanner, dependency, and structural-index paths resolve content through bounded async batches.
 
 ### Scanner Architecture
 
@@ -353,7 +354,7 @@ The GitHub REST API does not support blame. `lib/github/graphql.ts` provides a l
 
 ### Prerequisites
 
-- Node.js 22+
+- Node.js 22.12+
 - pnpm
 
 ### Commands
@@ -369,7 +370,7 @@ The GitHub REST API does not support blame. `lib/github/graphql.ts` provides a l
 | `pnpm test:watch` | Run tests in watch mode |
 | `pnpm test:coverage` | Run tests with V8 coverage |
 | `pnpm test:ui` | Open Vitest UI |
-| `pnpm test:e2e` | Run Playwright E2E tests (starts dev server automatically) |
+| `pnpm test:e2e` | Run deterministic desktop and mobile Playwright tests (starts the production server on port 3100) |
 
 ### Environment Variables
 
@@ -380,7 +381,7 @@ The GitHub REST API does not support blame. `lib/github/graphql.ts` provides a l
 ### Test Configuration
 
 - **Unit tests (Vitest)**: jsdom environment, `@/` path alias, files matched from `lib/`, `app/`, `components/`, `hooks/`, `providers/`, `types/`. Setup in `test/setup.ts`.
-- **E2E tests (Playwright)**: Chromium only, tests in `e2e/`, auto-starts dev server on port 3000.
+- **E2E tests (Playwright)**: Desktop Chromium and Pixel 5 projects run deterministic tests in `e2e/`; an opt-in desktop project runs `@live` tests. Playwright starts the production server on port 3100 by default, configurable with `PLAYWRIGHT_PORT`.
 - **Coverage**: V8 provider, reporters: text, lcov, json-summary.
 
 ## KEY_PATTERNS
@@ -441,3 +442,13 @@ The GitHub REST API does not support blame. `lib/github/graphql.ts` provides a l
 - Add new color tokens as CSS custom properties in `globals.css` (both light and dark variants).
 - Register them in the `@theme` block in `globals.css` with the `--color-token: hsl(var(--token))` pattern.
 - Use semantic names (e.g., `--status-error`, `--interactive-hover`), not color values.
+
+<!-- BEGIN:nextjs-agent-rules -->
+
+# This is NOT the Next.js you know
+
+This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` (resolved from this file's directory; in monorepos the `next` package may not be visible from the repo root) before writing any code. Heed deprecation notices.
+
+This block is written and re-added by `next dev` — verify at `node_modules/next/dist/server/lib/generate-agent-files.js`. Removing it from a diff only re-creates the uncommitted change; committing it with your work keeps the tree clean.
+
+<!-- END:nextjs-agent-rules -->

@@ -61,7 +61,7 @@ RepoLens supports 4 AI providers. You configure API keys directly in the app —
 
 ## GitHub Personal Access Token
 
-Add a GitHub Personal Access Token (PAT) to access **private repositories** and raise the API rate limit from 60 to **5,000 requests/hour**. The PAT is stored in your browser. RepoLens may send it through its server for validation, ZIP downloads, and some GitHub requests; other supported requests may go directly from the browser to GitHub.
+Add a GitHub Personal Access Token (PAT) to access **private repositories** and raise GitHub's account-level API limit from 60 to **5,000 requests/hour**. RepoLens applies separate endpoint-specific proxy limits. The PAT is stored in your browser. RepoLens may send it through its server for validation, ZIP downloads, and some GitHub requests; other supported requests may go directly from the browser to GitHub.
 
 ### How to Configure
 
@@ -80,7 +80,7 @@ Add a GitHub Personal Access Token (PAT) to access **private repositories** and 
 
 - The token is stored in your browser's `localStorage` — same as AI API keys.
 - Depending on the operation, authenticated GitHub traffic may go directly from the browser to GitHub or through RepoLens server routes.
-- Already signed in with OAuth? OAuth continues to work through server-side proxy routes. You can use either method, or both.
+- OAuth sign-in continues to work through server-side proxy routes. GitHub OAuth Apps require the broad `repo` scope for private code because they do not offer a read-only private-code scope; use a fine-grained PAT when you need repository-specific read-only access.
 
 ---
 
@@ -90,8 +90,8 @@ Add a GitHub Personal Access Token (PAT) to access **private repositories** and 
 
 | Requirement | Install | Verify |
 |---|---|---|
-| **Node.js 18+** | [nodejs.org](https://nodejs.org) | `node -v` |
-| **pnpm** | [pnpm.io](https://pnpm.io/installation) | `pnpm -v` |
+| **Node.js 22.12+** | [nodejs.org](https://nodejs.org) | `node -v` |
+| **pnpm 10.28.1** | [pnpm.io](https://pnpm.io/installation) | `pnpm -v` |
 | **AI API key** | At least one: [OpenAI](https://platform.openai.com/api-keys), [Google AI](https://aistudio.google.com/apikey), [Anthropic](https://console.anthropic.com/settings/keys), or [OpenRouter](https://openrouter.ai/keys) | — |
 
 ### Setup
@@ -136,7 +136,7 @@ AI keys are configured in the UI — no environment variables required for basic
 
 | Category | Technology |
 |---|---|
-| Framework | [Next.js 15](https://nextjs.org) (App Router) |
+| Framework | [Next.js 16](https://nextjs.org) (App Router) |
 | UI | [React 19](https://react.dev), [Tailwind CSS](https://tailwindcss.com), [shadcn/ui](https://ui.shadcn.com) |
 | Language | [TypeScript 5](https://www.typescriptlang.org) |
 | AI | [Vercel AI SDK v6](https://sdk.vercel.ai) |

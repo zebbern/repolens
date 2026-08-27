@@ -1,7 +1,7 @@
 // Main analysis entry point — orchestrates all parsing phases.
 
 import type { CodeIndex } from '../code-index'
-import { hydrateCodeIndexContent } from '../code-index'
+import { resolveFileContentBatches } from '../code-index'
 import type { FileAnalysis, DependencyGraph, FullAnalysis } from './types'
 import { detectLang, detectPrimaryLanguage } from './utils'
 import { extractImports } from './languages'
@@ -13,27 +13,41 @@ import { detectFramework } from './framework-detection'
 
 const JS_TS_LANGS = new Set(['typescript', 'javascript', 'tsx', 'jsx'])
 
-export async function analyzeCodebase(codeIndex: CodeIndex): Promise<FullAnalysis> {
-  const hydrated = await hydrateCodeIndexContent(codeIndex)
-  if (hydrated.missingPaths.length > 0) {
-    throw new Error(`Content unavailable for indexed files: ${hydrated.missingPaths.join(', ')}`)
-  }
-  codeIndex = hydrated.index
+async function analyzeCodebaseInternal(codeIndex: CodeIndex, enhanceNonJs: boolean): Promise<FullAnalysis> {
   const files = new Map<string, FileAnalysis>()
   const indexedPaths = new Set(codeIndex.files.keys())
+  const missingPaths: string[] = []
+  const asyncExtractors = enhanceNonJs ? await import('./extract-types') : null
 
-  // Phase 1: Analyze each file
-  for (const [path, indexedFile] of codeIndex.files) {
-    const content = indexedFile.content
-    if (typeof content !== 'string') continue
-    const lang = detectLang(path)
-    const imports = extractImports(content, path, lang, indexedPaths)
-    const exports = extractExports(content, lang)
-    const types = extractTypes(content, lang)
-    const classes = extractClasses(content, lang)
-    const jsxComponents = extractJsxComponents(content, lang)
+  // Analyze bounded source batches and retain only structural metadata. Source
+  // strings from an IDB-backed repository become collectible after each batch.
+  for await (const batch of resolveFileContentBatches(codeIndex, [...codeIndex.files.keys()])) {
+    missingPaths.push(...batch.missingPaths)
+    for (const path of batch.paths) {
+      const content = batch.contents.get(path)
+      if (content === undefined) continue
+      const lang = detectLang(path)
+      const imports = extractImports(content, path, lang, indexedPaths)
+      const exports = extractExports(content, lang)
+      let types = extractTypes(content, lang)
+      let classes = extractClasses(content, lang)
+      const jsxComponents = extractJsxComponents(content, lang)
 
-    files.set(path, { path, imports, exports, types, classes, jsxComponents, language: lang })
+      if (asyncExtractors && !JS_TS_LANGS.has(lang)) {
+        const [asyncTypes, asyncClasses] = await Promise.all([
+          asyncExtractors.extractTypesAsync(content, lang),
+          asyncExtractors.extractClassesAsync(content, lang),
+        ])
+        if (asyncTypes.length > types.length) types = asyncTypes
+        if (asyncClasses.length > classes.length) classes = asyncClasses
+      }
+
+      files.set(path, { path, imports, exports, types, classes, jsxComponents, language: lang })
+    }
+  }
+
+  if (missingPaths.length > 0) {
+    throw new Error(`Content unavailable for indexed files: ${missingPaths.join(', ')}`)
   }
 
   // Phase 2: Build dependency graph
@@ -73,40 +87,14 @@ export async function analyzeCodebase(codeIndex: CodeIndex): Promise<FullAnalysi
   return { files, graph, topology, detectedFramework, primaryLanguage }
 }
 
+export async function analyzeCodebase(codeIndex: CodeIndex): Promise<FullAnalysis> {
+  return analyzeCodebaseInternal(codeIndex, false)
+}
+
 /**
  * Async variant of `analyzeCodebase` — enhances non-JS/TS files with
  * Tree-sitter–based type and class extraction for richer class diagrams.
  */
 export async function analyzeCodebaseAsync(codeIndex: CodeIndex): Promise<FullAnalysis> {
-  const hydrated = await hydrateCodeIndexContent(codeIndex)
-  if (hydrated.missingPaths.length > 0) {
-    throw new Error(`Content unavailable for indexed files: ${hydrated.missingPaths.join(', ')}`)
-  }
-  codeIndex = hydrated.index
-  const result = await analyzeCodebase(codeIndex)
-
-  const { extractTypesAsync, extractClassesAsync } = await import('./extract-types')
-
-  const enhancePromises: Promise<void>[] = []
-  for (const [path, fileAnalysis] of result.files) {
-    if (JS_TS_LANGS.has(fileAnalysis.language)) continue
-
-    enhancePromises.push((async () => {
-      const content = codeIndex.files.get(path)?.content
-      if (typeof content !== 'string') return
-      const [asyncTypes, asyncClasses] = await Promise.all([
-        extractTypesAsync(content, fileAnalysis.language),
-        extractClassesAsync(content, fileAnalysis.language),
-      ])
-      if (asyncTypes.length > fileAnalysis.types.length) {
-        fileAnalysis.types = asyncTypes
-      }
-      if (asyncClasses.length > fileAnalysis.classes.length) {
-        fileAnalysis.classes = asyncClasses
-      }
-    })())
-  }
-
-  await Promise.all(enhancePromises)
-  return result
+  return analyzeCodebaseInternal(codeIndex, true)
 }

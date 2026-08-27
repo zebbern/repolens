@@ -236,11 +236,9 @@ describe('calculateHealthScore', () => {
     expect(score).toBeLessThanOrEqual(10)
   })
 
-  it('returns averaged security+outdated when meta is null', () => {
-    // security=100 (0 CVEs), outdated=100 (null) → (100+100)/2 = 100
-    expect(calculateHealthScore(null, 0, null)).toBe(100)
-    // security=60 (1 CVE), outdated=10 (major) → (60+10)/2 = 35
-    expect(calculateHealthScore(null, 1, 'major')).toBe(35)
+  it('withholds a score when metadata is unavailable', () => {
+    expect(calculateHealthScore(null, 0, null)).toBeNull()
+    expect(calculateHealthScore(makeMeta({ lastPublish: null }), 0, null)).toBeNull()
   })
 
   it('factors in download score at 20% weight', () => {
@@ -250,7 +248,7 @@ describe('calculateHealthScore', () => {
     const highScore = calculateHealthScore(metaHigh, 0, null)
     const lowScore = calculateHealthScore(metaLow, 0, null)
 
-    expect(highScore).toBeGreaterThan(lowScore)
+    expect(highScore!).toBeGreaterThan(lowScore!)
   })
 
   it('uses outdatedType directly to determine outdated score', () => {
@@ -303,9 +301,51 @@ describe('computeDependencyHealth', () => {
     expect(result.score).toBeLessThan(35)
   })
 
-  it('maps null meta correctly', () => {
+  it('withholds health when npm metadata is unavailable', () => {
     const result = computeDependencyHealth(null, 0, null)
-    expect(result.grade).toBe('A')
-    expect(result.score).toBe(100)
+    expect(result).toEqual({ score: null, grade: null, confidence: 'unknown' })
+  })
+
+  it('withholds health when the registry publish date is unavailable', () => {
+    const result = computeDependencyHealth(makeMeta({ lastPublish: null }), 0, null)
+
+    expect(result).toEqual({ score: null, grade: null, confidence: 'unknown' })
+  })
+
+  it('returns unknown health when metadata and CVE signals are unavailable', () => {
+    const result = computeDependencyHealth(
+      null,
+      { status: 'unknown' },
+      { status: 'unknown' },
+    )
+
+    expect(result).toEqual({ score: null, grade: null, confidence: 'unknown' })
+  })
+
+  it.each([
+    [
+      { status: 'unknown' as const, error: 'OSV unavailable' },
+      { status: 'known' as const, value: null },
+    ],
+    [
+      { status: 'known' as const, value: 0 },
+      { status: 'unknown' as const, error: 'Installed version unresolved' },
+    ],
+  ])('withholds health when any required signal is unknown', (cveSignal, outdatedSignal) => {
+    const result = computeDependencyHealth(makeMeta(), cveSignal, outdatedSignal)
+
+    expect(result).toEqual({ score: null, grade: null, confidence: 'unknown' })
+  })
+
+  it('reports known confidence when metadata and both signals are known', () => {
+    const result = computeDependencyHealth(
+      makeMeta({ weeklyDownloads: 1_000_000 }),
+      { status: 'known', value: 0 },
+      { status: 'known', value: null },
+    )
+
+    expect(result.confidence).toBe('known')
+    expect(result.score).not.toBeNull()
+    expect(result.grade).not.toBeNull()
   })
 })

@@ -45,4 +45,11 @@ describe('HealthBadge', () => {
     const badge = container.querySelector('.extra-class')
     expect(badge).toBeInTheDocument()
   })
+
+  it('renders an explicit unknown state when a score cannot be computed', () => {
+    render(<HealthBadge grade={null} score={null} />)
+
+    expect(screen.getByLabelText('Health grade: unknown')).toHaveTextContent('?')
+    expect(screen.getByText('Score: Unknown')).toBeInTheDocument()
+  })
 })

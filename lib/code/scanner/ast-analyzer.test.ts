@@ -3,10 +3,10 @@ import { parseFileAST, getAST, clearASTCache } from './ast-parser'
 import { analyzeAST, extractScopeInfo, findFunctionBodies, isRouteHandler, isExportedFunction } from './ast-analysis'
 import type { IndexedFile } from '../code-index'
 
-function makeFile(content: string, language = 'typescript'): IndexedFile {
+function makeFile(content: string, language = 'typescript', path = 'test.ts'): IndexedFile {
   return {
-    path: 'test.ts',
-    name: 'test.ts',
+    path,
+    name: path.split('/').at(-1) ?? path,
     content,
     language,
     lineCount: content.split('\n').length,
@@ -58,6 +58,33 @@ describe('getAST', () => {
     clearASTCache()
   })
 
+  it('does not reuse a cached AST for equal-length changed content', () => {
+    const first = getAST(makeFile('const aa = 1;'))
+    const second = getAST(makeFile('const bb = 2;'))
+
+    const firstName = (first?.program.body[0] as { declarations?: Array<{ id?: { name?: string } }> })
+      .declarations?.[0]?.id?.name
+    const secondName = (second?.program.body[0] as { declarations?: Array<{ id?: { name?: string } }> })
+      .declarations?.[0]?.id?.name
+
+    expect(firstName).toBe('aa')
+    expect(secondName).toBe('bb')
+  })
+
+  it('does not reuse a cached AST when distinct source strings have the same fast hash', () => {
+    // These valid declarations collide under the previous 32-bit FNV-1a cache key.
+    const first = getAST(makeFile('const v1xletrirry = 1;'))
+    const second = getAST(makeFile('const vtv7zm8tuo = 1;'))
+
+    const firstName = (first?.program.body[0] as { declarations?: Array<{ id?: { name?: string } }> })
+      .declarations?.[0]?.id?.name
+    const secondName = (second?.program.body[0] as { declarations?: Array<{ id?: { name?: string } }> })
+      .declarations?.[0]?.id?.name
+
+    expect(firstName).toBe('v1xletrirry')
+    expect(secondName).toBe('vtv7zm8tuo')
+  })
+
   it('returns AST for eligible files', () => {
     const file = makeFile('const x = 1;')
     const ast = getAST(file)
@@ -69,6 +96,14 @@ describe('getAST', () => {
     const ast1 = getAST(file)
     const ast2 = getAST(file)
     expect(ast1).toBe(ast2)
+  })
+
+  it('reuses a content-identified AST across renamed files', () => {
+    const content = 'export const shared = 1;'
+    const first = getAST(makeFile(content, 'typescript', 'src/original.ts'))
+    const renamed = getAST(makeFile(content, 'typescript', 'src/renamed.ts'))
+
+    expect(renamed).toBe(first)
   })
 
   it('returns null for non-JS files', () => {
@@ -91,6 +126,18 @@ describe('getAST', () => {
 describe('analyzeAST', () => {
   beforeEach(() => {
     clearASTCache()
+  })
+
+  it('propagates traversal failures so the scanner can report partial coverage', () => {
+    const code = 'const value = 1'
+    const file = makeFile(code, 'javascript')
+    const ast = parseFileAST(code, 'javascript')!
+    Object.defineProperty(ast.program, 'body', {
+      configurable: true,
+      get: () => { throw new Error('synthetic traversal failure') },
+    })
+
+    expect(() => analyzeAST(ast, file)).toThrow('synthetic traversal failure')
   })
 
   it('detects eval() usage', () => {

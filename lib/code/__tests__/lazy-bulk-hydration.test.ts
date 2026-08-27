@@ -21,21 +21,24 @@ function lazyIndex() {
 }
 
 describe('bulk hydration of on-demand repositories', () => {
-  it('structural indexing fails visibly without fetching every lazy file', async () => {
+  it('structural indexing preserves available structure and reports missing content', async () => {
     const { fetchFile, index } = lazyIndex()
-    await expect(buildStructuralIndexAsync(index)).rejects.toThrow('Content unavailable')
+    const result = await buildStructuralIndexAsync(index)
+    expect(result).toContain('[content-coverage]')
     expect(fetchFile).not.toHaveBeenCalled()
   })
 
-  it('full search fails visibly without fetching every lazy file', async () => {
+  it('full search reports missing lazy files without bulk hydration', async () => {
     const { fetchFile, index } = lazyIndex()
-    await expect(searchIndexAsync(index, 'fetched')).rejects.toThrow('Content unavailable')
+    const result = await searchIndexAsync(index, 'fetched')
+    expect(result.unsearchedPaths).toEqual(['src/a.ts', 'src/b.ts'])
     expect(fetchFile).not.toHaveBeenCalled()
   })
 
-  it('full scanning fails visibly without fetching every lazy file', async () => {
+  it('full scanning reports unscanned files without bulk hydration', async () => {
     const { fetchFile, index } = lazyIndex()
-    await expect(scanIssuesAsync(index, null)).rejects.toThrow('Content unavailable')
+    const result = await scanIssuesAsync(index, null)
+    expect(result.unscannedFileCount).toBe(2)
     expect(fetchFile).not.toHaveBeenCalled()
   })
 })

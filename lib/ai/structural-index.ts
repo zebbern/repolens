@@ -1,12 +1,14 @@
 import type { CodeIndex, IndexedFile } from '@/lib/code/code-index'
 import type { RepositoryCoverage } from '@/types/repository'
-import { getFileLines, getFileContent, getFileLinesAsync, hydrateCodeIndexContent } from '@/lib/code/code-index'
+import { getFileLines, getFileContent, getFileLinesAsync, resolveFileContentBatches } from '@/lib/code/code-index'
 import { coverageNotice } from '@/lib/repository'
 
 export interface RichFileMetadata {
   path: string
   language: string
   lineCount: number
+  /** False when the index has no source-derived line count for this file. */
+  lineCountKnown?: boolean
   exports?: string[]
   imports?: string[]
   signatures?: string[]
@@ -28,6 +30,15 @@ export const IMPORT_REGEX = /import\s+.*?from\s+['"]([^'"]+)['"]/g
 const EXPORT_REGEX = /^export\s+(?:default\s+)?(?:async\s+)?(?:function|class|const|let|type|interface|enum)\s+(\w+)/
 
 const MAX_INDEX_BYTES = 300_000
+const STRUCTURAL_BATCH_SIZE = 50
+const textEncoder = new TextEncoder()
+
+const INDEX_TRUNCATED_ENTRY: RichFileMetadata = {
+  path: '[index-truncated]',
+  language: 'metadata',
+  lineCount: 0,
+  coverageNotice: 'Structural index truncated to the configured byte limit',
+}
 
 /** Per-file structural extraction limits. */
 const MAX_EXPORTS_PER_FILE = 50
@@ -51,38 +62,22 @@ export function buildStructuralIndex(
 
   const maxBytes = options?.maxIndexBytes ?? MAX_INDEX_BYTES
   const metadata: RichFileMetadata[] = []
+  let usedBytes = 2
+  const truncationBytes = encodedJsonBytes(INDEX_TRUNCATED_ENTRY) + 1
+  let truncated = false
 
   for (const [path, file] of codeIndex.files) {
-    const entry: RichFileMetadata = {
-      path,
-      language: file.language || inferLanguage(path),
-      lineCount: file.lineCount,
+    const entry = buildStructuralEntry(path, file)
+    const entryBytes = encodedJsonBytes(entry) + (metadata.length > 0 ? 1 : 0)
+    if (usedBytes + entryBytes + truncationBytes > maxBytes) {
+      truncated = true
+      break
     }
-
-    // Extract structural info for code files (skip non-code like JSON, markdown, etc.)
-    if (isCodeFile(path)) {
-      const exports = extractExports(file)
-      const imports = extractImports(file)
-      const signatures = extractSignatures(file)
-
-      // Truncation guard: cap exports and append "...(N more)" message
-      if (exports.length > MAX_EXPORTS_PER_FILE) {
-        const total = exports.length
-        entry.exports = [
-          ...exports.slice(0, MAX_EXPORTS_PER_FILE),
-          `...(${total - MAX_EXPORTS_PER_FILE} more)`,
-        ]
-      } else if (exports.length > 0) {
-        entry.exports = exports
-      }
-
-      if (imports.length > 0) entry.imports = imports.slice(0, MAX_IMPORTS_PER_FILE)
-      if (signatures.length > 0) entry.signatures = signatures.slice(0, MAX_SIGNATURES_PER_FILE)
-    }
-
-    // All files appear in the index; zero-export files have just path/language/lineCount
     metadata.push(entry)
+    usedBytes += entryBytes
   }
+
+  if (truncated) metadata.push({ ...INDEX_TRUNCATED_ENTRY })
 
   return serializeStructuralMetadata(metadata, codeIndex.coverage, maxBytes)
 }
@@ -93,11 +88,87 @@ export async function buildStructuralIndexAsync(
   options?: { maxIndexBytes?: number },
 ): Promise<string> {
   if (!codeIndex?.files) return ''
-  const hydrated = await hydrateCodeIndexContent(codeIndex)
-  if (hydrated.missingPaths.length > 0) {
-    throw new Error(`Content unavailable for indexed files: ${hydrated.missingPaths.join(', ')}`)
+  const maxBytes = options?.maxIndexBytes ?? MAX_INDEX_BYTES
+  const metadata: RichFileMetadata[] = []
+  const paths = [...codeIndex.files.keys()]
+  const truncationBytes = encodedJsonBytes(INDEX_TRUNCATED_ENTRY) + 1
+  let usedBytes = 2
+  let missingCount = 0
+  let truncated = false
+
+  outer: for (let offset = 0; offset < paths.length; offset += STRUCTURAL_BATCH_SIZE) {
+    const batchPaths = paths.slice(offset, offset + STRUCTURAL_BATCH_SIZE)
+    const codePaths = batchPaths.filter(isCodeFile)
+    const contents = new Map<string, string>()
+    const missing = new Set<string>()
+    for await (const batch of resolveFileContentBatches(codeIndex, codePaths, { batchSize: STRUCTURAL_BATCH_SIZE })) {
+      for (const [path, content] of batch.contents) contents.set(path, content)
+      for (const path of batch.missingPaths) missing.add(path)
+    }
+    missingCount += missing.size
+
+    for (const path of batchPaths) {
+      const file = codeIndex.files.get(path)
+      if (!file) continue
+      const content = contents.get(path)
+      const entry = buildStructuralEntry(path, content === undefined
+        ? file
+        : {
+            ...file,
+            content,
+            lineCount: content.split('\n').length,
+            lineCountKnown: true,
+          })
+      const entryBytes = encodedJsonBytes(entry) + (metadata.length > 0 ? 1 : 0)
+      if (usedBytes + entryBytes + truncationBytes > maxBytes) {
+        truncated = true
+        break outer
+      }
+      metadata.push(entry)
+      usedBytes += entryBytes
+    }
   }
-  return buildStructuralIndex(hydrated.index, options)
+
+  if (missingCount > 0) {
+    metadata.unshift({
+      path: '[content-coverage]',
+      language: 'metadata',
+      lineCount: 0,
+      coverageNotice: `Content unavailable for ${missingCount} indexed file${missingCount === 1 ? '' : 's'}`,
+    })
+  }
+  if (truncated) metadata.push({ ...INDEX_TRUNCATED_ENTRY })
+  return serializeStructuralMetadata(metadata, codeIndex.coverage, maxBytes)
+}
+
+function buildStructuralEntry(path: string, file: IndexedFile): RichFileMetadata {
+  const entry: RichFileMetadata = {
+    path,
+    language: file.language || inferLanguage(path),
+    lineCount: file.lineCount,
+    ...(file.lineCountKnown === false ? { lineCountKnown: false } : {}),
+  }
+
+  if (!isCodeFile(path) || typeof file.content !== 'string') return entry
+
+  const exports = extractExports(file)
+  const imports = extractImports(file)
+  const signatures = extractSignatures(file)
+  if (exports.length > MAX_EXPORTS_PER_FILE) {
+    entry.exports = [
+      ...exports.slice(0, MAX_EXPORTS_PER_FILE),
+      `...(${exports.length - MAX_EXPORTS_PER_FILE} more)`,
+    ]
+  } else if (exports.length > 0) {
+    entry.exports = exports
+  }
+  if (imports.length > 0) entry.imports = imports.slice(0, MAX_IMPORTS_PER_FILE)
+  if (signatures.length > 0) entry.signatures = signatures.slice(0, MAX_SIGNATURES_PER_FILE)
+  return entry
+}
+
+function encodedJsonBytes(value: unknown): number {
+  return textEncoder.encode(JSON.stringify(value)).byteLength
 }
 
 function serializeStructuralMetadata(
@@ -105,9 +176,11 @@ function serializeStructuralMetadata(
   coverage: RepositoryCoverage | undefined,
   maxBytes: number,
 ): string {
+  if (!Number.isFinite(maxBytes) || maxBytes < 2) return ''
+  const working = metadata.map(entry => ({ ...entry }))
   const notice = coverageNotice(coverage)
   if (notice) {
-    metadata.unshift({
+    working.unshift({
       path: '[repository-coverage]',
       language: 'metadata',
       lineCount: 0,
@@ -116,14 +189,14 @@ function serializeStructuralMetadata(
     })
   }
 
-  if (metadata.length === 0) return ''
+  if (working.length === 0) return ''
 
-  let result = JSON.stringify(metadata)
-  if (result.length <= maxBytes) return result
+  let result = JSON.stringify(working)
+  if (textEncoder.encode(result).byteLength <= maxBytes) return result
 
   // Progressive trimming: drop signatures → imports → exports,
   // starting from files with fewest exports
-  const sortedByExports = [...metadata].sort(
+  const sortedByExports = [...working].sort(
     (a, b) => (a.exports?.length ?? 0) - (b.exports?.length ?? 0),
   )
 
@@ -131,13 +204,49 @@ function serializeStructuralMetadata(
     for (const entry of sortedByExports) {
       if (entry[field]) {
         delete entry[field]
-        result = JSON.stringify(metadata)
-        if (result.length <= maxBytes) return result
+        result = JSON.stringify(working)
+        if (textEncoder.encode(result).byteLength <= maxBytes) return result
       }
     }
   }
 
-  return result
+  let removedFile = false
+  while (textEncoder.encode(result).byteLength > maxBytes) {
+    const index = working.findLastIndex(entry => !entry.path.startsWith('['))
+    if (index < 0) break
+    working.splice(index, 1)
+    removedFile = true
+    result = JSON.stringify(working)
+  }
+
+  if (removedFile && !working.some(entry => entry.path === INDEX_TRUNCATED_ENTRY.path)) {
+    working.push({ ...INDEX_TRUNCATED_ENTRY })
+    result = JSON.stringify(working)
+    while (textEncoder.encode(result).byteLength > maxBytes) {
+      const index = working.findLastIndex(entry => !entry.path.startsWith('['))
+      if (index < 0) break
+      working.splice(index, 1)
+      result = JSON.stringify(working)
+    }
+  }
+
+  for (const entry of working) delete entry.repositoryCoverage
+  result = JSON.stringify(working)
+  if (textEncoder.encode(result).byteLength <= maxBytes) return result
+
+  // Preserve a valid JSON array and the most important truncation signal even
+  // for very small caller budgets.
+  const minimal = [{ ...INDEX_TRUNCATED_ENTRY }]
+  let low = 0
+  let high = INDEX_TRUNCATED_ENTRY.coverageNotice!.length
+  while (low < high) {
+    const mid = Math.ceil((low + high) / 2)
+    minimal[0].coverageNotice = INDEX_TRUNCATED_ENTRY.coverageNotice!.slice(0, mid)
+    if (encodedJsonBytes(minimal) <= maxBytes) low = mid
+    else high = mid - 1
+  }
+  minimal[0].coverageNotice = INDEX_TRUNCATED_ENTRY.coverageNotice!.slice(0, low)
+  return encodedJsonBytes(minimal) <= maxBytes ? JSON.stringify(minimal) : '[]'
 }
 
 /**

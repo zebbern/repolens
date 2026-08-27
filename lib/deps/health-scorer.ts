@@ -3,7 +3,7 @@
  * Produces a 0-100 score and A-F grade based on weighted factors.
  */
 
-import type { HealthGrade, NpmPackageMeta } from './types'
+import type { HealthGrade, HealthConfidence, HealthSignal, NpmPackageMeta } from './types'
 
 // ---------------------------------------------------------------------------
 // Weights
@@ -102,21 +102,17 @@ export function scoreToGrade(score: number): HealthGrade {
  * Calculate the overall health score for a dependency.
  * Returns a 0-100 score and A-F grade.
  *
- * When npmMeta is null (fetch failed), the score is based only on
- * outdated and security sub-scores with reduced confidence.
+ * Returns null when registry metadata is incomplete; partial inputs must not
+ * be presented as a complete health score.
  */
 export function calculateHealthScore(
   meta: NpmPackageMeta | null,
   cveCount: number,
   outdatedType: 'major' | 'minor' | 'patch' | null,
-): number {
+): number | null {
+  if (!meta?.lastPublish) return null
   const securityScore = calculateSecurityScore(cveCount)
   const outdatedScore = calculateOutdatedScore(outdatedType)
-
-  if (!meta) {
-    // No npm metadata — use only security and outdated with equal weight
-    return Math.round((securityScore + outdatedScore) / 2)
-  }
 
   const downloadScore = calculateDownloadScore(meta.weeklyDownloads)
   const maintenanceScore = calculateMaintenanceScore(meta.lastPublish, meta.deprecated)
@@ -136,9 +132,30 @@ export function calculateHealthScore(
  */
 export function computeDependencyHealth(
   meta: NpmPackageMeta | null,
-  cveCount: number,
-  outdatedType: 'major' | 'minor' | 'patch' | null,
-): { score: number; grade: HealthGrade } {
-  const score = calculateHealthScore(meta, cveCount, outdatedType)
-  return { score, grade: scoreToGrade(score) }
+  cveCount: number | HealthSignal<number>,
+  outdatedType: 'major' | 'minor' | 'patch' | null | HealthSignal<'major' | 'minor' | 'patch' | null>,
+): { score: number | null; grade: HealthGrade | null; confidence: HealthConfidence } {
+  if (meta === null || meta.lastPublish === null) {
+    return { score: null, grade: null, confidence: 'unknown' }
+  }
+  if (typeof cveCount !== 'number' && cveCount.status === 'unknown') {
+    return { score: null, grade: null, confidence: 'unknown' }
+  }
+  if (outdatedType !== null && typeof outdatedType === 'object' && outdatedType.status === 'unknown') {
+    return { score: null, grade: null, confidence: 'unknown' }
+  }
+
+  const knownCves = typeof cveCount === 'number'
+    ? cveCount
+    : cveCount.value
+  const knownOutdated = outdatedType === null || typeof outdatedType === 'string'
+    ? outdatedType
+    : outdatedType.value
+  const score = calculateHealthScore(meta, knownCves, knownOutdated)
+  if (score === null) return { score: null, grade: null, confidence: 'unknown' }
+  return {
+    score,
+    grade: scoreToGrade(score),
+    confidence: 'known',
+  }
 }

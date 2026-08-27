@@ -165,6 +165,20 @@ describe('executeToolLocally — searchFiles unchanged behavior', () => {
 })
 
 describe('executeToolLocally — truthful on-demand bulk consumers', () => {
+  it('searchFiles reports the exact resident-only content coverage', async () => {
+    const { fetchFile, index } = buildTrueLazyIndex({
+      'src/a.ts': 'export const needle = true',
+      'src/b.ts': 'export const other = true',
+    })
+
+    const result = JSON.parse(await executeToolLocally('searchFiles', { query: 'needle' }, index))
+
+    expect(fetchFile).not.toHaveBeenCalled()
+    expect(result.matchCount).toBe(0)
+    expect(result.unsearchedFiles).toBe(2)
+    expect(result.contentCoverage).toMatchObject({ searchedFiles: 0, totalFiles: 2, unavailableFiles: 2 })
+  })
+
   it('findSymbol reports resident-only coverage without fetching every file', async () => {
     const { fetchFile, index } = buildTrueLazyIndex({
       'src/a.ts': 'export function target() {}',

@@ -59,8 +59,8 @@ export {
 export type { ScopeInfo, FunctionBody } from './ast-analyzer'
 export { scoreIssue, scoreProject, getRiskBand, getRiskDistribution, buildCvssVector } from './risk-scorer'
 
-export { lookupCves, lookupCvesForPackage, parseDependencies, clearCveCache, queryOSV, mapSeverity } from './cve-lookup'
-export type { CveResult, CveLookupResult, PackageDependency } from './cve-lookup'
+export { lookupCves, lookupCvesForPackage, parseDependencies, parseDependenciesAsyncWithCoverage, clearCveCache, queryOSV, mapSeverity } from './cve-lookup'
+export type { CveResult, CveLookupResult, PackageDependency, DependencyManifestStatus, DependencyManifestResult, DependencyParseCoverage, DependencyParseResult } from './cve-lookup'
 
 export { trackTaint, taintFlowsToIssues, DEFAULT_SOURCES, DEFAULT_SINKS, DEFAULT_SANITIZERS } from './taint-tracker'
 export type {

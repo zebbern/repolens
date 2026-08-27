@@ -13,7 +13,7 @@ vi.mock('@/lib/parsers/tree-sitter', () => ({
 
 // Side-effect import: registers the worker's `message` listener on `self`.
 import '@/lib/code/scanner/scanner.worker'
-import { batchIndexFiles, createEmptyIndex, createEmptyIndexWithStore, indexFile } from '@/lib/code/code-index'
+import { batchIndexFiles, batchIndexMetadataOnly, createEmptyIndex, createEmptyIndexWithStore, indexFile } from '@/lib/code/code-index'
 import { IDBContentStore } from '@/lib/code/content-store'
 import { deserializeCodeIndex, serializeCodeIndex, serializeCodeIndexMeta } from '../serialization'
 import type { ScanWorkerRequest, ScanWorkerResponse } from '../serialization'
@@ -190,6 +190,76 @@ describe('scanner.worker', () => {
     expect(response.results.issues.some(issue => issue.ruleId === 'eval-usage')).toBe(true)
     expect(response.results.scannedFiles).toBe(2)
     expect(response.results.unscannedFileCount).toBe(0)
+  })
+
+  it('scans a session-local renamed path without changing the durable IDB snapshot', async () => {
+    const source = 'eval(userInput)\n'
+    const store = new IDBContentStore('owner/repo@renamed-tree')
+    const original = batchIndexFiles(createEmptyIndexWithStore(store), [
+      { path: 'src/original.ts', content: source, language: 'typescript' },
+    ], { retainContent: false })
+    await store.flush()
+    const originalFile = original.files.get('src/original.ts')!
+    const renamed = {
+      ...original,
+      files: new Map([[
+        'src/renamed.ts',
+        { ...originalFile, path: 'src/renamed.ts', name: 'renamed.ts' },
+      ]]),
+    }
+
+    const response = await runWorker({
+      type: 'scan',
+      id: 8,
+      codeIndex: serializeCodeIndexMeta(renamed),
+      analysis: null,
+      storeKey: store.storeKey,
+      contentOverlay: {
+        deletedPaths: ['src/original.ts'],
+        entries: [{ path: 'src/renamed.ts', content: source }],
+      },
+    })
+
+    expect(response.type).toBe('result')
+    if (response.type !== 'result') return
+    expect(response.results.issues).toContainEqual(expect.objectContaining({
+      file: 'src/renamed.ts',
+      ruleId: 'eval-usage',
+    }))
+    expect(response.results.unscannedFileCount).toBe(0)
+    expect(await store.get('src/original.ts')).toBe(source)
+    expect(await store.get('src/renamed.ts')).toBeNull()
+  })
+
+  it('scans a normal session edit without changing the durable IDB snapshot', async () => {
+    const storeKey = 'owner/repo@edited-tree'
+    const durable = new IDBContentStore(storeKey)
+    durable.put('src/value.ts', 'const value = 1\n')
+    await durable.flush()
+
+    const session = new IDBContentStore(storeKey, undefined, { kind: 'disabled' })
+    session.registerPaths(['src/value.ts'])
+    const metadata = batchIndexMetadataOnly(createEmptyIndexWithStore(session), [
+      { path: 'src/value.ts', language: 'typescript', lineCount: 1 },
+    ])
+    const edited = indexFile(metadata, 'src/value.ts', 'eval(userInput)\n', 'typescript')
+
+    const response = await runWorker({
+      type: 'scan',
+      id: 9,
+      codeIndex: serializeCodeIndexMeta(edited),
+      analysis: null,
+      storeKey,
+      contentOverlay: session.getSessionOverlay(),
+    })
+
+    expect(response.type).toBe('result')
+    if (response.type !== 'result') return
+    expect(response.results.issues).toContainEqual(expect.objectContaining({
+      file: 'src/value.ts',
+      ruleId: 'eval-usage',
+    }))
+    expect(await durable.get('src/value.ts')).toBe('const value = 1\n')
   })
 
   it('cancels one request without aborting another request', async () => {

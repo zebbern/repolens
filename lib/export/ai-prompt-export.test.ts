@@ -80,6 +80,7 @@ function createCve(overrides: Partial<CveResult> = {}): CveResult {
   return {
     packageName: 'lodash',
     version: '4.17.11',
+    advisoryId: 'GHSA-35jh-r3h4-6jhm',
     cveId: 'CVE-2021-23337',
     aliases: ['GHSA-35jh-r3h4-6jhm'],
     summary: 'Command injection in lodash',

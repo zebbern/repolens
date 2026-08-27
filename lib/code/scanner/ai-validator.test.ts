@@ -8,6 +8,7 @@ import {
   validateFinding,
   validateBatch,
   clearValidationCache,
+  getCachedResult,
   type ValidationOptions,
 } from '@/lib/code/scanner/ai-validator'
 
@@ -281,6 +282,47 @@ describe('validateFinding', () => {
     expect(first.verdict).toBe('false-positive')
     expect(second).toEqual(first)
     expect(global.fetch).toHaveBeenCalledOnce() // only called once
+  })
+
+  it('does not reuse a verdict when the repository content changes', async () => {
+    const first = { issueId: 'test-1', verdict: 'false-positive', confidence: 'medium', reasoning: 'first' }
+    const second = { issueId: 'test-1', verdict: 'true-positive', confidence: 'high', reasoning: 'second' }
+    vi.spyOn(global, 'fetch')
+      .mockResolvedValueOnce(mockFetchResponse(first))
+      .mockResolvedValueOnce(mockFetchResponse(second))
+    const issue = makeIssue()
+
+    const firstResult = await validateFinding(issue, 'repository A', { ...defaultOptions, repositoryKey: 'owner/a' })
+    const secondResult = await validateFinding(issue, 'repository B', { ...defaultOptions, repositoryKey: 'owner/b' })
+
+    expect(firstResult.reasoning).toBe('first')
+    expect(secondResult.reasoning).toBe('second')
+    expect(global.fetch).toHaveBeenCalledTimes(2)
+  })
+
+  it('composes repository and session identities and rejects issue-only lookups', async () => {
+    const first = { issueId: 'test-1', verdict: 'false-positive', confidence: 'medium', reasoning: 'repo a' }
+    const second = { issueId: 'test-1', verdict: 'true-positive', confidence: 'high', reasoning: 'repo b' }
+    vi.spyOn(global, 'fetch')
+      .mockResolvedValueOnce(mockFetchResponse(first))
+      .mockResolvedValueOnce(mockFetchResponse(second))
+    const issue = makeIssue()
+
+    await validateFinding(issue, SAMPLE_FILE, {
+      ...defaultOptions,
+      repositoryKey: 'owner/a',
+      repositorySessionId: '1',
+    })
+    await validateFinding(issue, SAMPLE_FILE, {
+      ...defaultOptions,
+      repositoryKey: 'owner/b',
+      repositorySessionId: '1',
+    })
+
+    expect(global.fetch).toHaveBeenCalledTimes(2)
+    expect(getCachedResult(issue.id)).toBeUndefined()
+    expect(getCachedResult(issue.id, SAMPLE_FILE, 'owner/a', '1')?.reasoning).toBe('repo a')
+    expect(getCachedResult(issue.id, SAMPLE_FILE, 'owner/b', '1')?.reasoning).toBe('repo b')
   })
 
   it('sends correct provider/model/apiKey in request body', async () => {

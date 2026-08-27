@@ -96,6 +96,7 @@ export async function scanInWorker(
 
   const id = ++requestId
   const isIDB = codeIndex.contentStore instanceof IDBContentStore
+  const idbStore = isIDB ? codeIndex.contentStore as IDBContentStore : null
 
   return new Promise<ScanResults>((resolve, reject) => {
     const handlers: PendingScan = { resolve, reject, signal: options.signal }
@@ -121,7 +122,10 @@ export async function scanInWorker(
         : serializeCodeIndex(codeIndex),
       analysis: analysis ? serializeFullAnalysis(analysis) : null,
       options: serializedOptions,
-      ...(isIDB && { storeKey: (codeIndex.contentStore as IDBContentStore).storeKey }),
+      ...(idbStore && {
+        storeKey: idbStore.storeKey,
+        contentOverlay: idbStore.getSessionOverlay(),
+      }),
     }
     w.postMessage(message)
   })

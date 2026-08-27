@@ -131,6 +131,7 @@ export function IssuesPanel({ codeIndex, onNavigateToFile }: IssuesPanelProps) {
     setFixCache,
     setShowFix,
     setValidationResults,
+    repositoryKey: repo?.fullName,
     repositorySession,
     isRepositorySessionCurrent,
   })
@@ -158,7 +159,7 @@ export function IssuesPanel({ codeIndex, onNavigateToFile }: IssuesPanelProps) {
 
   const handleValidate = useCallback(async (issue: CodeIssue) => {
     const requestSession = repositorySession
-    if (!isRepositorySessionCurrent(requestSession)) return
+    if (!requestSession || !isRepositorySessionCurrent(requestSession)) return
     if (validationResultsRef.current.has(issue.id) || validatingIssuesRef.current.has(issue.id)) return
     if (!selectedProvider || !selectedModel) return
     const apiKey = apiKeys[selectedProvider]?.key
@@ -171,6 +172,9 @@ export function IssuesPanel({ codeIndex, onNavigateToFile }: IssuesPanelProps) {
       if (!isRepositorySessionCurrent(requestSession)) return
       const result = await validateFinding(issue, content, {
         provider: selectedProvider, model: selectedModel.id, apiKey,
+        repositoryKey: repo?.fullName,
+        repositorySessionId: String(requestSession.id),
+        signal: requestSession.signal,
       })
       if (!isRepositorySessionCurrent(requestSession)) return
       setValidationResults(prev => new Map(prev).set(issue.id, result))
@@ -185,7 +189,7 @@ export function IssuesPanel({ codeIndex, onNavigateToFile }: IssuesPanelProps) {
         setValidatingIssues(prev => { const next = new Set(prev); next.delete(issue.id); return next })
       }
     }
-  }, [selectedProvider, selectedModel, apiKeys, codeIndex, repositorySession, isRepositorySessionCurrent])
+  }, [selectedProvider, selectedModel, apiKeys, codeIndex, repo?.fullName, repositorySession, isRepositorySessionCurrent])
 
   const handleCopyPrompt = useCallback(async (issue: CodeIssue) => {
     const requestSession = repositorySession
@@ -285,6 +289,7 @@ export function IssuesPanel({ codeIndex, onNavigateToFile }: IssuesPanelProps) {
 
   const autoExpand = groupedByFile.size <= 5 && groupedByFile.size > 0
   const isGroupExpanded = (file: string) => autoExpand ? !expandedGroups.has(file) : expandedGroups.has(file)
+  const scanFailures = results.diagnostics?.failures ?? []
 
   const toggleSet = (setter: React.Dispatch<React.SetStateAction<Set<string>>>) => (key: string) => {
     setter(prev => { const next = new Set(prev); if (next.has(key)) next.delete(key); else next.add(key); return next })
@@ -305,6 +310,21 @@ export function IssuesPanel({ codeIndex, onNavigateToFile }: IssuesPanelProps) {
           </button>
         ))}
       </div>
+
+      {scanFailures.length > 0 && (
+        <div className="mx-4 mt-2 flex items-start gap-2 rounded-md bg-amber-500/10 px-3 py-2" role="status">
+          <AlertTriangle className="h-3.5 w-3.5 text-amber-400 shrink-0 mt-0.5" aria-hidden="true" />
+          <div className="text-[11px] text-amber-300/90 leading-snug">
+            <p className="font-medium">Issue scan coverage incomplete</p>
+            <p>Findings and grades exclude checks from unavailable or incomplete analysis engines.</p>
+            {scanFailures.map((failure, index) => (
+              <p key={`${failure.engine}-${index}`}>
+                {failure.engine}: {failure.message}
+              </p>
+            ))}
+          </div>
+        </div>
+      )}
 
       {viewMode === 'compliance' ? (
         <ComplianceDashboard codeIndex={codeIndex} scanResults={results} />

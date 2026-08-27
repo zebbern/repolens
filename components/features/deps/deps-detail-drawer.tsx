@@ -1,7 +1,7 @@
 "use client"
 
 import { cn } from '@/lib/utils'
-import { ExternalLink, Shield, Clock, TrendingUp, AlertTriangle, CheckCircle } from 'lucide-react'
+import { ExternalLink, Shield, Clock, TrendingUp, CheckCircle } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Progress } from '@/components/ui/progress'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -61,16 +61,20 @@ const SEVERITY_STYLES: Record<string, string> = {
 export function DepsDetailDrawer({ dep, cves, isOpen, onClose }: DepsDetailDrawerProps) {
   if (!dep) return null
 
+  const hasScoreBreakdown = dep.score !== null
+    && dep.npmMeta !== null
+    && dep.cveCount !== null
+    && dep.outdatedStatus !== 'unknown'
   const downloadScore = dep.npmMeta
     ? calculateDownloadScore(dep.npmMeta.weeklyDownloads)
     : 0
-  const maintenanceScore = dep.npmMeta
+  const maintenanceScore = dep.npmMeta?.lastPublish
     ? calculateMaintenanceScore(dep.npmMeta.lastPublish, dep.npmMeta.deprecated)
     : 0
-  const securityScore = calculateSecurityScore(dep.cveCount)
+  const securityScore = dep.cveCount === null ? 0 : calculateSecurityScore(dep.cveCount)
   const outdatedScore = calculateOutdatedScore(dep.isOutdated ? dep.outdatedType : null)
 
-  const npmUrl = `https://www.npmjs.com/package/${dep.packageName}`
+  const npmUrl = `https://www.npmjs.com/package/${dep.registryName ?? dep.packageName}`
 
   return (
     <Sheet open={isOpen} onOpenChange={open => { if (!open) onClose() }}>
@@ -94,8 +98,13 @@ export function DepsDetailDrawer({ dep, cves, isOpen, onClose }: DepsDetailDrawe
               <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Version</h4>
               <div className="grid grid-cols-2 gap-2 text-sm">
                 <div>
-                  <span className="text-xs text-muted-foreground">Installed</span>
+                  <span className="text-xs text-muted-foreground">
+                    {dep.versionSource === 'lockfile' ? 'Installed' : 'Requested range'}
+                  </span>
                   <p className="font-mono text-xs">{dep.currentVersion}</p>
+                  {dep.versionSource === 'manifest' && (
+                    <p className="mt-1 text-[10px] text-muted-foreground">Exact installed version unknown</p>
+                  )}
                 </div>
                 <div>
                   <span className="text-xs text-muted-foreground">Latest</span>
@@ -115,28 +124,36 @@ export function DepsDetailDrawer({ dep, cves, isOpen, onClose }: DepsDetailDrawe
             {/* Score breakdown */}
             <div className="space-y-3">
               <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
-                Score Breakdown ({dep.score}/100)
+                Score Breakdown ({dep.score === null ? 'unknown' : `${dep.score}/100`})
               </h4>
-              <ScoreBar
-                label="Downloads"
-                value={downloadScore}
-                icon={<TrendingUp className="h-3 w-3" />}
-              />
-              <ScoreBar
-                label="Maintenance"
-                value={maintenanceScore}
-                icon={<Clock className="h-3 w-3" />}
-              />
-              <ScoreBar
-                label="Security"
-                value={securityScore}
-                icon={<Shield className="h-3 w-3" />}
-              />
-              <ScoreBar
-                label="Up-to-date"
-                value={outdatedScore}
-                icon={<CheckCircle className="h-3 w-3" />}
-              />
+              {hasScoreBreakdown ? (
+                <>
+                  <ScoreBar
+                    label="Downloads"
+                    value={downloadScore}
+                    icon={<TrendingUp className="h-3 w-3" />}
+                  />
+                  <ScoreBar
+                    label="Maintenance"
+                    value={maintenanceScore}
+                    icon={<Clock className="h-3 w-3" />}
+                  />
+                  <ScoreBar
+                    label="Security"
+                    value={securityScore}
+                    icon={<Shield className="h-3 w-3" />}
+                  />
+                  <ScoreBar
+                    label="Up-to-date"
+                    value={outdatedScore}
+                    icon={<CheckCircle className="h-3 w-3" />}
+                  />
+                </>
+              ) : (
+                <p className="text-xs text-muted-foreground">
+                  Health score unavailable until metadata, an exact installed version, and CVE results are known.
+                </p>
+              )}
             </div>
 
             {/* Download sparkline */}
@@ -162,7 +179,10 @@ export function DepsDetailDrawer({ dep, cves, isOpen, onClose }: DepsDetailDrawe
                 </h4>
                 <div className="space-y-2">
                   {cves.map(cve => (
-                    <div key={cve.cveId} className="rounded-md border p-2.5 space-y-1">
+                    <div
+                      key={`${cve.packageName}\u0000${cve.version}\u0000${cve.advisoryId}`}
+                      className="rounded-md border p-2.5 space-y-1"
+                    >
                       <div className="flex items-center gap-2">
                         <Badge className={cn(
                           'text-[10px] px-1.5 py-0',
@@ -190,6 +210,11 @@ export function DepsDetailDrawer({ dep, cves, isOpen, onClose }: DepsDetailDrawe
                   ))}
                 </div>
               </div>
+            )}
+            {dep.cveCount === null && (
+              <p className="text-xs text-muted-foreground" role="status">
+                Vulnerability status unknown for this dependency version.
+              </p>
             )}
 
             {/* Metadata & links */}

@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import { createEmptyIndex, indexFile } from '@/lib/code/code-index'
+import { batchIndexMetadataOnly, createEmptyIndex, createEmptyIndexWithStore, indexFile } from '@/lib/code/code-index'
+import { InMemoryContentStore } from '@/lib/code/content-store'
 import { executeToolLocally, type ToolExecutorOptions } from '../client-tool-executor'
 import { codeTools } from '../tool-definitions'
 
@@ -199,6 +200,20 @@ describe('executeToolLocally — searchFiles', () => {
     expect(result.results.length).toBeLessThanOrEqual(1)
   })
 
+  it('reports when maxResults omits additional content result files', async () => {
+    let index = createEmptyIndex()
+    index = indexFile(index, 'src/a.ts', 'const needle = 1', 'typescript')
+    index = indexFile(index, 'src/b.ts', 'const needle = 2', 'typescript')
+
+    const result = JSON.parse(
+      await executeToolLocally('searchFiles', { query: 'needle', maxResults: 1 }, index),
+    )
+
+    expect(result.results).toHaveLength(1)
+    expect(result.searchTruncated).toBe(true)
+    expect(result.warning).toMatch(/result limit/i)
+  })
+
   it('returns validation error for missing query', async () => {
     const index = buildMockIndex()
     const result = JSON.parse(await executeToolLocally('searchFiles', {}, index))
@@ -241,6 +256,17 @@ describe('executeToolLocally — searchFiles with isRegex', () => {
     expect(result.warning).toContain('200 characters')
   })
 
+  it('rejects an unsafe regex before using it for path matching', async () => {
+    const index = buildMockIndex()
+
+    const result = JSON.parse(
+      await executeToolLocally('searchFiles', { query: '(a+)+$', isRegex: true }, index),
+    )
+
+    expect(result).toHaveProperty('matchCount')
+    expect(result.warning).toMatch(/unsafe regex/i)
+  })
+
   it('uses regex for path matching when isRegex is true', async () => {
     const index = buildMockIndex()
     // Regex that matches paths containing "types" or "utils"
@@ -275,6 +301,17 @@ describe('executeToolLocally — searchFiles with isRegex', () => {
       await executeToolLocally('searchFiles', { query: 'greet', isRegex: true }, index),
     )
     expect(result.warning).toBeUndefined()
+  })
+
+  it('reports when bounded content results are truncated', async () => {
+    const index = indexFile(createEmptyIndex(), 'src/many.ts', 'needle '.repeat(101), 'typescript')
+
+    const result = JSON.parse(
+      await executeToolLocally('searchFiles', { query: 'needle' }, index),
+    )
+
+    expect(result.searchTruncated).toBe(true)
+    expect(result.warning).toMatch(/truncated/i)
   })
 })
 
@@ -403,6 +440,21 @@ describe('executeToolLocally — getProjectOverview', () => {
     expect(result.totalLines).toBeGreaterThan(0)
     expect(Array.isArray(result.languages)).toBe(true)
     expect(result.languages.length).toBeGreaterThan(0)
+  })
+
+  it('reports line totals as partial when metadata has no line counts', async () => {
+    const store = new InMemoryContentStore(new Map([
+      ['src/lazy.ts', 'first\nsecond\nthird'],
+    ]))
+    const index = batchIndexMetadataOnly(createEmptyIndexWithStore(store), [
+      { path: 'src/lazy.ts', language: 'typescript' },
+    ])
+
+    const result = JSON.parse(await executeToolLocally('getProjectOverview', {}, index))
+
+    expect(result.totalLines).toBe(0)
+    expect(result.totalLinesPartial).toBe(true)
+    expect(result.unknownLineCountFiles).toBe(1)
   })
 })
 

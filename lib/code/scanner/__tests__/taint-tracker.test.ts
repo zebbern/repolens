@@ -44,6 +44,18 @@ function getFlows(code: string): TaintFlow[] {
 // ---------------------------------------------------------------------------
 
 describe('trackTaint', () => {
+  it('propagates traversal failures so the scanner can report partial coverage', () => {
+    const code = 'const value = 1'
+    const file = makeFile(code)
+    const ast = parseCode(code)
+    Object.defineProperty(ast.program, 'body', {
+      configurable: true,
+      get: () => { throw new Error('synthetic traversal failure') },
+    })
+
+    expect(() => trackTaint(ast, file)).toThrow('synthetic traversal failure')
+  })
+
   it('detects req.query.id flowing directly to db.query() without sanitization', () => {
     const code = `
 function handler(req, res) {

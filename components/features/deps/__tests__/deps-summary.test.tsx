@@ -1,12 +1,16 @@
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import { DepsSummary } from '../deps-summary'
-import type { DependencyHealth, NpmPackageMeta } from '@/lib/deps/types'
+import type { DependencyHealth } from '@/lib/deps/types'
 
 function makeDep(overrides: Partial<DependencyHealth> = {}): DependencyHealth {
   return {
+    dependencyKey: 'test-pkg@1.0.0',
     packageName: 'test-pkg',
     currentVersion: '1.0.0',
+    requestedRange: '^1.0.0',
+    installedVersion: '1.0.0',
+    versionSource: 'lockfile',
     latestVersion: '1.0.0',
     npmMeta: null,
     isOutdated: false,
@@ -69,16 +73,28 @@ describe('DepsSummary', () => {
 
     render(<DepsSummary deps={deps} />)
 
-    expect(screen.getByText('Known CVEs')).toBeInTheDocument()
+    expect(screen.getByText('Vulnerability occurrences')).toBeInTheDocument()
     expect(screen.getByText('5')).toBeInTheDocument()
+  })
+
+  it('labels the sum across workspace rows as vulnerability occurrences', () => {
+    const deps = [
+      makeDep({ dependencyKey: 'packages/a:react@19.0.0', packageName: 'react', cveCount: 1 }),
+      makeDep({ dependencyKey: 'packages/b:react@19.0.0', packageName: 'react', cveCount: 1 }),
+    ]
+
+    render(<DepsSummary deps={deps} />)
+
+    expect(screen.getByText('Vulnerability occurrences')).toBeInTheDocument()
+    expect(screen.queryByText('Known CVEs')).not.toBeInTheDocument()
   })
 
   it('renders zero CVE count', () => {
     const deps = [makeDep({ cveCount: 0 })]
     render(<DepsSummary deps={deps} />)
-    expect(screen.getByText('Known CVEs')).toBeInTheDocument()
+    expect(screen.getByText('Vulnerability occurrences')).toBeInTheDocument()
     // Multiple "0" texts may appear (CVEs, outdated) — check that the CVE card contains 0
-    const cveLabel = screen.getByText('Known CVEs')
+    const cveLabel = screen.getByText('Vulnerability occurrences')
     const cveCard = cveLabel.closest('[class*="flex"]')!
     expect(cveCard.textContent).toContain('0')
   })
@@ -106,5 +122,46 @@ describe('DepsSummary', () => {
     expect(screen.getByText('Dependencies')).toBeInTheDocument()
     // Total should show 0
     expect(screen.getAllByText('0').length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('reports dependency signals that could not be evaluated', () => {
+    render(<DepsSummary deps={[
+      makeDep({ packageName: 'known', dependencyKey: 'known@1.0.0' }),
+      makeDep({
+        packageName: 'unknown',
+        dependencyKey: 'unknown@range:^1',
+        installedVersion: null,
+        versionSource: 'manifest',
+        cveCount: null,
+        score: null,
+        grade: null,
+        outdatedStatus: 'unknown',
+      }),
+    ]} />)
+
+    expect(screen.getByText('1 vulnerability status unknown')).toBeInTheDocument()
+    expect(screen.getByText('1 version status unknown')).toBeInTheDocument()
+    expect(screen.getByText('?: 1')).toBeInTheDocument()
+  })
+
+  it('uses neutral icons when dependency status is unknown', () => {
+    render(<DepsSummary deps={[
+      makeDep({
+        packageName: 'unknown-cve',
+        cveCount: null,
+      }),
+      makeDep({
+        packageName: 'unknown-version',
+        outdatedStatus: 'unknown',
+      }),
+    ]} />)
+
+    const cveCard = screen.getByText('Vulnerability occurrences').closest('[class~="rounded-lg"]')!
+    const outdatedCard = screen.getByText('Outdated').closest('[class~="rounded-lg"]')!
+
+    expect(cveCard.querySelector('svg')).toHaveClass('text-muted-foreground')
+    expect(cveCard.querySelector('svg')?.parentElement).toHaveClass('bg-muted')
+    expect(outdatedCard.querySelector('svg')).toHaveClass('text-muted-foreground')
+    expect(outdatedCard.querySelector('svg')?.parentElement).toHaveClass('bg-muted')
   })
 })

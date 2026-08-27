@@ -1,5 +1,5 @@
 import type { CodeIndex, IndexedFile } from '@/lib/code/code-index'
-import { createEmptyIndex, indexFile, searchIndexAsync, getFileContent, getFileContentSync, resolveFileContents } from '@/lib/code/code-index'
+import { buildSearchRegex, createEmptyIndex, indexFile, searchIndexAsync, getFileContent, getFileContentSync, resolveFileContents, validateSearchRegex } from '@/lib/code/code-index'
 import { LANG_EXTENSIONS } from '@/lib/code/scanner/constants'
 import { SYMBOL_PATTERNS } from '@/lib/ai/structural-index'
 import {
@@ -335,7 +335,7 @@ async function executeSearchFiles(
   const limit = input.maxResults ?? 15
   const paths = allFilePaths && allFilePaths.length > 0 ? allFilePaths : allPaths(codeIndex)
   const results: Array<{ path: string; matchType: 'path' | 'content'; matches?: Array<{ line: number; content: string; context?: string[] }>; totalMatches?: number }> = []
-  let warning: string | undefined
+  const warnings: string[] = []
 
   // Determine matching strategy with ReDoS protection
   let pathRegex: RegExp | null = null
@@ -343,14 +343,18 @@ async function executeSearchFiles(
 
   if (useRegex) {
     if (input.query.length > 200) {
-      warning = 'Regex pattern exceeds 200 characters, falling back to text search'
+      warnings.push('Regex pattern exceeds 200 characters, falling back to text search')
       useRegex = false
     } else {
-      try {
-        pathRegex = new RegExp(input.query, 'i')
-      } catch {
-        warning = 'Invalid regex, falling back to text search'
+      const validation = validateSearchRegex(input.query)
+      if (validation === 'unsafe') {
+        warnings.push('Unsafe regex pattern, falling back to text search')
         useRegex = false
+      } else if (validation === 'invalid') {
+        warnings.push('Invalid regex, falling back to text search')
+        useRegex = false
+      } else {
+        pathRegex = buildSearchRegex(input.query, { regex: true })
       }
     }
   }
@@ -359,6 +363,7 @@ async function executeSearchFiles(
   const queryLower = input.query.toLowerCase()
   for (const path of paths) {
     if (results.length >= limit) break
+    if (pathRegex) pathRegex.lastIndex = 0
     const isMatch = pathRegex ? pathRegex.test(path) : path.toLowerCase().includes(queryLower)
     if (isMatch) {
       results.push({ path, matchType: 'path' })
@@ -366,13 +371,19 @@ async function executeSearchFiles(
   }
 
   // Content matching: delegate to searchIndex for accurate regex/substring search
+  let contentSearch: Awaited<ReturnType<typeof searchIndexAsync>> | null = null
+  let outputLimitTruncated = false
   if (results.length < limit) {
     const searchResults = await searchIndexAsync(codeIndex, input.query, { regex: useRegex })
+    contentSearch = searchResults
     const pathsAlreadyMatched = new Set(results.map(r => r.path))
 
     for (const sr of searchResults) {
-      if (results.length >= limit) break
       if (pathsAlreadyMatched.has(sr.file)) continue
+      if (results.length >= limit) {
+        outputLimitTruncated = true
+        break
+      }
 
       const file = codeIndex.files.get(sr.file)
       if (!file) continue
@@ -413,18 +424,44 @@ async function executeSearchFiles(
   })
 
   const output: Record<string, unknown> = { totalFiles: paths.length, matchCount: results.length, results }
-  if (warning) output.warning = warning
-
-  // Partial coverage: when meta has paths not in files, content search is incomplete
-  const metaSize = codeIndex.meta?.size ?? 0
-  const filesWithContent = codeIndex.files.size
-  if (metaSize > 0 && filesWithContent < metaSize) {
-    output.contentCoverage = {
-      searchedFiles: filesWithContent,
-      totalFiles: metaSize,
-      note: `Content search covered ${filesWithContent}/${metaSize} files. Path matching covers all files.`,
+  if (contentSearch) {
+    const totalContentFiles = codeIndex.files.size
+    const unsearchedFiles = contentSearch.unsearchedPaths.length
+    const unavailableFiles = contentSearch.unavailablePaths.length
+    if (unsearchedFiles > 0) {
+      output.unsearchedFiles = unsearchedFiles
+      output.unsearchedPaths = contentSearch.unsearchedPaths
     }
+    if (unsearchedFiles > 0 || contentSearch.truncated) {
+      output.contentCoverage = {
+        searchedFiles: totalContentFiles - unsearchedFiles,
+        totalFiles: totalContentFiles,
+        unsearchedFiles,
+        unavailableFiles,
+        note: `Content search covered ${totalContentFiles - unsearchedFiles}/${totalContentFiles} files; ${unavailableFiles} files had no resident content.`,
+      }
+    }
+    if (contentSearch.truncated) {
+      output.searchTruncated = true
+      warnings.push('Content matches were truncated at the search result limits')
+    }
+  } else if (codeIndex.files.size > 0) {
+    output.unsearchedFiles = codeIndex.files.size
+    output.contentCoverage = {
+      searchedFiles: 0,
+      totalFiles: codeIndex.files.size,
+      unsearchedFiles: codeIndex.files.size,
+      unavailableFiles: 0,
+      note: 'Content search was not run because path matches filled the requested result limit.',
+    }
+    output.searchTruncated = true
+    warnings.push('Content search was skipped because path matches filled the requested result limit')
   }
+  if (outputLimitTruncated) {
+    output.searchTruncated = true
+    warnings.push('Additional matching files were omitted by the requested result limit')
+  }
+  if (warnings.length > 0) output.warning = warnings.join('. ')
 
   return output
 }
@@ -896,18 +933,22 @@ function executeGetProjectOverview(
   const languages: Record<string, number> = {}
   const folders: Record<string, number> = {}
   let totalLines = 0
+  let unknownLineCountFiles = 0
 
   for (const [path, file] of codeIndex.files) {
     const ext = path.split('.').pop() || 'other'
     languages[ext] = (languages[ext] || 0) + 1
     const dir = path.split('/')[0] || '(root)'
     folders[dir] = (folders[dir] || 0) + 1
-    totalLines += file.lineCount
+    if (file.lineCountKnown === false) unknownLineCountFiles++
+    else totalLines += file.lineCount
   }
 
   return {
     totalFiles: paths.length,
     totalLines,
+    totalLinesPartial: unknownLineCountFiles > 0,
+    unknownLineCountFiles,
     languages: Object.entries(languages).sort((a, b) => b[1] - a[1]),
     topFolders: Object.entries(folders).sort((a, b) => b[1] - a[1]).slice(0, 15),
     hasTests: detectionPaths.some(p => p.includes('.test.') || p.includes('.spec.') || p.includes('__tests__')),

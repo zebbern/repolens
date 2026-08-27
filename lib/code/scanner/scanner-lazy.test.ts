@@ -31,7 +31,7 @@ function buildPartialContentIndex(): CodeIndex {
   let index = createEmptyIndex()
   index = indexFile(index, 'src/danger.ts', 'const result = eval(userInput)', 'typescript')
   index = indexFile(index, 'src/clean.ts', 'export const x = 1', 'typescript')
-  // Add metadata-only files (content = '')
+  // Add metadata-only files with content omitted.
   return batchIndexMetadataOnly(index, [
     { path: 'src/large-file.ts', language: 'typescript', lineCount: 500 },
     { path: 'src/unloaded-a.ts', language: 'typescript', lineCount: 50 },
@@ -95,7 +95,7 @@ describe('scanIssues with metadataOnly option', () => {
 
     const result = scanIssues(index, null, { metadataOnly: true })
 
-    // All files have content: '' so all are unscanned
+    // All files have absent content, so all are unscanned.
     expect(result.unscannedFileCount).toBe(3)
   })
 
@@ -168,11 +168,11 @@ describe('unscannedFileCount', () => {
     expect(result.unscannedFileCount).toBe(0)
   })
 
-  it('counts files with empty content', () => {
+  it('counts files with absent content', () => {
     const index = buildPartialContentIndex()
     const result = scanIssues(index, null)
 
-    // 3 metadata-only files have content: ''
+    // Three metadata-only files have absent content.
     expect(result.unscannedFileCount).toBe(3)
   })
 

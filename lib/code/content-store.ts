@@ -1,6 +1,6 @@
 // Content store abstraction for Phase 3 tiered repo loading.
 // Wave 1: InMemoryContentStore only. Wave 2 adds IDBContentStore.
-// Phase 4: LazyContentStore for >200MB repos (on-demand content loading).
+// Phase 4: LazyContentStore for repos at or above 250 MB (on-demand content loading).
 
 import type { FetchQueue } from './fetch-queue'
 import type { CacheMutationLease } from '@/lib/cache/cache-mutation-lock'
@@ -16,6 +16,8 @@ export interface CodeIndexMeta {
   name: string
   language?: string
   lineCount: number
+  /** False only when the source has not been loaded and no durable count exists. */
+  lineCountKnown?: boolean
 }
 
 /**
@@ -26,6 +28,9 @@ export interface CodeIndexMeta {
 export interface ContentStore {
   /** Whether bulk reads can resolve every durable path or resident source only. */
   readonly bulkReadMode: 'complete' | 'resident-only'
+
+  /** Monotonic version when source can change without replacing the store. */
+  readonly contentRevision?: number
 
   /** Get file content by path. Always resolves for in-memory store. */
   get(path: string): Promise<string | null>
@@ -153,6 +158,12 @@ export type IDBContentWriteAccess =
   | { kind: 'disabled' }
   | { kind: 'uncoordinated' }
 
+/** Session-local source changes layered over a shared IndexedDB snapshot. */
+export interface IDBSessionOverlay {
+  entries: Array<{ path: string; content: string }>
+  deletedPaths: string[]
+}
+
 function runContentTransaction(
   db: IDBDatabase,
   run: (store: IDBObjectStore) => void,
@@ -269,6 +280,8 @@ export class IDBContentStore implements ContentStore {
   private paths: Set<string> = new Set()
   private dbPromise: Promise<IDBDatabase> | null = null
   private unflushedWrites = new Set<Promise<void>>()
+  private sessionContent = new Map<string, string>()
+  private sessionDeletedPaths = new Set<string>()
 
   constructor(
     storeKey: string,
@@ -310,6 +323,9 @@ export class IDBContentStore implements ContentStore {
   }
 
   async get(path: string): Promise<string | null> {
+    const localContent = this.sessionContent.get(path)
+    if (localContent !== undefined || this.sessionContent.has(path)) return localContent ?? ''
+    if (this.sessionDeletedPaths.has(path)) return null
     try {
       const db = await this.openDB()
       return new Promise((resolve) => {
@@ -330,18 +346,28 @@ export class IDBContentStore implements ContentStore {
 
   async getBatch(paths: string[]): Promise<Map<string, string>> {
     const result = new Map<string, string>()
+    const durablePaths: string[] = []
+    for (const path of paths) {
+      const localContent = this.sessionContent.get(path)
+      if (localContent !== undefined || this.sessionContent.has(path)) {
+        result.set(path, localContent ?? '')
+      } else if (!this.sessionDeletedPaths.has(path)) {
+        durablePaths.push(path)
+      }
+    }
+    if (durablePaths.length === 0) return result
     try {
       const db = await this.openDB()
       return new Promise((resolve) => {
         const tx = db.transaction(IDB_CONTENT_STORE, 'readonly')
         const store = tx.objectStore(IDB_CONTENT_STORE)
-        let remaining = paths.length
+        let remaining = durablePaths.length
         if (remaining === 0) {
           resolve(result)
           return
         }
 
-        for (const p of paths) {
+        for (const p of durablePaths) {
           const req = store.get(this.idbKey(p))
           req.onsuccess = () => {
             if (req.result != null) result.set(p, req.result)
@@ -357,26 +383,110 @@ export class IDBContentStore implements ContentStore {
     }
   }
 
+  /** Verify that every declared path has a durable source record without loading source bodies. */
+  async containsAllDurablePaths(paths: Iterable<string>): Promise<boolean> {
+    if (this.signal?.aborted) throw abortError(this.signal)
+    const remaining = new Set(paths)
+    if (remaining.size === 0) return true
+
+    const db = await this.openDB()
+    if (this.signal?.aborted) throw abortError(this.signal)
+    const prefix = `${this.storeKey}:`
+
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(IDB_CONTENT_STORE, 'readonly')
+      const request = tx.objectStore(IDB_CONTENT_STORE).openKeyCursor(IDBKeyRange.lowerBound(prefix))
+      let settled = false
+      const settle = (result: boolean, error?: unknown) => {
+        if (settled) return
+        settled = true
+        this.signal?.removeEventListener('abort', abort)
+        if (error !== undefined && error !== null) reject(error)
+        else resolve(result)
+      }
+      const abort = () => {
+        try {
+          tx.abort()
+        } catch {
+          // The readonly transaction already completed or aborted.
+        }
+      }
+
+      this.signal?.addEventListener('abort', abort, { once: true })
+      request.onsuccess = () => {
+        const cursor = request.result
+        if (!cursor) {
+          settle(false)
+          return
+        }
+        const key = String(cursor.key)
+        if (!key.startsWith(prefix)) {
+          settle(false)
+          return
+        }
+        remaining.delete(key.slice(prefix.length))
+        if (remaining.size === 0) {
+          settle(true)
+          return
+        }
+        cursor.continue()
+      }
+      request.onerror = () => settle(false, request.error)
+      tx.onabort = () => settle(
+        false,
+        tx.error ?? (this.signal?.aborted ? abortError(this.signal) : new DOMException('Transaction aborted', 'AbortError')),
+      )
+    })
+  }
+
   put(path: string, content: string): void {
-    if (this.signal?.aborted || !this.canWrite()) return
+    if (this.signal?.aborted) return
+    if (this.writeAccess.kind === 'disabled') {
+      this.applySessionOverlay({
+        entries: [{ path, content }],
+        deletedPaths: [],
+      })
+      return
+    }
+    if (!this.canWrite()) return
+    this.sessionContent.delete(path)
+    this.sessionDeletedPaths.delete(path)
     this.paths.add(path)
     this.write(store => store.put(content, this.idbKey(path)))
   }
 
   putBatch(entries: Array<{ path: string; content: string }>): void {
-    if (this.signal?.aborted || !this.canWrite()) return
-    for (const { path } of entries) this.paths.add(path)
+    if (this.signal?.aborted) return
+    if (this.writeAccess.kind === 'disabled') {
+      this.applySessionOverlay({ entries, deletedPaths: [] })
+      return
+    }
+    if (!this.canWrite()) return
+    for (const { path } of entries) {
+      this.sessionContent.delete(path)
+      this.sessionDeletedPaths.delete(path)
+      this.paths.add(path)
+    }
     this.write(store => {
       for (const { path, content } of entries) store.put(content, this.idbKey(path))
     })
   }
 
   has(path: string): boolean {
+    if (this.sessionContent.has(path)) return true
+    if (this.sessionDeletedPaths.has(path)) return false
     return this.paths.has(path)
   }
 
   delete(path: string): void {
-    if (this.signal?.aborted || !this.canWrite()) return
+    if (this.signal?.aborted) return
+    if (this.writeAccess.kind === 'disabled') {
+      this.applySessionOverlay({ entries: [], deletedPaths: [path] })
+      return
+    }
+    if (!this.canWrite()) return
+    this.sessionContent.delete(path)
+    this.sessionDeletedPaths.delete(path)
     this.paths.delete(path)
     this.write(store => store.delete(this.idbKey(path)))
   }
@@ -406,6 +516,28 @@ export class IDBContentStore implements ContentStore {
     for (const path of paths) this.paths.add(path)
   }
 
+  /** Apply virtual source changes without mutating the shared IndexedDB snapshot. */
+  applySessionOverlay(overlay: IDBSessionOverlay): void {
+    for (const path of overlay.deletedPaths) {
+      this.sessionContent.delete(path)
+      this.sessionDeletedPaths.add(path)
+      this.paths.delete(path)
+    }
+    for (const { path, content } of overlay.entries) {
+      this.sessionDeletedPaths.delete(path)
+      this.sessionContent.set(path, content)
+      this.paths.add(path)
+    }
+  }
+
+  /** Return a transferable copy of the virtual source changes for workers. */
+  getSessionOverlay(): IDBSessionOverlay {
+    return {
+      entries: Array.from(this.sessionContent, ([path, content]) => ({ path, content })),
+      deletedPaths: Array.from(this.sessionDeletedPaths),
+    }
+  }
+
   /** Clear all content for this repo from IDB. */
   async clear(): Promise<void> {
     if (this.signal?.aborted) throw abortError(this.signal)
@@ -414,6 +546,8 @@ export class IDBContentStore implements ContentStore {
     if (this.signal?.aborted) throw abortError(this.signal)
     await deleteRepoContent(this.storeKey, this.signal)
     this.paths.clear()
+    this.sessionContent.clear()
+    this.sessionDeletedPaths.clear()
   }
 
   /** Reset cached DB connection (for testing). */
@@ -423,7 +557,7 @@ export class IDBContentStore implements ContentStore {
 }
 
 /**
- * Lazy content store for repos >200MB.
+ * Lazy content store for repos at or above 250 MB.
  * Uses resident memory plus a FetchQueue for on-demand content loading.
  * SHA-less lazy content is deliberately not written to shared IndexedDB.
  *
@@ -438,6 +572,7 @@ export class LazyContentStore implements ContentStore {
   private readonly fetchQueue: FetchQueue
   private readonly metadataPaths = new Set<string>()
   private readonly loadedPaths = new Set<string>()
+  private revision = 0
 
   constructor(
     repoKey: string,
@@ -478,14 +613,16 @@ export class LazyContentStore implements ContentStore {
     if (this.signal?.aborted) return
     this.contentStore.put(path, content)
     this.loadedPaths.add(path)
+    this.revision++
   }
 
   putBatch(entries: Array<{ path: string; content: string }>): void {
-    if (this.signal?.aborted) return
+    if (this.signal?.aborted || entries.length === 0) return
     this.contentStore.putBatch(entries)
     for (const { path } of entries) {
       this.loadedPaths.add(path)
     }
+    this.revision++
   }
 
   has(path: string): boolean {
@@ -496,6 +633,7 @@ export class LazyContentStore implements ContentStore {
     this.contentStore.delete(path)
     this.loadedPaths.delete(path)
     this.metadataPaths.delete(path)
+    this.revision++
   }
 
   flush(): Promise<void> {
@@ -509,6 +647,11 @@ export class LazyContentStore implements ContentStore {
   /** Whether content has been loaded (fetched + stored in IDB) for this path. */
   hasContent(path: string): boolean {
     return this.loadedPaths.has(path)
+  }
+
+  /** Monotonic version of the resident source snapshot. */
+  get contentRevision(): number {
+    return this.revision
   }
 
   /** Current content loading status. */
@@ -533,6 +676,7 @@ export class LazyContentStore implements ContentStore {
     this.loadedPaths.clear()
     this.fetchQueue.abort()
     await this.contentStore.clear()
+    this.revision++
   }
 
   /** Access the underlying FetchQueue (e.g., for progress tracking). */

@@ -1,5 +1,11 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
-import { batchIndexFiles, createEmptyIndex, indexFile } from '@/lib/code/code-index'
+import {
+  batchIndexFiles,
+  batchIndexMetadataOnly,
+  createEmptyIndex,
+  createEmptyIndexWithStore,
+  indexFile,
+} from '@/lib/code/code-index'
 import type { ScanResults } from '../types'
 import type { CodeIndex } from '../../code-index'
 import type { FullAnalysis } from '../../parser/types'
@@ -146,6 +152,63 @@ describe('scanInWorker (jsdom environment)', () => {
     fakeWorker.emit({ type: 'error', id: scanRequest.id, name: 'AbortError', error: 'Scan aborted' })
     await expect(resultPromise).rejects.toMatchObject({ name: 'AbortError' })
     if (cancelAssertion) throw cancelAssertion
+  })
+
+  it('transfers a session-local IDB rename overlay to the scanner worker', async () => {
+    class FakeWorker {
+      static instance: FakeWorker
+      readonly messages: ScanWorkerRequest[] = []
+      onmessage: ((event: MessageEvent<ScanWorkerResponse>) => void) | null = null
+      onerror: ((event: ErrorEvent) => void) | null = null
+
+      constructor() {
+        FakeWorker.instance = this
+      }
+
+      postMessage(message: ScanWorkerRequest): void {
+        this.messages.push(message)
+      }
+
+      terminate(): void {}
+
+      emit(message: ScanWorkerResponse): void {
+        this.onmessage?.(new MessageEvent('message', { data: message }))
+      }
+    }
+
+    Object.defineProperty(globalThis, 'Worker', {
+      value: FakeWorker,
+      writable: true,
+      configurable: true,
+    })
+    vi.resetModules()
+    const { scanInWorker } = await import('../scanner-client')
+    const { IDBContentStore } = await import('@/lib/code/content-store')
+    const store = new IDBContentStore('owner/repo@tree', undefined, { kind: 'disabled' })
+    store.registerPaths(['src/original.ts'])
+    store.applySessionOverlay({
+      deletedPaths: ['src/original.ts'],
+      entries: [{ path: 'src/renamed.ts', content: 'eval(userInput)' }],
+    })
+    const index = batchIndexMetadataOnly(createEmptyIndexWithStore(store), [
+      { path: 'src/renamed.ts', language: 'typescript', lineCount: 1 },
+    ])
+
+    const pending = scanInWorker(index, null)
+    const request = FakeWorker.instance.messages.find(
+      (message): message is Extract<ScanWorkerRequest, { type: 'scan' }> => message.type === 'scan',
+    )!
+
+    expect(request).toMatchObject({
+      storeKey: 'owner/repo@tree',
+      contentOverlay: {
+        deletedPaths: ['src/original.ts'],
+        entries: [{ path: 'src/renamed.ts', content: 'eval(userInput)' }],
+      },
+    })
+
+    FakeWorker.instance.emit({ type: 'error', id: request.id, error: 'test complete' })
+    await expect(pending).rejects.toThrow('test complete')
   })
 })
 

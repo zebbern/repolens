@@ -23,14 +23,20 @@ export function DepsSummary({ deps, className }: DepsSummaryProps) {
   const stats = useMemo(() => {
     const gradeDistribution: Record<HealthGrade, number> = { A: 0, B: 0, C: 0, D: 0, F: 0 }
     let totalCves = 0
+    let unknownCves = 0
+    let unknownGrades = 0
     let outdatedMajor = 0
     let outdatedMinor = 0
     let outdatedPatch = 0
+    let unknownOutdated = 0
 
     for (const d of deps) {
-      gradeDistribution[d.grade]++
-      totalCves += d.cveCount
-      if (d.outdatedType === 'major') outdatedMajor++
+      if (d.grade) gradeDistribution[d.grade]++
+      else unknownGrades++
+      if (d.cveCount === null) unknownCves++
+      else totalCves += d.cveCount
+      if (d.outdatedStatus === 'unknown') unknownOutdated++
+      else if (d.outdatedType === 'major') outdatedMajor++
       else if (d.outdatedType === 'minor') outdatedMinor++
       else if (d.outdatedType === 'patch') outdatedPatch++
     }
@@ -41,7 +47,10 @@ export function DepsSummary({ deps, className }: DepsSummaryProps) {
       total: deps.length,
       gradeDistribution,
       totalCves,
+      unknownCves,
+      unknownGrades,
       totalOutdated,
+      unknownOutdated,
       outdatedMajor,
       outdatedMinor,
       outdatedPatch,
@@ -86,6 +95,11 @@ export function DepsSummary({ deps, className }: DepsSummaryProps) {
                 </span>
               )
             })}
+            {stats.unknownGrades > 0 && (
+              <span className="inline-flex items-center rounded-full bg-muted px-2 py-0.5 text-xs font-semibold text-muted-foreground">
+                ?: {stats.unknownGrades}
+              </span>
+            )}
           </div>
         </CardContent>
       </Card>
@@ -95,16 +109,29 @@ export function DepsSummary({ deps, className }: DepsSummaryProps) {
         <CardContent className="flex items-center gap-3 p-4">
           <div className={cn(
             'rounded-md p-2',
-            stats.totalCves > 0 ? 'bg-red-500/10' : 'bg-emerald-500/10',
+            stats.totalCves > 0
+              ? 'bg-red-500/10'
+              : stats.unknownCves > 0
+                ? 'bg-muted'
+                : 'bg-emerald-500/10',
           )}>
             <Shield className={cn(
               'h-4 w-4',
-              stats.totalCves > 0 ? 'text-red-500' : 'text-emerald-500',
+              stats.totalCves > 0
+                ? 'text-red-500'
+                : stats.unknownCves > 0
+                  ? 'text-muted-foreground'
+                  : 'text-emerald-500',
             )} />
           </div>
           <div>
-            <p className="text-xs text-muted-foreground">Known CVEs</p>
+            <p className="text-xs text-muted-foreground">Vulnerability occurrences</p>
             <p className="text-xl font-bold tabular-nums">{stats.totalCves}</p>
+            {stats.unknownCves > 0 && (
+              <p className="text-[10px] text-muted-foreground">
+                {stats.unknownCves} vulnerability status unknown
+              </p>
+            )}
           </div>
         </CardContent>
       </Card>
@@ -114,11 +141,19 @@ export function DepsSummary({ deps, className }: DepsSummaryProps) {
         <CardContent className="flex items-center gap-3 p-4">
           <div className={cn(
             'rounded-md p-2',
-            stats.totalOutdated > 0 ? 'bg-amber-500/10' : 'bg-emerald-500/10',
+            stats.totalOutdated > 0
+              ? 'bg-amber-500/10'
+              : stats.unknownOutdated > 0
+                ? 'bg-muted'
+                : 'bg-emerald-500/10',
           )}>
             <AlertTriangle className={cn(
               'h-4 w-4',
-              stats.totalOutdated > 0 ? 'text-amber-500' : 'text-emerald-500',
+              stats.totalOutdated > 0
+                ? 'text-amber-500'
+                : stats.unknownOutdated > 0
+                  ? 'text-muted-foreground'
+                  : 'text-emerald-500',
             )} />
           </div>
           <div>
@@ -131,6 +166,11 @@ export function DepsSummary({ deps, className }: DepsSummaryProps) {
                 {stats.outdatedMinor > 0 && <span className="text-amber-400">{stats.outdatedMinor} minor</span>}
                 {(stats.outdatedMajor > 0 || stats.outdatedMinor > 0) && stats.outdatedPatch > 0 && ' · '}
                 {stats.outdatedPatch > 0 && <span className="text-blue-400">{stats.outdatedPatch} patch</span>}
+              </p>
+            )}
+            {stats.unknownOutdated > 0 && (
+              <p className="text-[10px] text-muted-foreground">
+                {stats.unknownOutdated} version status unknown
               </p>
             )}
           </div>

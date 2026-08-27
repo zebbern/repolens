@@ -19,8 +19,8 @@ const GRADE_STYLES: Record<HealthGrade, string> = {
 }
 
 interface HealthBadgeProps {
-  grade: HealthGrade
-  score: number
+  grade: HealthGrade | null
+  score: number | null
   className?: string
 }
 
@@ -30,18 +30,18 @@ export function HealthBadge({ grade, score, className }: HealthBadgeProps) {
       <Tooltip>
         <TooltipTrigger asChild>
           <Badge
-            aria-label={`Health grade: ${grade}`}
+            aria-label={`Health grade: ${grade ?? 'unknown'}`}
             className={cn(
               'cursor-default font-bold text-xs tabular-nums',
-              GRADE_STYLES[grade],
+              grade ? GRADE_STYLES[grade] : 'bg-muted text-muted-foreground',
               className,
             )}
           >
-            {grade}
+            {grade ?? '?'}
           </Badge>
         </TooltipTrigger>
         <TooltipContent>
-          <p className="text-xs">Score: {score}/100</p>
+          <p className="text-xs">Score: {score == null ? 'Unknown' : `${score}/100`}</p>
         </TooltipContent>
       </Tooltip>
     </TooltipProvider>

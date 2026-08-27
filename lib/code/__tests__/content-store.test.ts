@@ -325,6 +325,29 @@ describe('IDBContentStore', () => {
     expect(await store.get('file.ts')).toBe('published')
   })
 
+  it('keeps mutations session-local when durable writes are disabled', async () => {
+    const durable = new IDBContentStore('owner/repo@cached')
+    durable.putBatch([
+      { path: 'edited.ts', content: 'original' },
+      { path: 'deleted.ts', content: 'published' },
+    ])
+    await durable.flush()
+
+    const session = new IDBContentStore('owner/repo@cached', undefined, { kind: 'disabled' })
+    session.registerPaths(['edited.ts', 'deleted.ts'])
+    session.put('edited.ts', 'session edit')
+    session.delete('deleted.ts')
+
+    expect(await session.get('edited.ts')).toBe('session edit')
+    expect(await session.get('deleted.ts')).toBeNull()
+    expect(session.getSessionOverlay()).toEqual({
+      entries: [{ path: 'edited.ts', content: 'session edit' }],
+      deletedPaths: ['deleted.ts'],
+    })
+    expect(await durable.get('edited.ts')).toBe('original')
+    expect(await durable.get('deleted.ts')).toBe('published')
+  })
+
   it('put() and get() round-trip', async () => {
     const store = new IDBContentStore('owner/repo')
     store.put('src/index.ts', 'export default 42;')

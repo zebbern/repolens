@@ -25,6 +25,12 @@ export interface ValidationOptions {
   apiKey: string
   /** Maximum findings to validate in a batch (default: 20) */
   maxFindings?: number
+  /** Stable repository/session identity used to isolate cached verdicts. */
+  repositoryKey?: string
+  /** Optional repository session identity when a repository is reloaded. */
+  repositorySessionId?: string
+  /** Cancels the provider request when its repository or UI operation is replaced. */
+  signal?: AbortSignal
 }
 
 export interface BatchValidationResult {
@@ -43,8 +49,27 @@ export interface BatchValidationResult {
 
 const validationCache = new Map<string, ValidationResult>()
 
-export function getCachedResult(issueId: string): ValidationResult | undefined {
-  return validationCache.get(issueId)
+function contentHash(content: string): string {
+  // Small deterministic hash. The content itself is not retained in the key.
+  let hash = 2166136261
+  for (let i = 0; i < content.length; i += 1) {
+    hash ^= content.charCodeAt(i)
+    hash = Math.imul(hash, 16777619)
+  }
+  return (hash >>> 0).toString(16)
+}
+
+function validationCacheKey(issueId: string, fileContent: string, repositoryKey?: string, repositorySessionId?: string): string {
+  const repositoryIdentity = repositoryKey ?? 'repository'
+  const sessionIdentity = repositorySessionId ?? 'session'
+  return `${issueId}|${repositoryIdentity}|${sessionIdentity}|${contentHash(fileContent)}`
+}
+
+export function getCachedResult(issueId: string, fileContent?: string, repositoryKey?: string, repositorySessionId?: string): ValidationResult | undefined {
+  if (fileContent !== undefined) return validationCache.get(validationCacheKey(issueId, fileContent, repositoryKey, repositorySessionId))
+  // Issue IDs alone are not a safe cache identity across repositories or
+  // revisions. Callers must provide the content and repository/session keys.
+  return undefined
 }
 
 export function clearValidationCache(): void {
@@ -304,7 +329,7 @@ export async function validateFinding(
   const issueId = issue.id
 
   // Check cache first
-  const cached = validationCache.get(issueId)
+  const cached = validationCache.get(validationCacheKey(issueId, fileContent, options.repositoryKey, options.repositorySessionId))
   if (cached) return cached
 
   try {
@@ -318,6 +343,7 @@ export async function validateFinding(
         model: options.model,
         apiKey: options.apiKey,
       }),
+      signal: options.signal,
     })
 
     if (!res.ok) {
@@ -327,7 +353,7 @@ export async function validateFinding(
     const result = (await res.json()) as ValidationResult
 
     // Cache the result
-    validationCache.set(issueId, result)
+    validationCache.set(validationCacheKey(issueId, fileContent, options.repositoryKey, options.repositorySessionId), result)
 
     return result
   } catch (error) {

@@ -61,13 +61,13 @@ describe('batchIndexMetadataOnly', () => {
     expect(index.totalFiles).toBe(index.meta!.size)
   })
 
-  it('totalLines is 0 (content not loaded)', () => {
+  it('uses metadata line counts without loading source content', () => {
     const index = batchIndexMetadataOnly(createEmptyIndex(), [
       { path: 'a.ts', lineCount: 100 },
       { path: 'b.ts', lineCount: 200 },
     ])
 
-    expect(index.totalLines).toBe(0)
+    expect(index.totalLines).toBe(300)
   })
 
   it('contentStore is preserved from input index', () => {
@@ -92,6 +92,9 @@ describe('batchIndexMetadataOnly', () => {
 
     const file = index.files.get('no-linecount.ts')
     expect(file!.lineCount).toBe(0)
+    expect(file!.lineCountKnown).toBe(false)
+    expect(meta!.lineCountKnown).toBe(false)
+    expect(index.unknownLineCountFiles).toBe(1)
   })
 
   it('language is preserved correctly including undefined', () => {

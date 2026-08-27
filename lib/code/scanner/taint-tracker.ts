@@ -393,6 +393,12 @@ interface TaintOptions {
 const MAX_TAINT_FILE_BYTES = 100_000 // 100 KB
 const MAX_TAINT_FILE_LINES = 3_000
 
+export function isTaintEligible(file: IndexedFile): boolean {
+  if (!file.content) return true
+  return file.content.length <= MAX_TAINT_FILE_BYTES
+    && getFileLines(file).length <= MAX_TAINT_FILE_LINES
+}
+
 export function trackTaint(
   ast: ParseResult<File>,
   file: IndexedFile,
@@ -405,16 +411,12 @@ export function trackTaint(
   const flows: TaintFlow[] = []
 
   if (!file.content) return flows
-  const content = file.content
   const lines = getFileLines(file)
 
-  // Guard: skip taint analysis on very large files to avoid UI freezing
-  if (content.length > MAX_TAINT_FILE_BYTES || lines.length > MAX_TAINT_FILE_LINES) {
-    return flows
-  }
+  // Guard: skip taint analysis on very large files to avoid UI freezing.
+  if (!isTaintEligible(file)) return flows
 
-  try {
-    traverse(ast, {
+  traverse(ast, {
       'FunctionDeclaration|FunctionExpression|ArrowFunctionExpression|ObjectMethod|ClassMethod|ClassPrivateMethod'(
         fnPath: NodePath,
       ) {
@@ -445,11 +447,7 @@ export function trackTaint(
           analyzeNodePath(bodyPath, state, context)
         }
       },
-    })
-  } catch (error) {
-    // AST traversal errors should not crash the scanner
-    console.warn('[taint-tracker] AST traversal failed for', file.path, error)
-  }
+  })
 
   return flows
 }

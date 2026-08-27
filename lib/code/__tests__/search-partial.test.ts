@@ -1,13 +1,19 @@
 import { describe, it, expect } from 'vitest'
 import {
+  buildSearchRegex,
   searchIndexPartial,
+  searchIndexAsync,
   searchMore,
   createEmptyIndex,
   batchIndexFiles,
   batchIndexMetadataOnly,
+  createEmptyIndexWithStore,
   InMemoryContentStore,
 } from '../code-index'
 import type { CodeIndexMeta } from '../content-store'
+import { LazyContentStore } from '../content-store'
+import { FetchQueue } from '../fetch-queue'
+import { vi } from 'vitest'
 
 // ---------------------------------------------------------------------------
 // searchIndexPartial
@@ -93,6 +99,170 @@ describe('searchIndexPartial', () => {
 
     expect(results).toHaveLength(0)
     expect(unsearchedPaths).toHaveLength(3)
+  })
+})
+
+describe('bounded async search', () => {
+  it('applies a finite per-file match limit by default', async () => {
+    const index = batchIndexFiles(createEmptyIndex(), [
+      { path: 'many.ts', content: 'needle '.repeat(101) },
+    ])
+
+    const result = await searchIndexAsync(index, 'needle')
+
+    expect(result.flatMap(file => file.matches)).toHaveLength(100)
+    expect(result.truncated).toBe(true)
+  })
+
+  it('skips oversized lines before executing literal search', async () => {
+    const index = batchIndexFiles(createEmptyIndex(), [{
+      path: 'generated.min.js',
+      content: `needle${'x'.repeat(200_000)}`,
+    }])
+
+    const result = await searchIndexAsync(index, 'needle')
+
+    expect(result.results).toEqual([])
+    expect(result.truncated).toBe(true)
+  })
+
+  it('applies a finite global limit and reports files skipped after reaching it', async () => {
+    const index = batchIndexFiles(createEmptyIndex(), Array.from({ length: 11 }, (_, index) => ({
+      path: `f${index}.ts`,
+      content: 'needle '.repeat(100),
+    })))
+
+    const result = await searchIndexAsync(index, 'needle')
+
+    expect(result.flatMap(file => file.matches)).toHaveLength(1_000)
+    expect(result.unsearchedPaths).toEqual(['f10.ts'])
+    expect(result.truncated).toBe(true)
+  })
+
+  it('applies compact include rules before the global match limit', async () => {
+    const index = batchIndexFiles(createEmptyIndex(), [
+      ...Array.from({ length: 10 }, (_, fileIndex) => ({
+        path: `generated-${fileIndex}.js`,
+        content: 'needle '.repeat(100),
+      })),
+      { path: 'src/allowed.ts', content: 'needle' },
+    ])
+
+    const result = await searchIndexAsync(index, 'needle', {
+      pathFilter: {
+        includes: [{ kind: 'suffix', value: '.ts' }],
+      },
+    })
+
+    expect(result.map(file => file.file)).toEqual(['src/allowed.ts'])
+    expect(result.flatMap(file => file.matches)).toHaveLength(1)
+    expect(result.unsearchedPaths).toEqual([])
+    expect(result.unavailablePaths).toEqual([])
+    expect(result.truncated).toBe(false)
+  })
+
+  it('preserves extension, directory, and substring include-filter semantics', async () => {
+    const index = batchIndexFiles(createEmptyIndex(), [
+      { path: 'vendor/excluded.js', content: 'needle' },
+      { path: 'lib/value.ts', content: 'needle' },
+      { path: 'src/value.js', content: 'needle' },
+      { path: 'config/settings.json', content: 'needle' },
+    ])
+
+    const result = await searchIndexAsync(index, 'needle', {
+      pathFilter: {
+        includes: [
+          { kind: 'suffix', value: '.ts' },
+          { kind: 'prefix', value: 'src/' },
+          { kind: 'contains', value: 'config' },
+        ],
+      },
+    })
+
+    expect(result.map(file => file.file)).toEqual([
+      'lib/value.ts',
+      'src/value.js',
+      'config/settings.json',
+    ])
+    expect(result.unsearchedPaths).toEqual([])
+    expect(result.truncated).toBe(false)
+  })
+
+  it('yields between batches so an asynchronous cancellation can stop the search', async () => {
+    const index = batchIndexFiles(createEmptyIndex(), Array.from({ length: 51 }, (_, index) => ({
+      path: `f${index}.ts`,
+      content: 'no match here',
+    })))
+    const controller = new AbortController()
+
+    const pending = searchIndexAsync(index, 'needle', { signal: controller.signal })
+    setTimeout(() => controller.abort(), 0)
+
+    await expect(pending).rejects.toMatchObject({ name: 'AbortError' })
+  })
+
+  it('yields within one large file so cancellation does not wait for the full file scan', async () => {
+    const index = batchIndexFiles(createEmptyIndex(), [{
+      path: 'large.ts',
+      content: Array.from({ length: 500 }, (_, line) => `const value${line} = ${line}`).join('\n'),
+    }])
+    const controller = new AbortController()
+
+    const pending = searchIndexAsync(index, 'needle', { signal: controller.signal })
+    setTimeout(() => controller.abort(), 0)
+
+    await expect(pending).rejects.toMatchObject({ name: 'AbortError' })
+  })
+
+  it('returns resident results and reports non-resident paths without bulk hydration', async () => {
+    const fetchFile = vi.fn(async (path: string) => `needle in ${path}`)
+    const store = new LazyContentStore('owner/repo', new FetchQueue({ fetchFn: fetchFile }))
+    store.registerPaths(['src/resident.ts', 'src/not-resident.ts'])
+    store.put('src/resident.ts', 'needle here')
+    const index = batchIndexMetadataOnly(createEmptyIndexWithStore(store), [
+      { path: 'src/resident.ts', language: 'typescript', lineCount: 1 },
+      { path: 'src/not-resident.ts', language: 'typescript', lineCount: 1 },
+    ])
+
+    const result = await searchIndexAsync(index, 'needle', { maxMatches: 10 })
+
+    expect(result.results).toHaveLength(1)
+    expect(result.unsearchedPaths).toEqual(['src/not-resident.ts'])
+    expect(result.unavailablePaths).toEqual(['src/not-resident.ts'])
+    expect(result.truncated).toBe(false)
+    expect(fetchFile).not.toHaveBeenCalled()
+  })
+
+  it('enforces a global match bound and reports truncation', async () => {
+    const index = batchIndexFiles(createEmptyIndex(), [
+      { path: 'a.ts', content: 'needle needle' },
+      { path: 'b.ts', content: 'needle' },
+    ])
+
+    const result = await searchIndexAsync(index, 'needle', { maxMatches: 2 })
+
+    expect(result.results!.flatMap(file => file.matches)).toHaveLength(2)
+    expect(result.truncated).toBe(true)
+  })
+
+  it('falls back to literal matching for nested quantified regular expressions', () => {
+    const pattern = buildSearchRegex('(a+)+$', { regex: true })
+
+    expect(pattern?.test('prefix (a+)+$ suffix')).toBe(true)
+    pattern!.lastIndex = 0
+    expect(pattern?.test('aaaaaaaaaaaaaaaa')).toBe(false)
+  })
+
+  it('falls back to literal matching for repeated groups with overlapping alternatives', () => {
+    const pattern = buildSearchRegex('^(a|aa)+$', { regex: true })
+
+    expect(pattern?.test('^(a|aa)+$')).toBe(true)
+  })
+
+  it('falls back to literal matching for ambiguous chains of unbounded quantifiers', () => {
+    const pattern = buildSearchRegex('^a*a*a*a*b$', { regex: true })
+
+    expect(pattern?.test('^a*a*a*a*b$')).toBe(true)
   })
 })
 

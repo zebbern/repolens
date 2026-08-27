@@ -3,6 +3,7 @@
 
 import type { RepositoryCoverage } from '@/types/repository'
 import type { CodeIndex, IndexedFile } from '../code-index'
+import type { IDBSessionOverlay } from '../content-store'
 import { InMemoryContentStore } from '../content-store'
 import type { FullAnalysis, FileAnalysis } from '../parser/types'
 import type { ScanResults } from './types'
@@ -66,6 +67,8 @@ export type ScanWorkerRequest =
       options?: SerializedScanOptions
       /** When set, worker loads content from IDB instead of using serialized content. */
       storeKey?: string
+      /** Session-local virtual paths layered over the shared IDB snapshot. */
+      contentOverlay?: IDBSessionOverlay
     }
   | { type: 'cancel'; id: number }
 

@@ -117,6 +117,10 @@ const mockScanResults = {
   scannedFiles: 2,
   languagesDetected: ['typescript'],
   healthGrade: { grade: 'B', score: 75, label: 'Good' },
+  diagnostics: {
+    engines: {} as Record<string, string>,
+    failures: [] as Array<{ engine: string; message: string }>,
+  },
 }
 
 vi.mock('@/lib/code/issue-scanner', () => ({
@@ -135,6 +139,7 @@ vi.mock('@/providers', () => ({
     setTabCache: () => {},
   }),
   useRepositoryData: () => ({
+    repo: { fullName: 'owner/repo' },
     codebaseAnalysis: { files: new Map() },
     repositorySession: issuesHarness.session,
   }),
@@ -190,6 +195,8 @@ describe('IssuesPanel', () => {
     issuesHarness.session = { id: 1, signal: new AbortController().signal }
     issuesHarness.latestProps = null
     issuesHarness.validateFinding.mockResolvedValue({ issueId: 'issue-1', verdict: 'true-positive', confidence: 'high', reasoning: 'Confirmed' })
+    mockScanResults.diagnostics.engines = {}
+    mockScanResults.diagnostics.failures = []
   })
 
   it('does not publish a single validation that completes after a session switch', async () => {
@@ -244,6 +251,10 @@ describe('IssuesPanel', () => {
 
     await waitFor(() => expect(issuesHarness.validateFinding).toHaveBeenCalled())
     expect(issuesHarness.validateFinding.mock.calls[0][1]).toBe('')
+    expect(issuesHarness.validateFinding.mock.calls[0][2]).toMatchObject({
+      repositoryKey: 'owner/repo',
+      repositorySessionId: '1',
+    })
   })
 
   it('does not publish a single fix whose content read completes after a session switch', async () => {
@@ -272,6 +283,21 @@ describe('IssuesPanel', () => {
     await waitFor(() => {
       expect(screen.getByTestId('issue-summary')).toBeInTheDocument()
     })
+  })
+
+  it('reports incomplete coverage when a best-effort scan engine fails', async () => {
+    mockScanResults.diagnostics.engines = { 'tree-sitter': 'failed' }
+    mockScanResults.diagnostics.failures = [
+      { engine: 'tree-sitter', message: 'grammar unavailable' },
+    ]
+
+    render(<IssuesPanel codeIndex={mockCodeIndex as unknown as CodeIndex} />)
+
+    expect(await screen.findByText('Issue scan coverage incomplete')).toBeInTheDocument()
+    expect(screen.getByText(/tree-sitter: grammar unavailable/)).toBeInTheDocument()
+
+    await userEvent.click(screen.getByRole('tab', { name: 'Compliance' }))
+    expect(screen.getByText('Issue scan coverage incomplete')).toBeInTheDocument()
   })
 
   it('renders issue filters', async () => {

@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import {
   createEmptyIndex,
   indexFile,
@@ -200,6 +200,39 @@ describe('extractSignaturesAsync with contentStore-only content', () => {
 })
 
 describe('buildStructuralIndexAsync', () => {
+  it('marks metadata-only line counts as unknown in the serialized index', () => {
+    const stored = buildStrippedIndex([
+      { path: 'src/utils.ts', content: TS_CONTENT, language: 'typescript' },
+    ])
+    const file = stored.files.get('src/utils.ts')!
+    file.lineCount = 0
+    file.lineCountKnown = false
+
+    const [entry] = JSON.parse(buildStructuralIndex(stored)) as Array<{
+      lineCount: number
+      lineCountKnown?: boolean
+    }>
+
+    expect(entry).toMatchObject({ lineCount: 0, lineCountKnown: false })
+  })
+
+  it('recomputes an unknown line count after resolving source content', async () => {
+    const stored = buildStrippedIndex([
+      { path: 'src/utils.ts', content: TS_CONTENT, language: 'typescript' },
+    ])
+    const file = stored.files.get('src/utils.ts')!
+    file.lineCount = 0
+    file.lineCountKnown = false
+
+    const [entry] = JSON.parse(await buildStructuralIndexAsync(stored)) as Array<{
+      lineCount: number
+      lineCountKnown?: boolean
+    }>
+
+    expect(entry.lineCount).toBe(8)
+    expect(entry.lineCountKnown).not.toBe(false)
+  })
+
   it('matches the inline structural index when source is only in the content store', async () => {
     const inline = buildPopulatedIndex([
       { path: 'src/utils.ts', content: TS_CONTENT, language: 'typescript' },
@@ -215,14 +248,43 @@ describe('buildStructuralIndexAsync', () => {
     )
   })
 
-  it('rejects missing source instead of publishing incomplete structure', async () => {
+  it('publishes available structure with an explicit missing-source notice', async () => {
     const missing = buildStrippedIndex([
       { path: 'src/missing.ts', content: TS_CONTENT, language: 'typescript' },
     ])
     await missing.contentStore.clear()
 
-    await expect(buildStructuralIndexAsync(missing)).rejects.toThrow(
-      'Content unavailable for indexed files: src/missing.ts',
-    )
+    const result = await buildStructuralIndexAsync(missing)
+    expect(result).toContain('[content-coverage]')
+    expect(result).toContain('Content unavailable for 1 indexed file')
+  })
+
+  it('never exceeds the UTF-8 byte budget for path-only metadata', () => {
+    const index = buildPopulatedIndex([
+      { path: `src/${'界'.repeat(200)}.txt`, content: 'metadata only' },
+    ])
+
+    const result = buildStructuralIndex(index, { maxIndexBytes: 128 })
+
+    expect(new TextEncoder().encode(result).byteLength).toBeLessThanOrEqual(128)
+    expect(() => JSON.parse(result)).not.toThrow()
+  })
+
+  it('stops resolving source after the byte budget is exhausted', async () => {
+    const entries = Array.from({ length: 200 }, (_, index) => ({
+      path: `src/component-${String(index).padStart(3, '0')}.ts`,
+      content: `export const value${index} = ${index}`,
+      language: 'typescript',
+    }))
+    const stored = buildStrippedIndex(entries)
+    const getBatch = vi.spyOn(stored.contentStore, 'getBatch')
+
+    const result = await buildStructuralIndexAsync(stored, { maxIndexBytes: 512 })
+
+    const requestedPaths = getBatch.mock.calls.flatMap(([paths]) => paths)
+    expect(Math.max(...getBatch.mock.calls.map(([paths]) => paths.length))).toBeLessThanOrEqual(50)
+    expect(requestedPaths.length).toBeLessThan(entries.length)
+    expect(result).toContain('[index-truncated]')
+    expect(new TextEncoder().encode(result).byteLength).toBeLessThanOrEqual(512)
   })
 })

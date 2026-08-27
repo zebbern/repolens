@@ -2,6 +2,7 @@
 
 import type { FileNode, RepositoryCoverage } from '@/types/repository'
 import { InMemoryContentStore, type ContentStore, type CodeIndexMeta } from './content-store'
+import { matchesSearchPathFilter, type SearchPathFilter } from './search-path-filter'
 
 /** Clone the content store for immutable CodeIndex updates (Wave 1: InMemoryContentStore only). */
 function cloneContentStore(store: ContentStore): InMemoryContentStore {
@@ -29,6 +30,8 @@ export interface IndexedFile {
   content?: string
   language?: string
   lineCount: number
+  /** False only when metadata did not include a source-derived line count. */
+  lineCountKnown?: boolean
 }
 
 const linesCache = new WeakMap<IndexedFile, string[]>()
@@ -53,7 +56,7 @@ export async function getFileContent(index: CodeIndex, path: string): Promise<st
   return index.contentStore.get(path)
 }
 
-/** Type guard: true when `file.content` is a non-empty string (content is loaded). */
+/** Type guard: true when `file.content` is a string, including a loaded empty file. */
 export function hasContent(file: IndexedFile): file is IndexedFile & { content: string } {
   return typeof file.content === 'string'
 }
@@ -85,10 +88,50 @@ export interface SearchMatch {
   length: number
 }
 
+// Bound result memory while retaining enough matches for interactive search and AI context.
+export const DEFAULT_SEARCH_MAX_MATCHES = 1_000
+export const DEFAULT_SEARCH_MAX_MATCHES_PER_FILE = 100
+const SEARCH_FILE_BATCH_SIZE = 50
+const SEARCH_LINE_BATCH_SIZE = 250
+const MAX_SEARCH_LINE_LENGTH = 200_000
+
+function throwIfSearchAborted(signal?: AbortSignal): void {
+  if (!signal?.aborted) return
+  throw signal.reason instanceof Error
+    ? signal.reason
+    : new DOMException('The operation was aborted', 'AbortError')
+}
+
+export interface SearchLimits {
+  maxMatches?: number
+  maxMatchesPerFile?: number
+  /** Restrict the search domain inside the worker before content hydration and match limits. */
+  pathFilter?: SearchPathFilter
+  signal?: AbortSignal
+}
+
+export type SearchOptions = {
+  caseSensitive?: boolean
+  regex?: boolean
+  wholeWord?: boolean
+  /** Internal, reviewed scanner rules may bypass the user-pattern guard. */
+  trusted?: boolean
+} & SearchLimits
+
+/** Async search retains the array API used by existing callers and exposes coverage metadata. */
+export interface AsyncSearchResult extends Array<SearchResult> {
+  results: SearchResult[]
+  unsearchedPaths: string[]
+  unavailablePaths: string[]
+  truncated: boolean
+}
+
 export interface CodeIndex {
   files: Map<string, IndexedFile>
   totalFiles: number
   totalLines: number
+  /** Files excluded from totalLines because their source-derived count is unavailable. */
+  unknownLineCountFiles?: number
   isIndexing: boolean
   /** Phase 3: metadata-only records (no content). Populated alongside `files`. */
   meta: Map<string, CodeIndexMeta>
@@ -109,25 +152,84 @@ export interface ResolvedFileContents {
   residentOnly: boolean
 }
 
+export interface ResolvedFileContentBatch extends ResolvedFileContents {
+  paths: string[]
+}
+
+export interface ResolveFileContentBatchOptions {
+  batchSize?: number
+  signal?: AbortSignal
+}
+
+export const DEFAULT_CONTENT_RESOLUTION_BATCH_SIZE = 50
+export const MAX_CONTENT_RESOLUTION_BATCH_SIZE = 100
+
+function throwIfContentResolutionAborted(signal?: AbortSignal): void {
+  if (!signal?.aborted) return
+  throw signal.reason instanceof Error
+    ? signal.reason
+    : new DOMException('Content resolution cancelled', 'AbortError')
+}
+
+/**
+ * Resolve source in bounded batches so consumers can process and release each
+ * batch without materializing an entire IDB-backed repository in heap.
+ */
+export async function* resolveFileContentBatches(
+  index: CodeIndex,
+  paths: readonly string[],
+  options: ResolveFileContentBatchOptions = {},
+): AsyncGenerator<ResolvedFileContentBatch> {
+  const requestedBatchSize = options.batchSize ?? DEFAULT_CONTENT_RESOLUTION_BATCH_SIZE
+  if (!Number.isFinite(requestedBatchSize) || requestedBatchSize < 1) {
+    throw new RangeError('Content resolution batchSize must be a positive finite number')
+  }
+  const batchSize = Math.min(Math.floor(requestedBatchSize), MAX_CONTENT_RESOLUTION_BATCH_SIZE)
+  const uniquePaths = Array.from(new Set(paths))
+
+  for (let offset = 0; offset < uniquePaths.length; offset += batchSize) {
+    throwIfContentResolutionAborted(options.signal)
+    const batchPaths = uniquePaths.slice(offset, offset + batchSize)
+    const missingInline = batchPaths.filter(path => typeof index.files.get(path)?.content !== 'string')
+    const stored = missingInline.length > 0
+      ? await index.contentStore.getBatch(missingInline)
+      : new Map<string, string>()
+    throwIfContentResolutionAborted(options.signal)
+    const contents = new Map<string, string>()
+    const missingPaths: string[] = []
+
+    for (const path of batchPaths) {
+      let source = index.files.get(path)?.content
+      if (typeof source !== 'string') source = stored.get(path)
+      if (typeof source !== 'string' && index.contentStore.bulkReadMode === 'complete') {
+        source = await index.contentStore.get(path) ?? undefined
+      }
+      throwIfContentResolutionAborted(options.signal)
+      if (typeof source === 'string') contents.set(path, source)
+      else missingPaths.push(path)
+    }
+
+    yield {
+      paths: batchPaths,
+      contents,
+      missingPaths,
+      residentOnly: index.contentStore.bulkReadMode === 'resident-only',
+    }
+  }
+}
+
 /** Resolve a selected set without turning an on-demand store into a bulk network fetch. */
 export async function resolveFileContents(
   index: CodeIndex,
   paths: readonly string[],
+  options: ResolveFileContentBatchOptions = {},
 ): Promise<ResolvedFileContents> {
-  const uniquePaths = Array.from(new Set(paths))
-  const missingInline = uniquePaths.filter(path => typeof index.files.get(path)?.content !== 'string')
-  const stored = await index.contentStore.getBatch(missingInline)
   const contents = new Map<string, string>()
   const missingPaths: string[] = []
 
-  for (const path of uniquePaths) {
-    let source = index.files.get(path)?.content
-    if (typeof source !== 'string') source = stored.get(path)
-    if (typeof source !== 'string' && index.contentStore.bulkReadMode === 'complete') {
-      source = await index.contentStore.get(path) ?? undefined
-    }
-    if (typeof source === 'string') contents.set(path, source)
-    else missingPaths.push(path)
+  for await (const batch of resolveFileContentBatches(index, paths, options)) {
+    for (const [path, source] of batch.contents) contents.set(path, source)
+    missingPaths.push(...batch.missingPaths)
   }
 
   return {
@@ -137,7 +239,11 @@ export async function resolveFileContents(
   }
 }
 
-/** Resolve resident and external source into an isolated in-memory index. */
+/**
+ * Resolve resident and external source into an isolated in-memory index.
+ * Prefer resolveFileContentBatches for repository-wide consumers; this legacy
+ * compatibility helper still materializes the final aggregate in memory.
+ */
 export async function hydrateCodeIndexContent(
   index: CodeIndex,
 ): Promise<HydratedCodeIndex> {
@@ -166,6 +272,7 @@ export function createEmptyIndex(): CodeIndex {
     files: new Map(),
     totalFiles: 0,
     totalLines: 0,
+    unknownLineCountFiles: 0,
     isIndexing: false,
     meta: new Map(),
     contentStore: new InMemoryContentStore(),
@@ -178,6 +285,7 @@ export function createEmptyIndexWithStore(contentStore: ContentStore): CodeIndex
     files: new Map(),
     totalFiles: 0,
     totalLines: 0,
+    unknownLineCountFiles: 0,
     isIndexing: false,
     meta: new Map(),
     contentStore,
@@ -223,6 +331,7 @@ export function indexFile(index: CodeIndex, path: string, content: string, langu
     files: newFiles,
     totalFiles: newFiles.size,
     totalLines: Array.from(newFiles.values()).reduce((sum, f) => sum + f.lineCount, 0),
+    unknownLineCountFiles: Array.from(newFiles.values()).filter(file => file.lineCountKnown === false).length,
     meta: newMeta,
     contentStore: newContentStore,
   }
@@ -253,6 +362,7 @@ export function removeFromIndex(index: CodeIndex, path: string): CodeIndex {
     files: newFiles,
     totalFiles: newFiles.size,
     totalLines: Array.from(newFiles.values()).reduce((sum, f) => sum + f.lineCount, 0),
+    unknownLineCountFiles: Array.from(newFiles.values()).filter(file => file.lineCountKnown === false).length,
     meta: newMeta,
     contentStore: newContentStore,
   }
@@ -303,13 +413,14 @@ export function batchIndexFiles(
     files: newFiles,
     totalFiles: newFiles.size,
     totalLines: Array.from(newFiles.values()).reduce((sum, f) => sum + f.lineCount, 0),
+    unknownLineCountFiles: Array.from(newFiles.values()).filter(file => file.lineCountKnown === false).length,
     meta: newMeta,
     contentStore: newContentStore,
   }
 }
 
 /**
- * Create a metadata-only CodeIndex for lazy-loaded repos (>200MB).
+ * Create a metadata-only CodeIndex for lazy-loaded repos (at least 250 MB).
  * Populates `files` and `meta` with metadata entries and leaves content absent.
  * Does NOT write to contentStore — content is fetched on demand.
  *
@@ -325,15 +436,17 @@ export function batchIndexMetadataOnly(
   for (const { path, language, lineCount } of entries) {
     const name = path.split('/').pop() || path
     const lc = lineCount ?? 0
-    newFiles.set(path, { path, name, language, lineCount: lc })
-    newMeta.set(path, { path, name, language, lineCount: lc })
+    const lineCountKnown = lineCount !== undefined
+    newFiles.set(path, { path, name, language, lineCount: lc, lineCountKnown })
+    newMeta.set(path, { path, name, language, lineCount: lc, lineCountKnown })
   }
 
   return {
     ...index,
     files: newFiles,
     totalFiles: newFiles.size,
-    totalLines: 0,
+    totalLines: Array.from(newFiles.values()).reduce((sum, file) => sum + file.lineCount, 0),
+    unknownLineCountFiles: Array.from(newFiles.values()).filter(file => file.lineCountKnown === false).length,
     meta: newMeta,
     contentStore: index.contentStore,
   }
@@ -350,13 +463,14 @@ export function batchIndexMetadataOnly(
  */
 export function buildSearchRegex(
   query: string,
-  options: { caseSensitive?: boolean; regex?: boolean; wholeWord?: boolean } = {},
+  options: { caseSensitive?: boolean; regex?: boolean; wholeWord?: boolean; trusted?: boolean } = {},
   captureGroup = false,
 ): RegExp | null {
   if (!query.trim()) return null
 
-  const { caseSensitive = false, regex = false, wholeWord = false } = options
+  const { caseSensitive = false, regex = false, wholeWord = false, trusted = false } = options
   const flags = caseSensitive ? 'g' : 'gi'
+  const useRegex = regex && (trusted || validateSearchRegex(query) === 'valid')
 
   const build = (src: string) => {
     const wrapped = captureGroup ? `(${src})` : src
@@ -364,7 +478,7 @@ export function buildSearchRegex(
   }
 
   try {
-    if (regex) {
+    if (useRegex) {
       return build(query)
     }
     const escaped = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
@@ -377,18 +491,91 @@ export function buildSearchRegex(
   }
 }
 
+/** Conservative guard against patterns with unbounded nested backtracking. */
+function isUnsafeSearchRegex(pattern: string): boolean {
+  if (pattern.length > 200) return true
+  if (/\\[1-9]/.test(pattern)) return true
+  if (/\([^()]*[+*][^()]*\)[+*?{]/.test(pattern)) return true
+  if (/\([^()]*\|[^()]*\)(?:[+*]|\{\d*,\})/.test(pattern)) return true
+  if (countUnboundedQuantifiers(pattern) > 1) return true
+  return false
+}
+
+function countUnboundedQuantifiers(pattern: string): number {
+  let count = 0
+  let inCharacterClass = false
+  for (let index = 0; index < pattern.length; index++) {
+    const character = pattern[index]
+    if (character === '\\') {
+      index++
+      continue
+    }
+    if (character === '[') {
+      inCharacterClass = true
+      continue
+    }
+    if (character === ']' && inCharacterClass) {
+      inCharacterClass = false
+      continue
+    }
+    if (inCharacterClass) continue
+    if (character === '*' || character === '+') {
+      count++
+      continue
+    }
+    if (character === '{' && /^\{\d+,\}/.test(pattern.slice(index))) count++
+  }
+  return count
+}
+
+/** Validate a user regex without ever compiling a pattern that failed the safety guard. */
+export function validateSearchRegex(pattern: string): 'valid' | 'invalid' | 'unsafe' {
+  if (isUnsafeSearchRegex(pattern)) return 'unsafe'
+  try {
+    new RegExp(pattern)
+    return 'valid'
+  } catch {
+    return 'invalid'
+  }
+}
+
+/** Update line metadata after previously absent source becomes available. */
+export function recordResolvedFileLineCount(index: CodeIndex, path: string, content: string): void {
+  const file = index.files.get(path)
+  if (!file) return
+  const wasUnknown = file.lineCountKnown === false
+  const previousLineCount = wasUnknown ? 0 : file.lineCount
+  const lineCount = countLines(content)
+  file.lineCount = lineCount
+  file.lineCountKnown = true
+  const metadata = index.meta.get(path)
+  if (metadata) {
+    metadata.lineCount = lineCount
+    metadata.lineCountKnown = true
+  }
+  index.totalLines += lineCount - previousLineCount
+  if (wasUnknown) {
+    const unknownCount = index.unknownLineCountFiles
+      ?? Array.from(index.files.values()).filter(indexed => indexed.lineCountKnown === false).length + 1
+    index.unknownLineCountFiles = Math.max(0, unknownCount - 1)
+  }
+}
+
 /**
  * Search across all indexed files
  */
 export function searchIndex(
   index: CodeIndex, 
   query: string, 
-  options: { caseSensitive?: boolean; regex?: boolean; wholeWord?: boolean } = {}
+  options: SearchOptions = {},
 ): SearchResult[] {
   const searchPattern = buildSearchRegex(query, options)
   if (!searchPattern) return []
   
   const results: SearchResult[] = []
+  const maxMatches = options.maxMatches ?? DEFAULT_SEARCH_MAX_MATCHES
+  const maxMatchesPerFile = options.maxMatchesPerFile ?? DEFAULT_SEARCH_MAX_MATCHES_PER_FILE
+  let totalMatches = 0
   
   for (const [path, file] of index.files) {
     if (typeof file.content !== 'string') continue
@@ -396,22 +583,26 @@ export function searchIndex(
     const matches: SearchMatch[] = []
     
     const lines = getFileLines(file)
-    lines.forEach((line, lineIndex) => {
+    for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
+      if (totalMatches >= maxMatches) break
+      const line = lines[lineIndex]
       searchPattern.lastIndex = 0
       let match: RegExpExecArray | null
       
       while ((match = searchPattern.exec(line)) !== null) {
+        if (matches.length >= maxMatchesPerFile || totalMatches >= maxMatches) break
         matches.push({
           line: lineIndex + 1,
           content: line,
           column: match.index,
           length: match[0].length,
         })
+        totalMatches++
         
         // Prevent infinite loop for zero-length matches
         if (match[0].length === 0) break
       }
-    })
+    }
     
     if (matches.length > 0) {
       results.push({
@@ -435,16 +626,102 @@ export function searchIndex(
 export async function searchIndexAsync(
   index: CodeIndex,
   query: string,
-  options: { caseSensitive?: boolean; regex?: boolean; wholeWord?: boolean } = {},
-): Promise<SearchResult[]> {
+  options: SearchOptions = {},
+): Promise<AsyncSearchResult> {
   const searchPattern = buildSearchRegex(query, options)
-  if (!searchPattern) return []
+  if (!searchPattern) return createAsyncSearchResult([], [])
 
-  const hydrated = await hydrateCodeIndexContent(index)
-  if (hydrated.missingPaths.length > 0) {
-    throw new Error(`Content unavailable for indexed files: ${hydrated.missingPaths.join(', ')}`)
+  const maxMatches = options.maxMatches ?? DEFAULT_SEARCH_MAX_MATCHES
+  const maxMatchesPerFile = options.maxMatchesPerFile ?? DEFAULT_SEARCH_MAX_MATCHES_PER_FILE
+  const signal = options.signal
+  const results: SearchResult[] = []
+  const unsearchedPaths: string[] = []
+  const unavailablePaths: string[] = []
+  let totalMatches = 0
+  let truncated = false
+  const paths = Array.from(index.files.keys()).filter(path => (
+    matchesSearchPathFilter(path, options.pathFilter)
+  ))
+
+  searchBatches: for (let offset = 0; offset < paths.length; offset += SEARCH_FILE_BATCH_SIZE) {
+    if (offset > 0) await new Promise<void>(resolve => setTimeout(resolve, 0))
+    throwIfSearchAborted(signal)
+    if (totalMatches >= maxMatches) {
+      unsearchedPaths.push(...paths.slice(offset))
+      truncated = true
+      break
+    }
+    const batch = paths.slice(offset, offset + SEARCH_FILE_BATCH_SIZE)
+    const missing = batch.filter(path => typeof index.files.get(path)?.content !== 'string')
+    const stored = await index.contentStore.getBatch(missing)
+    for (let batchIndex = 0; batchIndex < batch.length; batchIndex++) {
+      if (totalMatches >= maxMatches) {
+        unsearchedPaths.push(...batch.slice(batchIndex), ...paths.slice(offset + batch.length))
+        truncated = true
+        break searchBatches
+      }
+      const path = batch[batchIndex]
+      throwIfSearchAborted(signal)
+      let content = index.files.get(path)?.content
+      if (typeof content !== 'string') content = stored.get(path)
+      if (typeof content !== 'string') {
+        unsearchedPaths.push(path)
+        unavailablePaths.push(path)
+        continue
+      }
+
+      const matches: SearchMatch[] = []
+      const lines = content.split('\n')
+      for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
+        if (lineIndex > 0 && lineIndex % SEARCH_LINE_BATCH_SIZE === 0) {
+          await new Promise<void>(resolve => setTimeout(resolve, 0))
+          throwIfSearchAborted(signal)
+        }
+        if (totalMatches >= maxMatches) {
+          truncated = true
+          break
+        }
+        const line = lines[lineIndex]
+        if (line.length > MAX_SEARCH_LINE_LENGTH) {
+          truncated = true
+          continue
+        }
+        searchPattern.lastIndex = 0
+        let match: RegExpExecArray | null
+        while ((match = searchPattern.exec(line)) !== null) {
+          if (matches.length >= maxMatchesPerFile || totalMatches >= maxMatches) {
+            truncated = true
+            break
+          }
+          matches.push({ line: lineIndex + 1, content: line, column: match.index, length: match[0].length })
+          totalMatches++
+          if (match[0].length === 0) break
+        }
+      }
+      if (matches.length > 0) {
+        results.push({ file: path, language: index.files.get(path)?.language, matches })
+      }
+    }
   }
-  return searchIndex(hydrated.index, query, options)
+
+  results.sort((a, b) => b.matches.length - a.matches.length)
+  return createAsyncSearchResult(results, unsearchedPaths, truncated, unavailablePaths)
+}
+
+export function createAsyncSearchResult(
+  results: SearchResult[],
+  unsearchedPaths: string[],
+  truncated = false,
+  unavailablePaths: string[] = [],
+): AsyncSearchResult {
+  const output = [...results] as AsyncSearchResult
+  Object.defineProperties(output, {
+    results: { value: results, enumerable: false },
+    unsearchedPaths: { value: unsearchedPaths, enumerable: false },
+    unavailablePaths: { value: unavailablePaths, enumerable: false },
+    truncated: { value: truncated, enumerable: false },
+  })
+  return output
 }
 
 /** Result of a partial search over a lazy-loaded index. */

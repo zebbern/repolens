@@ -122,8 +122,7 @@ function createASTIssue(
 export function analyzeAST(ast: ParseResult<File>, file: IndexedFile): CodeIssue[] {
   const issues: CodeIssue[] = []
 
-  try {
-    traverse(ast, {
+  traverse(ast, {
       CallExpression(path: NodePath<t.CallExpression>) {
         const { callee } = path.node
         if (t.isIdentifier(callee) && callee.name === 'eval') {
@@ -384,11 +383,7 @@ export function analyzeAST(ast: ParseResult<File>, file: IndexedFile): CodeIssue
           }
         }
       },
-    })
-  } catch (error) {
-    console.warn('[ast-analysis] AST traversal error:', error)
-    // Traversal failure — return whatever issues were collected
-  }
+  })
 
   return issues
 }

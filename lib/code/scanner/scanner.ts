@@ -5,7 +5,7 @@
 // scanIssues remains a deprecated, synchronous core-only compatibility API.
 
 import type { CodeIndex, IndexedFile } from '../code-index'
-import { buildSearchRegex, getFileLines, hydrateCodeIndexContent } from '../code-index'
+import { buildSearchRegex, getFileLines, recordResolvedFileLineCount, resolveFileContentBatches } from '../code-index'
 import type { FullAnalysis } from '../import-parser'
 import type {
   ScanRule,
@@ -27,7 +27,7 @@ import { scanSupplyChain } from './supply-chain-scanner'
 import { classifyLine, computeBlockCommentLines, hasInlineSuppression, hasSanitizerNearby, computeDynamicConfidence } from './context-classifier'
 import { isLikelyRealSecret } from './entropy'
 import { getAST, analyzeAST, AST_LANGUAGES, clearASTCache } from './ast-analyzer'
-import { trackTaint, taintFlowsToIssues } from './taint-tracker'
+import { isTaintEligible, trackTaint, taintFlowsToIssues } from './taint-tracker'
 import { scoreIssue, scoreProject, getRiskDistribution, buildCvssVector } from './risk-scorer'
 import { scanWithTreeSitter } from './tree-sitter-scanner'
 
@@ -142,18 +142,20 @@ interface CompiledRule {
   isSecurityCritical: boolean
 }
 
-/**
- * Compile all RULES into RegExp objects upfront, grouped by applicable
- * file extension.  Rules with no `fileFilter` go into `universalRules`.
- */
-function buildCompiledRuleIndex(presentExtensions: Set<string>): {
+interface CompiledRuleIndex {
   /** Rules keyed by lowercased extension (e.g. ".ts") */
   rulesForExtension: Map<string, CompiledRule[]>
   /** Rules that apply to every file (no fileFilter) */
   universalRules: CompiledRule[]
   /** Total unique rules that were compiled */
   rulesEvaluated: number
-} {
+}
+
+/**
+ * Compile all RULES into RegExp objects upfront, grouped by applicable
+ * file extension.  Rules with no `fileFilter` go into `universalRules`.
+ */
+function buildCompiledRuleIndex(presentExtensions: Set<string>): CompiledRuleIndex {
   const rulesForExtension = new Map<string, CompiledRule[]>()
   const universalRules: CompiledRule[] = []
   let rulesEvaluated = 0
@@ -171,6 +173,7 @@ function buildCompiledRuleIndex(presentExtensions: Set<string>): {
       caseSensitive: rule.patternOptions?.caseSensitive ?? false,
       regex: rule.patternOptions?.regex ?? false,
       wholeWord: rule.patternOptions?.wholeWord ?? false,
+      trusted: true,
     })
     if (!compiled) continue
 
@@ -199,18 +202,24 @@ function buildCompiledRuleIndex(presentExtensions: Set<string>): {
   return { rulesForExtension, universalRules, rulesEvaluated }
 }
 
-function runRegexRules(ctx: ScanContext): RegexRulesResult {
-  const { filesToScan, scanCodeIndex, isPartialScan, blockCommentCache, presentExtensions } = ctx
+function runRegexRules(
+  ctx: ScanContext,
+  sharedRuleCounts = new Map<string, number>(),
+  sharedRuleOverflow = new Map<string, number>(),
+  compiledRuleIndex?: CompiledRuleIndex,
+  sharedRuleMatchIds = new Set<string>(),
+): RegexRulesResult {
+  const { filesToScan, isPartialScan, blockCommentCache, presentExtensions } = ctx
   const issues: CodeIssue[] = []
   const seenIds = new Set<string>()
   let suppressionCount = 0
-  const ruleOverflow = new Map<string, number>()
-  const ruleCounts = new Map<string, number>()
+  const ruleOverflow = sharedRuleOverflow
+  const ruleCounts = sharedRuleCounts
 
   // --- Phase 1: Single-pass over files --------------------------------
 
   const { rulesForExtension, universalRules, rulesEvaluated } =
-    buildCompiledRuleIndex(presentExtensions)
+    compiledRuleIndex ?? buildCompiledRuleIndex(presentExtensions)
 
   for (const [path, file] of filesToScan) {
     if (typeof file.content !== 'string') continue
@@ -306,6 +315,10 @@ function runRegexRules(ctx: ScanContext): RegexRulesResult {
         const issueId = `${rule.id}-${path}-${lineNum}`
         if (seenIds.has(issueId)) continue
         seenIds.add(issueId)
+        if (rule.id === 'eval-usage') {
+          if (sharedRuleMatchIds.has(issueId)) continue
+          sharedRuleMatchIds.add(issueId)
+        }
 
         // --- Per-rule cap ---
         const ruleCount = (ruleCounts.get(rule.id) || 0) + 1
@@ -433,6 +446,16 @@ function runRegexRules(ctx: ScanContext): RegexRulesResult {
         }
 
         seenIds.add(issueId)
+        if (rule.id === 'eval-usage') {
+          if (sharedRuleMatchIds.has(issueId)) continue
+          sharedRuleMatchIds.add(issueId)
+        }
+        const ruleCount = (ruleCounts.get(rule.id) || 0) + 1
+        ruleCounts.set(rule.id, ruleCount)
+        if (ruleCount > MAX_PER_RULE) {
+          ruleOverflow.set(rule.id, (ruleOverflow.get(rule.id) || 0) + 1)
+          continue
+        }
         issues.push({
           id: issueId,
           ruleId: rule.id,
@@ -463,24 +486,34 @@ function runRegexRules(ctx: ScanContext): RegexRulesResult {
 // D4: AST analysis helper
 // ---------------------------------------------------------------------------
 
+interface ParsedEngineResult {
+  issues: CodeIssue[]
+  omittedPaths: string[]
+}
+
 function runAstAnalysis(
   filesToScan: Map<string, IndexedFile>,
-): CodeIssue[] {
+): ParsedEngineResult {
   const issues: CodeIssue[] = []
+  const omittedPaths: string[] = []
   for (const [path, file] of filesToScan) {
     if (SKIP_VENDORED.test(path)) continue
     const lang = file.language ?? ''
     if (!AST_LANGUAGES.has(lang)) continue
     try {
       const ast = getAST(file)
-      if (!ast) continue
+      if (!ast) {
+        if (file.content) omittedPaths.push(path)
+        continue
+      }
       const astIssues = analyzeAST(ast, file)
       issues.push(...astIssues)
     } catch (err) {
       console.warn(`[scanner] AST analysis failed for ${path}:`, err)
+      omittedPaths.push(path)
     }
   }
-  return issues
+  return { issues, omittedPaths }
 }
 
 // ---------------------------------------------------------------------------
@@ -489,22 +522,31 @@ function runAstAnalysis(
 
 function runTaintAnalysis(
   filesToScan: Map<string, IndexedFile>,
-): CodeIssue[] {
+): ParsedEngineResult {
   const issues: CodeIssue[] = []
+  const omittedPaths: string[] = []
   for (const [path, file] of filesToScan) {
     if (SKIP_VENDORED.test(path)) continue
     const lang = file.language ?? ''
     if (!AST_LANGUAGES.has(lang)) continue
     try {
+      if (!isTaintEligible(file)) {
+        omittedPaths.push(path)
+        continue
+      }
       const ast = getAST(file)
-      if (!ast) continue
+      if (!ast) {
+        if (file.content) omittedPaths.push(path)
+        continue
+      }
       const taintFlows = trackTaint(ast, file)
       issues.push(...taintFlowsToIssues(taintFlows))
     } catch (err) {
       console.warn(`[scanner] Taint analysis failed for ${path}:`, err)
+      omittedPaths.push(path)
     }
   }
-  return issues
+  return { issues, omittedPaths }
 }
 
 // ---------------------------------------------------------------------------
@@ -570,10 +612,18 @@ function computeHealthGrades(issues: CodeIssue[], sloc: number): HealthGrades {
 // D7: Deduplication helper — resolves AST vs regex overlapping findings
 // ---------------------------------------------------------------------------
 
+interface DeferredAstEvalState {
+  issueIds: Set<string>
+  count: number
+}
+
 function deduplicateIssues(
   issues: CodeIssue[],
   scanCodeIndex: CodeIndex,
   ruleOverflow: Map<string, number>,
+  ruleCounts?: Map<string, number>,
+  ruleMatchIds?: Set<string>,
+  deferredAstEval?: DeferredAstEvalState,
 ): void {
   // AST empty-catch wins over regex empty-catch for same file+line
   const astEmptyCatchKeys = new Set(
@@ -607,7 +657,8 @@ function deduplicateIssues(
   // Also apply the regex eval-usage rule's excludeFiles so test/fixture files
   // are not flagged by the AST path (which has no excludeFiles of its own).
   const EVAL_EXCLUDE_FILES = /rules-security|rules-security-lang|rules-quality|rules-framework|rules-composite|\.d\.ts$|\.test\.|\.spec\.|__tests__|fixture|mock/i
-  const existingEvalCount = issues.filter(i => i.ruleId === 'eval-usage').length
+  const existingEvalCount = ruleCounts?.get('eval-usage')
+    ?? issues.filter(i => i.ruleId === 'eval-usage').length
   let normalizedEvalCount = existingEvalCount
   for (let i = issues.length - 1; i >= 0; i--) {
     const issue = issues[i]
@@ -619,6 +670,10 @@ function deduplicateIssues(
     }
     issue.ruleId = 'eval-usage'
     issue.id = issue.id.replace('ast-eval-usage', 'eval-usage')
+    if (ruleMatchIds?.has(issue.id)) {
+      issues.splice(i, 1)
+      continue
+    }
     if (!issue.cwe) issue.cwe = 'CWE-94'
     // Apply inline suppression check for normalized issues
     const indexedFile = scanCodeIndex.files.get(issue.file)
@@ -629,11 +684,33 @@ function deduplicateIssues(
       issues.splice(i, 1)
       continue
     }
+    if (deferredAstEval) {
+      deferredAstEval.count++
+      deferredAstEval.issueIds.add(issue.id)
+      continue
+    }
     // Apply MAX_PER_RULE cap
     normalizedEvalCount++
+    ruleCounts?.set('eval-usage', normalizedEvalCount)
+    ruleMatchIds?.add(issue.id)
     if (normalizedEvalCount > MAX_PER_RULE) {
       ruleOverflow.set('eval-usage', (ruleOverflow.get('eval-usage') || 0) + 1)
       issues.splice(i, 1)
+    }
+  }
+
+  // Async scans cannot cap AST fallbacks until every regex batch has run.
+  // Retain only the latest candidates that the synchronous reverse pass would
+  // select; the total count preserves truthful overflow reporting.
+  if (deferredAstEval && deferredAstEval.issueIds.size > MAX_PER_RULE) {
+    let retained = 0
+    for (let index = issues.length - 1; index >= 0; index--) {
+      const issue = issues[index]
+      if (!deferredAstEval.issueIds.has(issue.id)) continue
+      retained++
+      if (retained <= MAX_PER_RULE) continue
+      deferredAstEval.issueIds.delete(issue.id)
+      issues.splice(index, 1)
     }
   }
 }
@@ -658,21 +735,53 @@ export interface AsyncScanOptions extends ScanOptions {
 interface ScanAccumulator {
   issues: CodeIssue[]
   seenIds: Set<string>
+  ruleCounts: Map<string, number>
+  ruleMatchIds: Set<string>
+  deferredAstEval: DeferredAstEvalState
   rulesEvaluated: number
   suppressionCount: number
   ruleOverflow: Map<string, number>
   diagnostics: ScanDiagnostics
+  partialEnginePaths: Map<ScanEngine, Set<string>>
 }
 
 function createScanAccumulator(): ScanAccumulator {
   return {
     issues: [],
     seenIds: new Set(),
+    ruleCounts: new Map(),
+    ruleMatchIds: new Set(),
+    deferredAstEval: { issueIds: new Set(), count: 0 },
     rulesEvaluated: 0,
     suppressionCount: 0,
     ruleOverflow: new Map(),
     diagnostics: { engines: {}, failures: [] },
+    partialEnginePaths: new Map(),
   }
+}
+
+function finalizeDeferredAstEvalIssues(accumulator: ScanAccumulator): void {
+  const { deferredAstEval, issues, ruleCounts, ruleOverflow } = accumulator
+  if (deferredAstEval.count === 0) return
+
+  const regexEvalCount = ruleCounts.get('eval-usage') ?? 0
+  const astRetentionLimit = Math.max(0, MAX_PER_RULE - regexEvalCount)
+  let retained = 0
+  for (let index = issues.length - 1; index >= 0; index--) {
+    const issue = issues[index]
+    if (!deferredAstEval.issueIds.has(issue.id)) continue
+    retained++
+    if (retained <= astRetentionLimit) continue
+    issues.splice(index, 1)
+  }
+  const retainedAstCount = Math.min(deferredAstEval.count, astRetentionLimit)
+  const overflow = deferredAstEval.count - retainedAstCount
+  if (overflow > 0) {
+    ruleOverflow.set('eval-usage', (ruleOverflow.get('eval-usage') || 0) + overflow)
+  }
+  ruleCounts.set('eval-usage', regexEvalCount + deferredAstEval.count)
+  deferredAstEval.issueIds.clear()
+  deferredAstEval.count = 0
 }
 
 function addIssues(accumulator: ScanAccumulator, issues: CodeIssue[]): void {
@@ -692,15 +801,44 @@ function completeEngine(
   accumulator.diagnostics.engines[engine] = status
 }
 
+function recordPartialEngine(
+  accumulator: ScanAccumulator,
+  engine: 'ast' | 'taint',
+  paths: readonly string[],
+): void {
+  if (paths.length === 0 || accumulator.diagnostics.engines[engine] === 'failed') return
+  let omitted = accumulator.partialEnginePaths.get(engine)
+  if (!omitted) {
+    omitted = new Set<string>()
+    accumulator.partialEnginePaths.set(engine, omitted)
+  }
+  for (const path of paths) omitted.add(path)
+  accumulator.diagnostics.engines[engine] = 'partial'
+
+  const label = engine === 'ast' ? 'AST' : 'Taint'
+  const sortedPaths = [...omitted].sort()
+  const shownPaths = sortedPaths.slice(0, 3).join(', ')
+  const remaining = sortedPaths.length - Math.min(sortedPaths.length, 3)
+  const message = `${label} parsing unavailable for ${sortedPaths.length} file${sortedPaths.length === 1 ? '' : 's'}: ${shownPaths}${remaining > 0 ? ` (+${remaining} more)` : ''}`
+  const existing = accumulator.diagnostics.failures.find(
+    failure => failure.engine === engine && failure.message.startsWith(`${label} parsing unavailable for `),
+  )
+  if (existing) existing.message = message
+  else accumulator.diagnostics.failures.push({ engine, message })
+}
+
 async function runAsyncEngine(
   accumulator: ScanAccumulator,
   engine: ScanEngine,
   failureMode: 'best-effort' | 'strict',
   run: () => void | Promise<void>,
 ): Promise<void> {
+  if (accumulator.diagnostics.engines[engine] === 'failed') return
   try {
     await run()
-    completeEngine(accumulator, engine)
+    if (accumulator.diagnostics.engines[engine] !== 'partial') {
+      completeEngine(accumulator, engine)
+    }
   } catch (error) {
     accumulator.diagnostics.engines[engine] = 'failed'
     accumulator.diagnostics.failures.push({
@@ -745,6 +883,7 @@ function finalizeScan(
   isPartialScan: boolean,
   metadataOnly: boolean,
   accumulator: ScanAccumulator,
+  unscannedFileCountOverride?: number,
 ): ScanResults {
   const { issues } = accumulator
 
@@ -791,13 +930,13 @@ function finalizeScan(
     ruleOverflow: accumulator.ruleOverflow,
     languagesDetected: detectLanguages(codeIndex),
     rulesEvaluated: accumulator.rulesEvaluated,
-    scannedFiles: isPartialScan ? filesToScan.size : codeIndex.totalFiles,
+    scannedFiles: filesToScan.size,
     scannedAt: new Date(),
     securityGrade: grades.securityGrade,
     qualityGrade: grades.qualityGrade,
     issuesPerKloc: grades.issuesPerKloc,
     isPartialScan,
-    unscannedFileCount: countUnscannedFiles(codeIndex),
+    unscannedFileCount: unscannedFileCountOverride ?? countUnscannedFiles(codeIndex),
     isMetadataOnly: metadataOnly,
     suppressionCount: accumulator.suppressionCount,
     projectRiskScore,
@@ -832,7 +971,7 @@ export function scanIssues(
   // Build the set of files to scan, excluding test/fixture paths that
   // produce false positives (test corpus intentionally contains vulnerable patterns).
   const filesToScan = new Map<string, FileEntry>()
-  if (isPartialScan) {
+  if (changedFiles !== undefined && changedFiles.length > 0) {
     for (const changed of changedFiles!) {
       if (SCANNER_EXCLUDE_PATTERNS.test(changed)) continue
       const file = codeIndex.files.get(changed)
@@ -867,12 +1006,14 @@ export function scanIssues(
   let rulesEvaluated = 0
   let suppressionCount = 0
   let ruleOverflow = new Map<string, number>()
+  const ruleCounts = new Map<string, number>()
+  const ruleMatchIds = new Set<string>()
 
   if (!metadataOnly) {
     const regexResult = runRegexRules({
       filesToScan, scanCodeIndex, isPartialScan,
       blockCommentCache, presentExtensions, filesByExtension,
-    })
+    }, ruleCounts, ruleOverflow, undefined, ruleMatchIds)
     for (const issue of regexResult.issues) {
       if (!seenIds.has(issue.id)) {
         seenIds.add(issue.id)
@@ -886,23 +1027,27 @@ export function scanIssues(
 
   // 2. AST-based analysis (content-required)
   if (!metadataOnly) {
-    for (const issue of runAstAnalysis(filesToScan)) {
+    const astResult = runAstAnalysis(filesToScan)
+    for (const issue of astResult.issues) {
       if (!seenIds.has(issue.id)) {
         seenIds.add(issue.id)
         issues.push(issue)
       }
     }
+    recordPartialEngine(accumulator, 'ast', astResult.omittedPaths)
 
     // 2b. Taint tracking
-    for (const issue of runTaintAnalysis(filesToScan)) {
+    const taintResult = runTaintAnalysis(filesToScan)
+    for (const issue of taintResult.issues) {
       if (!seenIds.has(issue.id)) {
         seenIds.add(issue.id)
         issues.push(issue)
       }
     }
+    recordPartialEngine(accumulator, 'taint', taintResult.omittedPaths)
 
     // 2c–2d. Deduplicate AST vs regex overlapping findings
-    deduplicateIssues(issues, scanCodeIndex, ruleOverflow)
+    deduplicateIssues(issues, scanCodeIndex, ruleOverflow, ruleCounts, ruleMatchIds)
   }
 
   // 3. Composite file-level rules (content-required)
@@ -948,7 +1093,9 @@ export function scanIssues(
   accumulator.suppressionCount = suppressionCount
   accumulator.ruleOverflow = ruleOverflow
   for (const engine of ['regex', 'ast', 'taint', 'composite', 'supply-chain'] as const) {
-    completeEngine(accumulator, engine, metadataOnly ? 'not-applicable' : 'completed')
+    if (accumulator.diagnostics.engines[engine] !== 'partial') {
+      completeEngine(accumulator, engine, metadataOnly ? 'not-applicable' : 'completed')
+    }
   }
   completeEngine(accumulator, 'structural')
   completeEngine(accumulator, 'tree-sitter', 'skipped')
@@ -1031,25 +1178,18 @@ async function scanIssuesAsyncImpl(
   const metadataOnly = options.metadataOnly ?? false
   const failureMode = options.failureMode ?? 'best-effort'
   const originalCodeIndex = codeIndex
+  const missingContentPaths: string[] = []
 
   throwIfScanAborted(signal)
-  if (!metadataOnly) {
-    const hydrated = await hydrateCodeIndexContent(codeIndex)
-    throwIfScanAborted(signal)
-    if (hydrated.missingPaths.length > 0) {
-      throw new Error(`Content unavailable for indexed files: ${hydrated.missingPaths.join(', ')}`)
-    }
-    codeIndex = hydrated.index
-  }
 
   const accumulator = createScanAccumulator()
 
-  const isPartialScan = changedFiles !== undefined && changedFiles.length > 0
+  const hasChangedFiles = changedFiles !== undefined && changedFiles.length > 0
 
   // Build the set of files to scan, excluding test/fixture paths that
   // produce false positives (test corpus intentionally contains vulnerable patterns).
   const filesToScan = new Map<string, FileEntry>()
-  if (isPartialScan) {
+  if (hasChangedFiles) {
     for (const changed of changedFiles!) {
       if (SCANNER_EXCLUDE_PATTERNS.test(changed)) continue
       const file = codeIndex.files.get(changed)
@@ -1058,114 +1198,195 @@ async function scanIssuesAsyncImpl(
   } else {
     for (const [path, file] of codeIndex.files) {
       if (SCANNER_EXCLUDE_PATTERNS.test(path)) continue
+      if (!metadataOnly && missingContentPaths.includes(path)) continue
       filesToScan.set(path, file)
     }
   }
 
-  const scanCodeIndex = codeIndex
-
   // Pre-compute extension-based data structures
-  const blockCommentCache = new Map<string, Set<number> | undefined>()
   const presentExtensions = new Set(
     Array.from(filesToScan.keys()).map(p => '.' + (p.split('.').pop() || '').toLowerCase())
   )
-  const filesByExtension = new Map<string, Map<string, FileEntry>>()
-  for (const [path, file] of filesToScan) {
-    const ext = '.' + (path.split('.').pop() || '').toLowerCase()
-    let group = filesByExtension.get(ext)
-    if (!group) {
-      group = new Map<string, FileEntry>()
-      filesByExtension.set(ext, group)
-    }
-    group.set(path, file)
-  }
-
-  // --- Phase 1: Regex-based rules (content-required) ---
   if (metadataOnly) {
     completeEngine(accumulator, 'regex', 'not-applicable')
-  } else {
-    await runAsyncEngine(accumulator, 'regex', failureMode, () => {
-      const regexResult = runRegexRules({
-        filesToScan, scanCodeIndex, isPartialScan,
-        blockCommentCache, presentExtensions, filesByExtension,
-      })
-      addIssues(accumulator, regexResult.issues)
-      accumulator.rulesEvaluated = regexResult.rulesEvaluated
-      accumulator.suppressionCount = regexResult.suppressionCount
-      accumulator.ruleOverflow = regexResult.ruleOverflow
-    })
-  }
-
-  await yieldToMain()
-  throwIfScanAborted(signal)
-
-  // --- Phase 2: AST analysis + taint tracking (content-required) ---
-  if (metadataOnly) {
     completeEngine(accumulator, 'ast', 'not-applicable')
     completeEngine(accumulator, 'taint', 'not-applicable')
-  } else {
-    await runAsyncEngine(accumulator, 'ast', failureMode, () => {
-      addIssues(accumulator, runAstAnalysis(filesToScan))
-    })
-    await runAsyncEngine(accumulator, 'taint', failureMode, () => {
-      addIssues(accumulator, runTaintAnalysis(filesToScan))
-      deduplicateIssues(accumulator.issues, scanCodeIndex, accumulator.ruleOverflow)
-    })
-  }
-
-  await yieldToMain()
-  throwIfScanAborted(signal)
-
-  // --- Phase 3: Composite rules (content-required) ---
-  if (metadataOnly) {
     completeEngine(accumulator, 'composite', 'not-applicable')
+    completeEngine(accumulator, 'supply-chain', 'not-applicable')
+    completeEngine(accumulator, 'tree-sitter', 'not-applicable')
   } else {
-    await runAsyncEngine(accumulator, 'composite', failureMode, () => {
-      accumulator.rulesEvaluated += COMPOSITE_RULES.length
-      addIssues(
-        accumulator,
-        scanCompositeRules(scanCodeIndex).filter(issue => filesToScan.has(issue.file)),
-      )
-    })
+    accumulator.rulesEvaluated += COMPOSITE_RULES.length
+    const supplyChainRuleIds = new Set<string>()
+    let sawContentBatch = false
+    let regexRulesRecorded = false
+    const compiledRuleIndex = buildCompiledRuleIndex(presentExtensions)
+    const pathsToResolve = Array.from(filesToScan.keys())
+
+    for await (const batch of resolveFileContentBatches(
+      codeIndex,
+      pathsToResolve,
+      { batchSize: 50, signal },
+    )) {
+      throwIfScanAborted(signal)
+      missingContentPaths.push(...batch.missingPaths)
+
+      const batchFilesToScan = new Map<string, FileEntry>()
+      let batchTotalLines = 0
+      for (const path of batch.paths) {
+        const source = batch.contents.get(path)
+        if (source === undefined) continue
+        const originalFile = codeIndex.files.get(path)
+        if (!originalFile) continue
+        recordResolvedFileLineCount(codeIndex, path, source)
+        const file = { ...originalFile, content: source }
+        if (filesToScan.has(path)) {
+          batchFilesToScan.set(path, file)
+          batchTotalLines += file.lineCount
+        }
+      }
+
+      if (batchFilesToScan.size === 0) {
+        continue
+      }
+      sawContentBatch = true
+
+      const batchCodeIndex: CodeIndex = {
+        ...codeIndex,
+        files: batchFilesToScan,
+        totalFiles: batchFilesToScan.size,
+        totalLines: batchTotalLines,
+      }
+      const filesByExtension = new Map<string, Map<string, FileEntry>>()
+      const blockCommentCache = new Map<string, Set<number> | undefined>()
+      for (const [path, file] of batchFilesToScan) {
+        const ext = '.' + (path.split('.').pop() || '').toLowerCase()
+        let group = filesByExtension.get(ext)
+        if (!group) {
+          group = new Map<string, FileEntry>()
+          filesByExtension.set(ext, group)
+        }
+        group.set(path, file)
+      }
+      const scanContext: ScanContext = {
+        filesToScan: batchFilesToScan,
+        scanCodeIndex: batchCodeIndex,
+        isPartialScan: hasChangedFiles,
+        blockCommentCache,
+        presentExtensions,
+        filesByExtension,
+      }
+
+      // Match identities are needed only to deduplicate regex and AST findings
+      // within this bounded content batch. Counts remain global across batches.
+      accumulator.ruleMatchIds.clear()
+      await runAsyncEngine(accumulator, 'regex', failureMode, () => {
+        const regexResult = runRegexRules(
+          scanContext,
+          accumulator.ruleCounts,
+          accumulator.ruleOverflow,
+          compiledRuleIndex,
+          accumulator.ruleMatchIds,
+        )
+        addIssues(accumulator, regexResult.issues)
+        if (!regexRulesRecorded) {
+          accumulator.rulesEvaluated += regexResult.rulesEvaluated
+          regexRulesRecorded = true
+        }
+        accumulator.suppressionCount += regexResult.suppressionCount
+      })
+      await runAsyncEngine(accumulator, 'ast', failureMode, () => {
+        const astResult = runAstAnalysis(batchFilesToScan)
+        addIssues(accumulator, astResult.issues)
+        recordPartialEngine(accumulator, 'ast', astResult.omittedPaths)
+      })
+      await runAsyncEngine(accumulator, 'taint', failureMode, () => {
+        const taintResult = runTaintAnalysis(batchFilesToScan)
+        addIssues(accumulator, taintResult.issues)
+        recordPartialEngine(accumulator, 'taint', taintResult.omittedPaths)
+        deduplicateIssues(
+          accumulator.issues,
+          batchCodeIndex,
+          accumulator.ruleOverflow,
+          accumulator.ruleCounts,
+          accumulator.ruleMatchIds,
+          accumulator.deferredAstEval,
+        )
+        accumulator.ruleMatchIds.clear()
+      })
+      await runAsyncEngine(accumulator, 'composite', failureMode, () => {
+        addIssues(
+          accumulator,
+          scanCompositeRules(batchCodeIndex).filter(issue => filesToScan.has(issue.file)),
+        )
+      })
+      await runAsyncEngine(accumulator, 'supply-chain', failureMode, () => {
+        let supplyChainFiles: Map<string, FileEntry> | null = null
+        for (const path of batchFilesToScan.keys()) {
+          if ((path.split('/').pop() || '') !== 'package.json') continue
+          const directory = path.includes('/') ? path.slice(0, path.lastIndexOf('/') + 1) : ''
+          for (const lockfileName of ['package-lock.json', 'pnpm-lock.yaml', 'yarn.lock']) {
+            const lockfilePath = `${directory}${lockfileName}`
+            if (batchFilesToScan.has(lockfilePath)) continue
+            const lockfile = codeIndex.files.get(lockfilePath)
+            if (!lockfile) continue
+            supplyChainFiles ??= new Map(batchFilesToScan)
+            supplyChainFiles.set(lockfilePath, {
+              path: lockfile.path,
+              name: lockfile.name,
+              language: lockfile.language,
+              lineCount: lockfile.lineCount,
+            })
+          }
+        }
+        const supplyChainCodeIndex = supplyChainFiles
+          ? {
+              ...batchCodeIndex,
+              files: supplyChainFiles,
+              totalFiles: supplyChainFiles.size,
+              totalLines: Array.from(supplyChainFiles.values())
+                .reduce((sum, file) => sum + file.lineCount, 0),
+            }
+          : batchCodeIndex
+        const supplyChainIssues = scanSupplyChain(supplyChainCodeIndex)
+          .filter(issue => filesToScan.has(issue.file))
+        for (const issue of supplyChainIssues) supplyChainRuleIds.add(issue.ruleId)
+        addIssues(accumulator, supplyChainIssues)
+      })
+      await runAsyncEngine(accumulator, 'tree-sitter', failureMode, async () => {
+        const treeSitterIssues = await scanWithTreeSitter(batchFilesToScan)
+        addIssues(accumulator, treeSitterIssues.filter(issue => filesToScan.has(issue.file)))
+      })
+
+      batchFilesToScan.clear()
+      blockCommentCache.clear()
+      await yieldToMain()
+      throwIfScanAborted(signal)
+    }
+
+    accumulator.rulesEvaluated += supplyChainRuleIds.size
+    finalizeDeferredAstEvalIssues(accumulator)
+    if (!sawContentBatch) {
+      for (const engine of ['regex', 'ast', 'taint', 'composite', 'supply-chain', 'tree-sitter'] as const) {
+        completeEngine(accumulator, engine)
+      }
+    }
   }
+
+  const finalIsPartialScan = hasChangedFiles || missingContentPaths.length > 0
 
   await yieldToMain()
   throwIfScanAborted(signal)
 
-  // --- Phase 4: Structural rules (metadata-safe) ---
+  // --- Structural rules (metadata-safe) ---
   await runAsyncEngine(accumulator, 'structural', failureMode, () => {
-    const structuralIssues = scanStructuralIssues(scanCodeIndex, analysis)
+    const structuralIssues = scanStructuralIssues(codeIndex, analysis)
       .filter(issue => filesToScan.has(issue.file))
     accumulator.rulesEvaluated += new Set(structuralIssues.map(issue => issue.ruleId)).size
     addIssues(accumulator, structuralIssues)
   })
 
-  await yieldToMain()
-  throwIfScanAborted(signal)
-
-  // --- Phase 5: Supply chain rules (content-required) ---
-  if (metadataOnly) {
-    completeEngine(accumulator, 'supply-chain', 'not-applicable')
-  } else {
-    await runAsyncEngine(accumulator, 'supply-chain', failureMode, () => {
-      const supplyChainIssues = scanSupplyChain(scanCodeIndex)
-        .filter(issue => filesToScan.has(issue.file))
-      accumulator.rulesEvaluated += new Set(supplyChainIssues.map(issue => issue.ruleId)).size
-      addIssues(accumulator, supplyChainIssues)
-    })
-  }
-
-  await yieldToMain()
-  throwIfScanAborted(signal)
-
-  // --- Phase 5b: Tree-sitter multi-language analysis (content-required, async) ---
-  if (metadataOnly) {
-    completeEngine(accumulator, 'tree-sitter', 'not-applicable')
-  } else {
-    await runAsyncEngine(accumulator, 'tree-sitter', failureMode, async () => {
-      const treeSitterIssues = await scanWithTreeSitter(filesToScan)
-      addIssues(accumulator, treeSitterIssues.filter(issue => filesToScan.has(issue.file)))
-    })
+  if (!metadataOnly) {
+    for (const path of missingContentPaths) filesToScan.delete(path)
   }
 
   await yieldToMain()
@@ -1175,12 +1396,13 @@ async function scanIssuesAsyncImpl(
     codeIndex,
     analysis,
     filesToScan,
-    isPartialScan,
+    finalIsPartialScan,
     metadataOnly,
     accumulator,
+    metadataOnly ? undefined : missingContentPaths.length,
   )
 
-  if (isCompleteFullScan(options) && accumulator.diagnostics.failures.length === 0) {
+  if (isCompleteFullScan(options) && accumulator.diagnostics.failures.length === 0 && result.unscannedFileCount === 0) {
     lastScanRef = new WeakRef(originalCodeIndex)
     lastScanAnalysis = analysis
     lastScanOptionsKey = scanOptionsKey(options)
@@ -1292,6 +1514,7 @@ export function mergeScanResults(
   ] as const) {
     const statuses = [base.diagnostics.engines[engine], addition.diagnostics.engines[engine]]
     if (statuses.includes('failed')) engines[engine] = 'failed'
+    else if (statuses.includes('partial')) engines[engine] = 'partial'
     else if (statuses.includes('completed')) engines[engine] = 'completed'
     else if (statuses.includes('skipped')) engines[engine] = 'skipped'
     else if (statuses.includes('not-applicable')) engines[engine] = 'not-applicable'

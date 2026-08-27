@@ -4,6 +4,10 @@
  */
 
 import { getCached, setCache } from '@/lib/cache/memory-cache'
+import {
+  MAX_DEPENDENCY_API_BATCH,
+  MAX_DEPENDENCY_PACKAGES_PER_WINDOW,
+} from './constants'
 import type { DepsApiResponse, NpmPackageMeta } from './types'
 
 // ---------------------------------------------------------------------------
@@ -11,7 +15,11 @@ import type { DepsApiResponse, NpmPackageMeta } from './types'
 // ---------------------------------------------------------------------------
 
 const CACHE_TTL_MS = 10 * 60 * 1_000 // 10 minutes
-const MAX_BATCH_SIZE = 200
+
+export interface FetchDependencyMetaOptions {
+  signal?: AbortSignal
+  onError?: (packageName: string, message: string) => void
+}
 
 // ---------------------------------------------------------------------------
 // Cache helpers
@@ -32,6 +40,7 @@ function cacheKey(packageName: string): string {
  */
 export async function fetchDependencyMeta(
   packages: string[],
+  options: FetchDependencyMetaOptions = {},
 ): Promise<Map<string, NpmPackageMeta>> {
   if (packages.length === 0) return new Map()
 
@@ -50,20 +59,26 @@ export async function fetchDependencyMeta(
 
   if (uncached.length === 0) return results
 
+  const fetchable = uncached.slice(0, MAX_DEPENDENCY_PACKAGES_PER_WINDOW)
+
   // Fetch uncached packages in batches to respect API limits
-  for (let i = 0; i < uncached.length; i += MAX_BATCH_SIZE) {
-    const batch = uncached.slice(i, i + MAX_BATCH_SIZE)
+  for (let i = 0; i < fetchable.length; i += MAX_DEPENDENCY_API_BATCH) {
+    if (options.signal?.aborted) break
+    const batch = fetchable.slice(i, i + MAX_DEPENDENCY_API_BATCH)
 
     try {
       const response = await fetch('/api/deps', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ packages: batch }),
+        ...(options.signal && { signal: options.signal }),
       })
 
       if (!response.ok) {
+        const message = `/api/deps returned ${response.status}`
+        for (const name of batch) options.onError?.(name, message)
         console.warn(
-          `[npm-client] /api/deps returned ${response.status} for batch starting at index ${i}`,
+          `[npm-client] ${message} for batch starting at index ${i}`,
         )
         continue
       }
@@ -78,9 +93,20 @@ export async function fetchDependencyMeta(
 
       if (data.errors.length > 0) {
         console.warn('[npm-client] Partial fetch errors:', data.errors)
+        for (const message of data.errors) {
+          const matched = batch.filter(name => (
+            message.endsWith(`for ${name}`) || message.includes(`Skipped ${name}:`)
+          ))
+          const targets = matched.length > 0
+            ? matched
+            : batch.filter(name => !Object.prototype.hasOwnProperty.call(data.results, name))
+          for (const name of targets) options.onError?.(name, message)
+        }
       }
     } catch (error) {
+      if (options.signal?.aborted) break
       const message = error instanceof Error ? error.message : String(error)
+      for (const name of batch) options.onError?.(name, message)
       console.warn(`[npm-client] Failed to fetch batch: ${message}`)
       // Continue with remaining batches — partial results are acceptable
     }

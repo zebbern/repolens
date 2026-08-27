@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { batchIndexFiles, createEmptyIndex } from '../code-index'
+import { batchIndexFiles, batchIndexMetadataOnly, createEmptyIndex } from '../code-index'
 
 // ---------------------------------------------------------------------------
 // batchIndexFiles
@@ -83,5 +83,16 @@ describe('batchIndexFiles', () => {
     ])
 
     expect(result.files.get('script.py')!.language).toBe('python')
+  })
+})
+
+describe('batchIndexMetadataOnly', () => {
+  it('restores totalLines from persisted metadata', () => {
+    const result = batchIndexMetadataOnly(createEmptyIndex(), [
+      { path: 'a.ts', lineCount: 12 },
+      { path: 'b.ts', lineCount: 3 },
+    ])
+
+    expect(result.totalLines).toBe(15)
   })
 })

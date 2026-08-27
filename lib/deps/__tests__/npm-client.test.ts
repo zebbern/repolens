@@ -132,18 +132,18 @@ describe('fetchDependencyMeta', () => {
     expect(result.get('react')).toEqual(reactMeta)
   })
 
-  it('splits large package lists into batches of 200', async () => {
-    const packages = Array.from({ length: 250 }, (_, i) => `pkg-${i}`)
+  it('keeps every metadata request within the 20-package API contract', async () => {
+    const packages = Array.from({ length: 45 }, (_, i) => `pkg-${i}`)
     const results: Record<string, NpmPackageMeta> = {}
     for (const name of packages) {
       results[name] = makeMeta(name)
     }
 
     // Mock fetch to return results for each batch
-    let callCount = 0
+    const batchSizes: number[] = []
     globalThis.fetch = vi.fn().mockImplementation(async (_url: string, init: RequestInit) => {
-      callCount++
       const body = JSON.parse(init.body as string) as { packages: string[] }
+      batchSizes.push(body.packages.length)
       const batchResults: Record<string, NpmPackageMeta> = {}
       for (const name of body.packages) {
         batchResults[name] = results[name]
@@ -156,9 +156,44 @@ describe('fetchDependencyMeta', () => {
 
     const result = await fetchDependencyMeta(packages)
 
-    // Should have made 2 requests: 200 + 50
-    expect(callCount).toBe(2)
-    expect(result.size).toBe(250)
+    expect(batchSizes).toEqual([20, 20, 5])
+    expect(result.size).toBe(45)
+  })
+
+  it('stops scheduling metadata batches after cancellation', async () => {
+    const controller = new AbortController()
+    const packages = Array.from({ length: 21 }, (_, i) => `pkg-${i}`)
+    globalThis.fetch = vi.fn().mockImplementation(async () => {
+      controller.abort()
+      return {
+        ok: true,
+        json: () => Promise.resolve({ results: {}, errors: [] }),
+      }
+    })
+
+    await (fetchDependencyMeta as unknown as (
+      packages: string[],
+      options: { signal: AbortSignal },
+    ) => Promise<Map<string, NpmPackageMeta>>)(packages, { signal: controller.signal })
+
+    expect(globalThis.fetch).toHaveBeenCalledOnce()
+  })
+
+  it('does not schedule metadata beyond the 60-package workflow budget', async () => {
+    const packages = Array.from({ length: 61 }, (_, index) => `pkg-${index}`)
+    const batchSizes: number[] = []
+    globalThis.fetch = vi.fn().mockImplementation(async (_url: string, init: RequestInit) => {
+      const body = JSON.parse(String(init.body)) as { packages: string[] }
+      batchSizes.push(body.packages.length)
+      return {
+        ok: true,
+        json: () => Promise.resolve({ results: {}, errors: [] }),
+      }
+    })
+
+    await fetchDependencyMeta(packages)
+
+    expect(batchSizes).toEqual([20, 20, 20])
   })
 
   it('mixes cached and uncached packages correctly', async () => {
@@ -186,5 +221,60 @@ describe('fetchDependencyMeta', () => {
       (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0][1].body as string,
     )
     expect(body.packages).toEqual(['vue'])
+  })
+
+  it('reports network failures for every package in the failed batch', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    globalThis.fetch = vi.fn().mockRejectedValue(new Error('Registry unavailable'))
+    const errors: Array<{ packageName: string; message: string }> = []
+
+    const result = await fetchDependencyMeta(['react', 'vue'], {
+      onError: (packageName, message) => errors.push({ packageName, message }),
+    })
+
+    expect(result).toEqual(new Map())
+    expect(errors).toEqual([
+      { packageName: 'react', message: 'Registry unavailable' },
+      { packageName: 'vue', message: 'Registry unavailable' },
+    ])
+  })
+
+  it('reports API errors even when the batch also returns metadata', async () => {
+    const reactMeta = makeMeta('react')
+    globalThis.fetch = mockFetchSuccess(
+      { react: reactMeta },
+      ['npm registry returned a warning for react'],
+    )
+    const errors: Array<{ packageName: string; message: string }> = []
+
+    const result = await fetchDependencyMeta(['react', 'vue'], {
+      onError: (packageName, message) => errors.push({ packageName, message }),
+    })
+
+    expect(result.get('react')).toEqual(reactMeta)
+    expect(errors).toEqual([
+      {
+        packageName: 'react',
+        message: 'npm registry returned a warning for react',
+      },
+    ])
+  })
+
+  it('does not attribute a package error to a shorter package-name prefix', async () => {
+    const fooMeta = makeMeta('foo')
+    globalThis.fetch = mockFetchSuccess(
+      { foo: fooMeta },
+      ['npm registry returned 404 for foobar'],
+    )
+    const errors: Array<{ packageName: string; message: string }> = []
+
+    await fetchDependencyMeta(['foo', 'foobar'], {
+      onError: (packageName, message) => errors.push({ packageName, message }),
+    })
+
+    expect(errors).toEqual([{
+      packageName: 'foobar',
+      message: 'npm registry returned 404 for foobar',
+    }])
   })
 })

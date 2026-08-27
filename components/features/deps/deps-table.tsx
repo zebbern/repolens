@@ -2,7 +2,7 @@
 
 import { useState, useMemo } from 'react'
 import { cn } from '@/lib/utils'
-import { ExternalLink, ChevronUp, ChevronDown, Search } from 'lucide-react'
+import { ChevronUp, ChevronDown, Search } from 'lucide-react'
 import { HealthBadge } from './health-badge'
 import { DownloadSparkline } from './download-sparkline'
 import { Badge } from '@/components/ui/badge'
@@ -43,24 +43,24 @@ interface ColumnDef {
 const COLUMNS: ColumnDef[] = [
   { id: 'name', label: 'Package', className: 'min-w-[160px]' },
   { id: 'type', label: 'Type', className: 'w-[70px]' },
-  { id: 'current', label: 'Installed', className: 'w-[100px]' },
+  { id: 'current', label: 'Version', className: 'w-[130px]' },
   { id: 'latest', label: 'Latest', className: 'w-[100px]' },
   { id: 'downloads', label: 'Downloads', className: 'w-[160px]' },
   { id: 'updated', label: 'Updated', className: 'w-[90px]' },
-  { id: 'cves', label: 'CVEs', className: 'w-[60px]' },
+  { id: 'cves', label: 'Vuln. occurrences', className: 'w-[110px]' },
   { id: 'grade', label: 'Grade', className: 'w-[65px]' },
 ]
 
 function getSortValue(dep: DependencyHealth, field: SortField, depTypes: Map<string, 'production' | 'dev'>): string | number {
   switch (field) {
     case 'name': return dep.packageName.toLowerCase()
-    case 'type': return depTypes.get(dep.packageName) === 'dev' ? 1 : 0
+    case 'type': return (depTypes.get(dep.dependencyKey) ?? depTypes.get(dep.packageName)) === 'dev' ? 1 : 0
     case 'current': return dep.currentVersion
     case 'latest': return dep.latestVersion
     case 'downloads': return dep.npmMeta?.weeklyDownloads ?? 0
     case 'updated': return dep.npmMeta?.lastPublish ? new Date(dep.npmMeta.lastPublish).getTime() : 0
-    case 'cves': return dep.cveCount
-    case 'grade': return dep.score
+    case 'cves': return dep.cveCount ?? -1
+    case 'grade': return dep.score ?? -1
     default: return 0
   }
 }
@@ -83,7 +83,7 @@ export function DepsTable({ deps, depTypes, onSelectDep, className }: DepsTableP
   const filteredDeps = useMemo(() => {
     let result = deps
     if (!showDev) {
-      result = result.filter(d => depTypes.get(d.packageName) !== 'dev')
+      result = result.filter(d => (depTypes.get(d.dependencyKey) ?? depTypes.get(d.packageName)) !== 'dev')
     }
     if (search.trim()) {
       const q = search.toLowerCase()
@@ -181,10 +181,10 @@ export function DepsTable({ deps, depTypes, onSelectDep, className }: DepsTableP
           </thead>
           <tbody>
             {sortedDeps.map(dep => {
-              const depType = depTypes.get(dep.packageName) ?? 'production'
+              const depType = depTypes.get(dep.dependencyKey) ?? depTypes.get(dep.packageName) ?? 'production'
               return (
                 <tr
-                  key={dep.packageName}
+                  key={dep.dependencyKey}
                   className={cn(
                     'cursor-pointer border-b transition-colors hover:bg-muted/50',
                     dep.isOutdated && 'bg-amber-500/3',
@@ -212,16 +212,25 @@ export function DepsTable({ deps, depTypes, onSelectDep, className }: DepsTableP
                       {depType === 'dev' ? 'dev' : 'prod'}
                     </Badge>
                   </td>
-                  {/* Installed version */}
+                  {/* Exact installed version or unresolved manifest range */}
                   <td className="px-3 py-2 font-mono text-xs tabular-nums">
-                    {dep.currentVersion}
+                    <span>{dep.currentVersion}</span>
+                    {dep.versionSource === 'manifest' && (
+                      <Badge
+                        variant="secondary"
+                        className="ml-1.5 px-1 py-0 font-sans text-[9px]"
+                        title="Exact installed version is unknown; showing the manifest range"
+                      >
+                        range
+                      </Badge>
+                    )}
                   </td>
                   {/* Latest version */}
                   <td className="px-3 py-2 font-mono text-xs tabular-nums">
                     <span className={cn(dep.isOutdated && 'text-amber-500')}>
                       {dep.latestVersion}
                     </span>
-                    {dep.outdatedType === 'major' && (
+                    {dep.outdatedStatus !== 'unknown' && dep.outdatedType === 'major' && (
                       <span className="ml-1 text-[10px] text-red-400">major</span>
                     )}
                   </td>
@@ -243,11 +252,19 @@ export function DepsTable({ deps, depTypes, onSelectDep, className }: DepsTableP
                   </td>
                   {/* Updated */}
                   <td className="px-3 py-2 text-xs text-muted-foreground">
-                    {dep.npmMeta ? relativeTime(dep.npmMeta.lastPublish) : '—'}
+                    {dep.npmMeta?.lastPublish ? relativeTime(dep.npmMeta.lastPublish) : '—'}
                   </td>
                   {/* CVEs */}
                   <td className="px-3 py-2">
-                    {dep.cveCount > 0 ? (
+                    {dep.cveCount == null ? (
+                      <span
+                        className="text-xs font-medium text-muted-foreground"
+                        aria-label="CVE status unknown"
+                        title="CVE status is unknown because an exact version was not evaluated"
+                      >
+                        ?
+                      </span>
+                    ) : dep.cveCount > 0 ? (
                       <Badge variant="destructive" className="text-[10px] px-1.5 py-0">
                         {dep.cveCount}
                       </Badge>

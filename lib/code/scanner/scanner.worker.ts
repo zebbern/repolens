@@ -24,6 +24,7 @@ async function handleScan(request: Extract<ScanWorkerRequest, { type: 'scan' }>)
     if (request.storeKey) {
       const store = new IDBContentStore(request.storeKey, undefined, { kind: 'disabled' })
       store.registerPaths(codeIndex.files.keys())
+      if (request.contentOverlay) store.applySessionOverlay(request.contentOverlay)
       codeIndex.contentStore = store
     }
 

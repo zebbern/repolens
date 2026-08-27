@@ -34,7 +34,7 @@ const PARSER_PLUGINS: ParserPlugin[] = [
 // AST Cache
 // ---------------------------------------------------------------------------
 
-const astCache = new Map<string, { contentLen: number; ast: ParseResult<File> | null }>()
+const astCache = new Map<string, ParseResult<File> | null>()
 
 /** Maximum number of entries in the AST cache before evicting oldest */
 const AST_CACHE_MAX_SIZE = 500
@@ -42,6 +42,31 @@ const AST_CACHE_MAX_SIZE = 500
 /** Clear the AST cache. Exported for testing purposes. */
 export function clearASTCache(): void {
   astCache.clear()
+}
+
+/** Stable 128-bit content identity for the in-memory AST cache. */
+function stableContentHash(content: string): string {
+  let h1 = 0x6a09e667 ^ content.length
+  let h2 = 0xbb67ae85 ^ content.length
+  let h3 = 0x3c6ef372 ^ content.length
+  let h4 = 0xa54ff53a ^ content.length
+
+  for (let index = 0; index < content.length; index++) {
+    const code = content.charCodeAt(index)
+    h1 = Math.imul(h1 ^ code, 0x85ebca6b)
+    h2 = Math.imul(h2 ^ code, 0xc2b2ae35)
+    h3 = Math.imul(h3 ^ code, 0x27d4eb2f)
+    h4 = Math.imul(h4 ^ code, 0x165667b1)
+  }
+
+  h1 = Math.imul(h1 ^ (h1 >>> 16), 0x85ebca6b) ^ Math.imul(h2 ^ (h2 >>> 13), 0xc2b2ae35)
+  h2 = Math.imul(h2 ^ (h2 >>> 16), 0x85ebca6b) ^ Math.imul(h3 ^ (h3 >>> 13), 0xc2b2ae35)
+  h3 = Math.imul(h3 ^ (h3 >>> 16), 0x85ebca6b) ^ Math.imul(h4 ^ (h4 >>> 13), 0xc2b2ae35)
+  h4 = Math.imul(h4 ^ (h4 >>> 16), 0x85ebca6b) ^ Math.imul(h1 ^ (h1 >>> 13), 0xc2b2ae35)
+
+  return [h1, h2, h3, h4]
+    .map(value => (value >>> 0).toString(16).padStart(8, '0'))
+    .join('')
 }
 
 // ---------------------------------------------------------------------------
@@ -86,9 +111,9 @@ export function getAST(file: IndexedFile): ParseResult<File> | null {
   if (file.lineCount > MAX_LINE_COUNT) return null
   if (!file.content) return null
   const content = file.content
+  const cacheKey = `${lang}:${content.length}:${stableContentHash(content)}`
 
-  const cached = astCache.get(file.path)
-  if (cached && cached.contentLen === content.length) return cached.ast
+  if (astCache.has(cacheKey)) return astCache.get(cacheKey) ?? null
 
   const ast = parseFileAST(content, lang)
   // Evict oldest entry if cache is full (FIFO approximation)
@@ -96,7 +121,7 @@ export function getAST(file: IndexedFile): ParseResult<File> | null {
     const oldestKey = astCache.keys().next().value
     if (oldestKey !== undefined) astCache.delete(oldestKey)
   }
-  astCache.set(file.path, { contentLen: content.length, ast })
+  astCache.set(cacheKey, ast)
   return ast
 }
 

@@ -54,8 +54,8 @@ export type {
 export { scoreIssue, scoreProject, getRiskBand, getRiskDistribution, buildCvssVector } from './scanner'
 
 // --- CVE lookup ---
-export { lookupCves, lookupCvesForPackage, parseDependencies, clearCveCache, queryOSV, mapSeverity } from './scanner'
-export type { CveResult, CveLookupResult, PackageDependency } from './scanner'
+export { lookupCves, lookupCvesForPackage, parseDependencies, parseDependenciesAsyncWithCoverage, clearCveCache, queryOSV, mapSeverity } from './scanner'
+export type { CveResult, CveLookupResult, PackageDependency, DependencyManifestStatus, DependencyManifestResult, DependencyParseCoverage, DependencyParseResult } from './scanner'
 
 // --- AI validation ---
 export { validateFinding, validateBatch, buildValidationPrompt, parseValidationResponse, getCodeContext, clearValidationCache, getCachedResult, scrubSecrets } from './scanner'

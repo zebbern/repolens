@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { render, screen, within } from '@testing-library/react'
+import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { DepsTable } from '../deps-table'
 import type { DependencyHealth, NpmPackageMeta } from '@/lib/deps/types'
@@ -45,8 +45,12 @@ function makeDep(
   overrides: Partial<DependencyHealth> = {},
 ): DependencyHealth {
   return {
+    dependencyKey: `${name}@1.0.0`,
     packageName: name,
     currentVersion: '1.0.0',
+    requestedRange: '^1.0.0',
+    installedVersion: '1.0.0',
+    versionSource: 'lockfile',
     latestVersion: '2.0.0',
     npmMeta: makeMeta(name),
     isOutdated: true,
@@ -80,7 +84,7 @@ describe('DepsTable', () => {
       />,
     )
 
-    const expectedHeaders = ['Package', 'Type', 'Installed', 'Latest', 'Downloads', 'Updated', 'CVEs', 'Grade']
+    const expectedHeaders = ['Package', 'Type', 'Version', 'Latest', 'Downloads', 'Updated', 'Vuln. occurrences', 'Grade']
     for (const header of expectedHeaders) {
       expect(screen.getByText(header)).toBeInTheDocument()
     }
@@ -245,5 +249,48 @@ describe('DepsTable', () => {
     )
 
     expect(screen.getByText('3 of 3')).toBeInTheDocument()
+  })
+
+  it('labels an unresolved manifest range and shows unknown CVE status', () => {
+    render(
+      <DepsTable
+        deps={[makeDep('react', {
+          dependencyKey: 'react@range:^19.0.0',
+          currentVersion: '^19.0.0',
+          requestedRange: '^19.0.0',
+          installedVersion: null,
+          versionSource: 'manifest',
+          cveCount: null,
+          score: null,
+          grade: null,
+        })]}
+        depTypes={new Map([['react@range:^19.0.0', 'production']])}
+        onSelectDep={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByText('range')).toBeInTheDocument()
+    expect(screen.getByLabelText('CVE status unknown')).toHaveTextContent('?')
+    expect(screen.getByLabelText('Health grade: unknown')).toHaveTextContent('?')
+  })
+
+  it('renders distinct installed versions of the same package as separate rows', () => {
+    render(
+      <DepsTable
+        deps={[
+          makeDep('react', { dependencyKey: 'react@18.3.1', currentVersion: '18.3.1', installedVersion: '18.3.1' }),
+          makeDep('react', { dependencyKey: 'react@19.1.1', currentVersion: '19.1.1', installedVersion: '19.1.1' }),
+        ]}
+        depTypes={new Map([
+          ['react@18.3.1', 'production'],
+          ['react@19.1.1', 'production'],
+        ])}
+        onSelectDep={vi.fn()}
+      />,
+    )
+
+    expect(screen.getAllByText('react')).toHaveLength(2)
+    expect(screen.getByText('18.3.1')).toBeInTheDocument()
+    expect(screen.getByText('19.1.1')).toBeInTheDocument()
   })
 })

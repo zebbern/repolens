@@ -20,7 +20,7 @@ export interface ScanFailure {
 }
 
 export interface ScanDiagnostics {
-  engines: Partial<Record<ScanEngine, 'completed' | 'not-applicable' | 'skipped' | 'failed'>>
+  engines: Partial<Record<ScanEngine, 'completed' | 'partial' | 'not-applicable' | 'skipped' | 'failed'>>
   failures: ScanFailure[]
 }
 
@@ -125,7 +125,7 @@ export interface ScanResults {
   issuesPerKloc: number
   /** True when only a subset of files were scanned (differential scan) */
   isPartialScan: boolean
-  /** Number of files with content not yet loaded (content === ''). */
+  /** Number of files whose content is absent and has not been loaded. */
   unscannedFileCount?: number
   /** True when only metadata-only rules were evaluated (no content parsing). */
   isMetadataOnly?: boolean

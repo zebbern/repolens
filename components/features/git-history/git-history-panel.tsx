@@ -1,9 +1,10 @@
 "use client"
 
-import { useEffect, useCallback, useState } from "react"
+import { useEffect, useCallback, useRef, useState } from "react"
 import { GitCommitHorizontal, History, FileText, AlertCircle, X, RefreshCw, Loader2, Info, Lock, BarChart3 } from "lucide-react"
 import { useSession } from "next-auth/react"
 import { useApp, useRepositoryData, useRepositoryActions } from "@/providers"
+import type { RepositorySession } from "@/providers/repository-provider"
 import { useGitHistory, type GitHistoryView } from "@/hooks/use-git-history"
 import { fetchFileViaProxy } from "@/lib/github/client"
 import { Button } from "@/components/ui/button"
@@ -75,6 +76,7 @@ export function GitHistoryPanel({ navigateToFile }: GitHistoryPanelProps) {
   // File content for blame view
   const [fileContent, setFileContent] = useState<string>('')
   const [isLoadingFile, setIsLoadingFile] = useState(false)
+  const loadingCommitsSessionRef = useRef<RepositorySession | null>(null)
 
   // Determine the active file (prop override or from app state)
   const activeFile = navigateToFile ?? selectedFilePath
@@ -93,21 +95,26 @@ export function GitHistoryPanel({ navigateToFile }: GitHistoryPanelProps) {
 
   // Auto-load commits when timeline view is first loaded
   useEffect(() => {
-    let cancelled = false
     const requestSession = repositorySession
     if (!owner || !name || !isRepositorySessionCurrent(requestSession)) return
-    if ((viewMode === 'timeline' || viewMode === 'insights') && commits.length === 0 && !isLoading) {
+    if (
+      (viewMode === 'timeline' || viewMode === 'insights')
+      && commitsSession !== repositorySession
+      && loadingCommitsSessionRef.current !== repositorySession
+    ) {
       const cached = getTabCache<{ commits: typeof commits; hasMore: boolean }>('gitHistory')
       if (cached && cached.commits.length > 0) {
         if (isRepositorySessionCurrent(requestSession)) hydrateCommits(cached)
         return
       }
-      fetchCommits(owner, name).then(() => {
-        if (cancelled) return
+      loadingCommitsSessionRef.current = requestSession
+      void fetchCommits(owner, name).finally(() => {
+        if (loadingCommitsSessionRef.current === requestSession) {
+          loadingCommitsSessionRef.current = null
+        }
       })
     }
-    return () => { cancelled = true }
-  }, [owner, name, viewMode, repositorySession]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [owner, name, viewMode, commitsSession, repositorySession]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Cache commits when they change
   useEffect(() => {

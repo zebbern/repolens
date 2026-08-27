@@ -6,13 +6,14 @@ import userEvent from '@testing-library/user-event'
 const mockSetAPIKey = vi.fn()
 const mockValidateAPIKey = vi.fn().mockResolvedValue(undefined)
 const mockRemoveAPIKey = vi.fn()
+let mockAnthropicKey = 'sk-ant-test-key'
 
 vi.mock('@/providers/api-keys-provider', () => ({
   useAPIKeys: () => ({
     apiKeys: {
       openai: { key: '', isValid: null },
       google: { key: '', isValid: null },
-      anthropic: { key: 'sk-ant-test-key', isValid: true },
+      anthropic: { key: mockAnthropicKey, isValid: true },
       openrouter: { key: 'sk-or-invalid', isValid: false },
     },
     models: [
@@ -36,6 +37,7 @@ import { APIKeyInput } from '../api-key-input'
 describe('APIKeyInput', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mockAnthropicKey = 'sk-ant-test-key'
   })
 
   it('renders the API Key label', () => {
@@ -58,6 +60,15 @@ describe('APIKeyInput', () => {
   it('renders "Test" button', () => {
     render(<APIKeyInput provider="openai" />)
     expect(screen.getByRole('button', { name: /test/i })).toBeInTheDocument()
+  })
+
+  it('validates the current key when Enter submits the key form', async () => {
+    const user = userEvent.setup()
+    render(<APIKeyInput provider="anthropic" />)
+
+    await user.type(screen.getByLabelText('API Key'), '{Enter}')
+
+    expect(mockValidateAPIKey).toHaveBeenCalledWith('anthropic')
   })
 
   it('disables Test button when no key is entered', () => {
@@ -88,6 +99,20 @@ describe('APIKeyInput', () => {
     await act(async () => finishValidation())
   })
 
+  it('clears local validation loading when the key changes', async () => {
+    let finishValidation!: () => void
+    mockValidateAPIKey.mockImplementationOnce(() => new Promise<void>(resolve => { finishValidation = resolve }))
+    const user = userEvent.setup()
+    const view = render(<APIKeyInput provider="anthropic" />)
+
+    await user.click(screen.getByRole('button', { name: 'Test' }))
+    expect(screen.getByRole('button', { name: 'Test' })).toBeDisabled()
+    mockAnthropicKey = 'sk-ant-new-key'
+    view.rerender(<APIKeyInput provider="anthropic" />)
+    expect(screen.getByRole('button', { name: 'Test' })).toBeEnabled()
+    await act(async () => finishValidation())
+  })
+
   it('renders available models when key is valid', () => {
     render(<APIKeyInput provider="anthropic" />)
     expect(screen.getByText('Available Models')).toBeInTheDocument()
@@ -104,14 +129,7 @@ describe('APIKeyInput', () => {
     const user = userEvent.setup()
     render(<APIKeyInput provider="anthropic" />)
 
-    // Find the trash/remove button
-    const removeBtn = screen.getAllByRole('button').find(
-      btn => !btn.textContent?.includes('Test')
-    )
-    // The trash button is among the buttons — click the last non-Test, non-eye button
-    const buttons = screen.getAllByRole('button')
-    const trashBtn = buttons[buttons.length - 1]
-    await user.click(trashBtn)
+    await user.click(screen.getByRole('button', { name: 'Remove Anthropic API key' }))
 
     expect(mockRemoveAPIKey).toHaveBeenCalledWith('anthropic')
   })

@@ -1,5 +1,7 @@
-import { describe, it, expect, beforeEach } from 'vitest'
-import { IDBFactory, IDBKeyRange } from 'fake-indexeddb'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { IDBDatabase as FakeIDBDatabase, IDBFactory, IDBKeyRange } from 'fake-indexeddb'
+import { installFakeWebLocks } from './fake-web-lock-manager'
+import { withCacheMutationLock } from '../cache-mutation-lock'
 import {
   getToursByRepo,
   getTour,
@@ -39,8 +41,31 @@ function makeTour(overrides: Partial<Tour> = {}): Tour {
     ],
     createdAt: Date.now(),
     updatedAt: Date.now(),
+    visibility: 'public',
     ...overrides,
   }
+}
+
+async function removeTourPrincipal(id: string): Promise<void> {
+  const db = await new Promise<IDBDatabase>((resolve, reject) => {
+    const request = indexedDB.open('repolens-cache', 2)
+    request.onsuccess = () => resolve(request.result)
+    request.onerror = () => reject(request.error)
+  })
+  await new Promise<void>((resolve, reject) => {
+    const tx = db.transaction('tours', 'readwrite')
+    const store = tx.objectStore('tours')
+    const request = store.get(id)
+    request.onsuccess = () => {
+      const record = request.result as Record<string, unknown>
+      delete record.principal
+      store.put(record)
+    }
+    request.onerror = () => reject(request.error)
+    tx.oncomplete = () => resolve()
+    tx.onerror = () => reject(tx.error)
+  })
+  db.close()
 }
 
 // ---------------------------------------------------------------------------
@@ -53,6 +78,7 @@ describe('tour-cache (IndexedDB)', () => {
     _resetDBConnection()
     globalThis.indexedDB = new IDBFactory()
     globalThis.IDBKeyRange = IDBKeyRange
+    installFakeWebLocks()
   })
 
   // -----------------------------------------------------------------------
@@ -75,6 +101,39 @@ describe('tour-cache (IndexedDB)', () => {
   it('getTour returns null for non-existent id', async () => {
     const result = await getTour('nonexistent')
     expect(result).toBeNull()
+  })
+
+  it('only returns a private tour to the principal that saved it', async () => {
+    const tour = makeTour({ id: 'private-tour', visibility: 'private' })
+    await saveTour(tour, { principal: 'oauth:account-a' })
+
+    await expect(getTour('private-tour', { principal: 'oauth:account-a' })).resolves.toMatchObject({
+      id: 'private-tour',
+      principal: 'oauth:account-a',
+    })
+    await expect(getTour('private-tour', { principal: 'oauth:account-b' })).resolves.toBeNull()
+    await expect(getTour('private-tour', { principal: null })).resolves.toBeNull()
+  })
+
+  it('hides a private tour whose stored principal is missing', async () => {
+    await saveTour(makeTour({ id: 'orphaned-private-tour', visibility: 'private' }), { principal: 'oauth:account-a' })
+    await removeTourPrincipal('orphaned-private-tour')
+
+    await expect(getTour('orphaned-private-tour', { principal: 'oauth:account-a' })).resolves.toBeNull()
+    await expect(getToursByRepo('owner/repo', { principal: 'oauth:account-a' })).resolves.toEqual([])
+  })
+
+  it('lists public tours and only principal-owned private tours', async () => {
+    await saveTour(makeTour({ id: 'public-tour', visibility: 'public' }))
+    await saveTour(makeTour({ id: 'private-tour', visibility: 'private' }), { principal: 'pat:account-a' })
+
+    await expect(getToursByRepo('owner/repo', { principal: 'pat:account-b' })).resolves.toEqual([
+      expect.objectContaining({ id: 'public-tour', visibility: 'public' }),
+    ])
+    await expect(getToursByRepo('owner/repo', { principal: 'pat:account-a' })).resolves.toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'public-tour', visibility: 'public' }),
+      expect.objectContaining({ id: 'private-tour', visibility: 'private', principal: 'pat:account-a' }),
+    ]))
   })
 
   // -----------------------------------------------------------------------
@@ -135,6 +194,51 @@ describe('tour-cache (IndexedDB)', () => {
     const retrieved = await getTour('ts-test')
     // saveTour uses Date.now() internally, so updatedAt should be recent
     expect(retrieved!.updatedAt).toBeGreaterThan(1000)
+  })
+
+  it('waits for the shared cache mutation lock before writing', async () => {
+    let release!: () => void
+    let entered!: () => void
+    const lockEntered = new Promise<void>(resolve => { entered = resolve })
+    const lockRelease = new Promise<void>(resolve => { release = resolve })
+    const holder = withCacheMutationLock(undefined, async () => {
+      entered()
+      await lockRelease
+    })
+    await lockEntered
+
+    let settled = false
+    const write = saveTour(makeTour({ id: 'lock-wait' })).finally(() => { settled = true })
+    await Promise.resolve()
+    expect(settled).toBe(false)
+
+    release()
+    await Promise.all([holder, write])
+    await expect(getTour('lock-wait')).resolves.toMatchObject({ id: 'lock-wait' })
+  })
+
+  it('rejects when a write transaction aborts', async () => {
+    const original = FakeIDBDatabase.prototype.transaction
+    const transaction = vi.spyOn(FakeIDBDatabase.prototype, 'transaction').mockImplementation(function (this: InstanceType<typeof FakeIDBDatabase>, ...args) {
+      const tx = original.apply(this, args as never)
+      if (args[1] === 'readwrite') queueMicrotask(() => tx.abort())
+      return tx
+    } as typeof FakeIDBDatabase.prototype.transaction)
+
+    await expect(saveTour(makeTour({ id: 'aborted-write' }))).rejects.toBeInstanceOf(DOMException)
+    transaction.mockRestore()
+  })
+
+  it('rejects when a transaction reports an error without aborting', async () => {
+    const original = FakeIDBDatabase.prototype.transaction
+    const transaction = vi.spyOn(FakeIDBDatabase.prototype, 'transaction').mockImplementation(function (this: InstanceType<typeof FakeIDBDatabase>, ...args) {
+      const tx = original.apply(this, args as never)
+      if (args[1] === 'readwrite') queueMicrotask(() => tx.onerror?.(new Event('error')))
+      return tx
+    } as typeof FakeIDBDatabase.prototype.transaction)
+
+    await expect(saveTour(makeTour({ id: 'errored-write' }))).rejects.toThrow('Transaction failed')
+    transaction.mockRestore()
   })
 
   // -----------------------------------------------------------------------
@@ -203,23 +307,23 @@ describe('tour-cache (IndexedDB)', () => {
     expect(result).toBeNull()
   })
 
-  it('saveTour does not throw when indexedDB.open throws', async () => {
+  it('rejects when indexedDB.open throws', async () => {
     globalThis.indexedDB = {
       open: () => {
         throw new Error('IndexedDB unavailable')
       },
     } as unknown as IDBFactory
 
-    await expect(saveTour(makeTour())).resolves.toBeUndefined()
+    await expect(saveTour(makeTour())).rejects.toThrow('IndexedDB unavailable')
   })
 
-  it('deleteTour does not throw when indexedDB.open throws', async () => {
+  it('rejects when deleting and indexedDB.open throws', async () => {
     globalThis.indexedDB = {
       open: () => {
         throw new Error('IndexedDB unavailable')
       },
     } as unknown as IDBFactory
 
-    await expect(deleteTour('some-id')).resolves.toBeUndefined()
+    await expect(deleteTour('some-id')).rejects.toThrow('IndexedDB unavailable')
   })
 })

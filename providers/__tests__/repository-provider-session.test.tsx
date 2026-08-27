@@ -43,10 +43,11 @@ vi.mock('sonner', () => ({
 
 import { getCachedRepo, withHydratedCachedRepo } from '@/lib/cache/repo-cache'
 import { batchIndexFiles, batchIndexMetadataOnly, createEmptyIndex, createEmptyIndexWithStore } from '@/lib/code/code-index'
-import { IDBContentStore, InMemoryContentStore } from '@/lib/code/content-store'
+import { IDBContentStore } from '@/lib/code/content-store'
 import { fetchFileViaProxy, fetchRepoViaProxy, fetchTreeViaProxy } from '@/lib/github/client'
 import { startIndexing } from '@/lib/github/indexing-pipeline'
 import { RepositoryProvider, useRepository } from '../repository-provider'
+import { PRIVATE_REPOSITORY_ACCESS_REVOKED_EVENT } from '@/lib/auth/credential-events'
 
 interface Deferred<T> {
   promise: Promise<T>
@@ -203,6 +204,62 @@ describe('RepositoryProvider connection isolation', () => {
     await expect(connection).resolves.toBe(false)
   })
 
+  it('aborts a repository connection when credentials are revoked before metadata resolves', async () => {
+    const pendingRepo = deferred<GitHubRepo>()
+    vi.mocked(fetchRepoViaProxy).mockImplementation(() => pendingRepo.promise)
+
+    const { result } = renderHook(() => useRepository(), { wrapper })
+    let connection!: Promise<boolean>
+    act(() => {
+      connection = result.current.connectRepository('https://github.com/acme/private')
+    })
+    const signal = vi.mocked(fetchRepoViaProxy).mock.calls[0][2]?.signal
+    expect(signal?.aborted).toBe(false)
+
+    act(() => window.dispatchEvent(new Event(PRIVATE_REPOSITORY_ACCESS_REVOKED_EVENT)))
+
+    expect(signal?.aborted).toBe(true)
+    await act(async () => {
+      pendingRepo.resolve({ ...repo('private'), isPrivate: true })
+      await expect(connection).resolves.toBe(false)
+    })
+    expect(fetchTreeViaProxy).not.toHaveBeenCalled()
+    expect(result.current.repo).toBeNull()
+  })
+
+  it('disconnects an active private repository when credentials are revoked', async () => {
+    vi.mocked(fetchRepoViaProxy).mockResolvedValue({ ...repo('private'), isPrivate: true })
+    vi.mocked(fetchTreeViaProxy).mockResolvedValue(tree('private'))
+
+    const { result } = renderHook(() => useRepository(), { wrapper })
+    await act(async () => {
+      await result.current.connectRepository('https://github.com/acme/private')
+    })
+    expect(result.current.repo?.isPrivate).toBe(true)
+
+    act(() => window.dispatchEvent(new Event(PRIVATE_REPOSITORY_ACCESS_REVOKED_EVENT)))
+
+    expect(result.current.repo).toBeNull()
+    expect(result.current.files).toEqual([])
+  })
+
+  it('keeps an established public repository when credentials are revoked', async () => {
+    vi.mocked(fetchRepoViaProxy).mockResolvedValue(repo('public'))
+    vi.mocked(fetchTreeViaProxy).mockResolvedValue(tree('public'))
+
+    const { result } = renderHook(() => useRepository(), { wrapper })
+    await act(async () => {
+      await result.current.connectRepository('https://github.com/acme/public')
+    })
+    const signal = vi.mocked(fetchRepoViaProxy).mock.calls[0][2]?.signal
+
+    act(() => window.dispatchEvent(new Event(PRIVATE_REPOSITORY_ACCESS_REVOKED_EVENT)))
+
+    expect(signal?.aborted).toBe(false)
+    expect(result.current.repo?.fullName).toBe('acme/public')
+    expect(result.current.files.map(file => file.path)).toEqual(['public.ts'])
+  })
+
   it('re-indexes a current partial tree instead of relabeling it from a same-SHA complete cache', async () => {
     vi.mocked(fetchRepoViaProxy).mockResolvedValue(repo('a'))
     vi.mocked(fetchTreeViaProxy).mockResolvedValue(partialTree('a'))
@@ -326,7 +383,7 @@ describe('RepositoryProvider connection isolation', () => {
     expect(startIndexing).not.toHaveBeenCalled()
   })
 
-  it('keeps virtual renames resident instead of mutating shared hydrated content', async () => {
+  it('exposes virtual rename source through the session store without mutating shared hydrated content', async () => {
     globalThis.indexedDB = new IDBFactory()
     globalThis.IDBKeyRange = IDBKeyRange
     vi.mocked(fetchRepoViaProxy).mockResolvedValue({ ...repo('a'), size: 60_000 })
@@ -358,10 +415,80 @@ describe('RepositoryProvider connection isolation', () => {
       await result.current.renameFiles([{ from: 'a.ts', to: 'renamed.ts' }])
     })
 
-    expect(result.current.codeIndex.contentStore).toBeInstanceOf(InMemoryContentStore)
+    expect(result.current.codeIndex.contentStore).toBeInstanceOf(IDBContentStore)
     expect(result.current.codeIndex.files.has('renamed.ts')).toBe(true)
+    expect(result.current.codeIndex.files.get('renamed.ts')?.content).toBe('published')
+    expect(await result.current.codeIndex.contentStore.get('a.ts')).toBeNull()
+    expect(await result.current.codeIndex.contentStore.get('renamed.ts')).toBe('published')
     expect(await shared.get('a.ts')).toBe('published')
     expect(await shared.get('renamed.ts')).toBeNull()
+
+    await act(async () => {
+      await result.current.renameFiles([{ from: 'renamed.ts', to: 'a.ts' }])
+    })
+
+    expect(result.current.codeIndex.files.has('a.ts')).toBe(true)
+    expect(result.current.codeIndex.files.has('renamed.ts')).toBe(false)
+    expect(await result.current.codeIndex.contentStore.get('a.ts')).toBe('published')
+    expect(await result.current.codeIndex.contentStore.get('renamed.ts')).toBeNull()
+    expect(await shared.get('a.ts')).toBe('published')
+    expect(await shared.get('renamed.ts')).toBeNull()
+  })
+
+  it('does not commit a pending IDB rename after switching repositories', async () => {
+    globalThis.indexedDB = new IDBFactory()
+    globalThis.IDBKeyRange = IDBKeyRange
+    const shared = new IDBContentStore('acme/a@a-sha')
+    shared.put('a.ts', 'published')
+    await shared.flush()
+    const cachedA = {
+      schemaVersion: 5 as const,
+      complete: true as const,
+      coverage: {
+        treeStatus: 'complete' as const,
+        supportedFiles: { discovered: 1, loaded: 1 },
+        failures: { count: 0, samples: [] },
+        failedSubtrees: { count: 0, samples: [] },
+        mode: 'full' as const,
+      },
+      key: 'acme/a', owner: 'acme', repo: 'a', sha: 'a-sha', timestamp: 1,
+      content: {
+        kind: 'idb' as const,
+        storeKey: 'acme/a@a-sha',
+        files: [{ path: 'a.ts', lineCount: 1 }],
+      },
+      tree: [{ name: 'a.ts', path: 'a.ts', type: 'file' as const }],
+    }
+    vi.mocked(getCachedRepo).mockImplementation(async (_owner, name) => (
+      name === 'a' ? cachedA : null
+    ))
+    vi.mocked(fetchRepoViaProxy).mockImplementation(async (_owner, name) => repo(name))
+    vi.mocked(fetchTreeViaProxy).mockImplementation(async (_owner, name) => tree(name))
+
+    const { result } = renderHook(() => useRepository(), { wrapper })
+    await act(async () => {
+      await result.current.connectRepository('https://github.com/acme/a')
+    })
+
+    const pendingRead = deferred<Map<string, string>>()
+    vi.spyOn(result.current.codeIndex.contentStore, 'getBatch').mockReturnValue(pendingRead.promise)
+    let rename!: Promise<number>
+    act(() => {
+      rename = result.current.renameFiles([{ from: 'a.ts', to: 'renamed.ts' }])
+    })
+    await act(flush)
+
+    await act(async () => {
+      await result.current.connectRepository('https://github.com/acme/b')
+    })
+    await act(async () => {
+      pendingRead.resolve(new Map([['a.ts', 'published']]))
+      await expect(rename).resolves.toBe(0)
+    })
+
+    expect(result.current.repo?.fullName).toBe('acme/b')
+    expect(result.current.files.map(file => file.path)).toEqual(['b.ts'])
+    expect(result.current.codeIndex.files.has('renamed.ts')).toBe(false)
   })
 
   it.each(['metadata', 'tree', 'cache'] as const)(

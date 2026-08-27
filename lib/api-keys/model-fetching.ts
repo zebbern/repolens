@@ -4,15 +4,21 @@ import type { AIProvider, ProviderModel, ModelResponseItem } from '@/types/types
 export async function fetchProviderModels(
   provider: AIProvider,
   apiKey: string,
+  options: { signal?: AbortSignal } = {},
 ): Promise<{ models: ProviderModel[]; isValid: boolean }> {
   const response = await fetch(`/api/models/${provider}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ apiKey }),
+    ...(options.signal && { signal: options.signal }),
   })
 
   if (!response.ok) {
-    return { models: [], isValid: false }
+    if (response.status === 401 || response.status === 403) {
+      return { models: [], isValid: false }
+    }
+
+    throw new Error(`Failed to fetch ${provider} models (${response.status})`)
   }
 
   const data = await response.json()
@@ -23,5 +29,5 @@ export async function fetchProviderModels(
     contextLength: m.contextLength,
   }))
 
-  return { models, isValid: models.length > 0 }
+  return { models, isValid: true }
 }

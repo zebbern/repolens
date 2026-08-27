@@ -1,36 +1,77 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useRef, useState, type FormEvent } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { useGitHubToken } from "@/providers/github-token-provider"
 import { Eye, EyeOff, ExternalLink, Check, X, Loader2, Trash2 } from "lucide-react"
+import { toast } from "sonner"
 
 export function GitHubTokenInput() {
   const { token, isValid, isValidating, username, scopes, setToken, validateToken, removeToken } =
     useGitHubToken()
   const [showToken, setShowToken] = useState(false)
   const [inputValue, setInputValue] = useState(token ?? "")
+  const isDirtyRef = useRef(false)
+  const previousTokenRef = useRef(token)
+
+  useEffect(() => {
+    if (token === previousTokenRef.current) return
+    previousTokenRef.current = token
+
+    let cancelled = false
+    queueMicrotask(() => {
+      if (cancelled) return
+      if (token === null) {
+        isDirtyRef.current = false
+        setInputValue("")
+      } else if (!isDirtyRef.current) {
+        setInputValue(token)
+      }
+    })
+
+    return () => {
+      cancelled = true
+    }
+  }, [token])
+
+  const reportRemovalFailure = (error: unknown) => {
+    toast.error(error instanceof Error ? error.message : "Failed to remove GitHub token")
+  }
 
   const commitToken = () => {
     const trimmed = inputValue.trim()
+    isDirtyRef.current = false
     if (trimmed) {
-      setToken(trimmed)
+      void Promise.resolve(setToken(trimmed)).catch(() => {})
     } else {
-      removeToken()
+      void removeToken().catch(reportRemovalFailure)
     }
   }
 
   const handleValidate = async () => {
-    commitToken()
-    if (!inputValue.trim()) return
-    await validateToken()
+    const trimmed = inputValue.trim()
+    if (!trimmed) return
+    isDirtyRef.current = false
+    try {
+      await setToken(trimmed)
+      await validateToken(trimmed)
+    } catch {
+      // The provider reports credential-transition cleanup failures.
+    }
+  }
+
+  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    void handleValidate()
   }
 
   const handleRemove = () => {
-    removeToken()
-    setInputValue("")
+    isDirtyRef.current = false
+    void removeToken()
+      .then(() => setInputValue(""))
+      .catch(reportRemovalFailure)
   }
 
   const getStatusIcon = () => {
@@ -42,7 +83,7 @@ export function GitHubTokenInput() {
 
   return (
     <div className="space-y-4">
-      <div className="space-y-2">
+      <form className="space-y-2" onSubmit={handleSubmit}>
         <div className="flex items-center justify-between">
           <Label htmlFor="github-token" className="text-text-secondary">
             Personal Access Token
@@ -62,11 +103,15 @@ export function GitHubTokenInput() {
           <div className="relative flex-1">
             <Input
               id="github-token"
+              name="github-token"
               type={showToken ? "text" : "password"}
+              autoComplete="off"
               value={inputValue}
-              onChange={(e) => setInputValue(e.target.value)}
+              onChange={(e) => {
+                isDirtyRef.current = true
+                setInputValue(e.target.value)
+              }}
               onBlur={() => commitToken()}
-              onKeyDown={(e) => { if (e.key === 'Enter') commitToken() }}
               placeholder="ghp_... or github_pat_..."
               className="pr-10 bg-foreground/5 border-foreground/10 text-text-primary placeholder:text-text-muted"
             />
@@ -83,8 +128,8 @@ export function GitHubTokenInput() {
           </div>
 
           <Button
-            onClick={handleValidate}
-            disabled={!token || isValidating}
+            type="submit"
+            disabled={!inputValue.trim() || isValidating}
             className="bg-primary text-primary-foreground hover:bg-primary/90"
           >
             {isValidating ? (
@@ -95,7 +140,7 @@ export function GitHubTokenInput() {
             ) : "Test"}
           </Button>
         </div>
-      </div>
+      </form>
 
       {/* Status */}
       {token && (
@@ -149,7 +194,7 @@ export function GitHubTokenInput() {
       <p className="text-xs text-text-muted">
         Your token is stored in this browser. RepoLens may send it through its server for validation, ZIP downloads, and some GitHub requests; other supported requests may go directly from your browser to GitHub.
         It enables private-repository access and higher API rate limits.
-        No scopes needed for public repos. Add the <code className="text-text-secondary">repo</code> scope for private repos.
+        For private repos, use a fine-grained, read-only token scoped to the specific repository with <code className="text-text-secondary">Contents: Read-only</code>.
       </p>
     </div>
   )

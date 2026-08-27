@@ -8,7 +8,7 @@ import { parseGitHubUrl } from "@/lib/github/parser"
 import { buildFileTree } from "@/lib/github/fetcher"
 import { fetchRepoViaProxy, fetchTreeViaProxy, fetchFileViaProxy } from "@/lib/github/client"
 import type { CodeIndex } from "@/lib/code/code-index"
-import { createEmptyIndex, hydrateCodeIndexContent, invalidateLinesCache } from '@/lib/code/code-index'
+import { createEmptyIndex, resolveFileContentBatches, invalidateLinesCache, recordResolvedFileLineCount } from '@/lib/code/code-index'
 import { buildTreeFromFiles, type FileRename } from '@/lib/code/rename-files'
 import { IDBContentStore, InMemoryContentStore, LazyContentStore } from '@/lib/code/content-store'
 import type { FetchQueue } from '@/lib/code/fetch-queue'
@@ -17,6 +17,7 @@ import { toast } from 'sonner'
 import { analyzeCodebase, type FullAnalysis } from "@/lib/code/import-parser"
 import { startIndexing as runIndexingPipeline } from "@/lib/github/indexing-pipeline"
 import { useGitHubToken } from "@/providers/github-token-provider"
+import { PRIVATE_REPOSITORY_ACCESS_REVOKED_EVENT, isPrivateRepositoryRevocation } from '@/lib/auth/credential-events'
 import {
   DEFAULT_SEARCH_STATE,
   DEFAULT_INDEXING_PROGRESS,
@@ -140,6 +141,8 @@ export function RepositoryProvider({ children }: { children: ReactNode }) {
   const [indexingProgress, setIndexingProgress] = useState<IndexingProgress>(DEFAULT_INDEXING_PROGRESS)
   const connectionEpochRef = useRef(0)
   const connectionAbortRef = useRef<AbortController | null>(null)
+  const pendingConnectionRef = useRef<AbortController | null>(null)
+  const repositoryPrivacyRef = useRef<boolean | null>(null)
   const repositorySessionRef = useRef<RepositorySession | null>(null)
   const [repositorySession, setRepositorySession] = useState<RepositorySession | null>(null)
   const [searchState, setSearchState] = useState<SearchState>(DEFAULT_SEARCH_STATE)
@@ -195,6 +198,8 @@ export function RepositoryProvider({ children }: { children: ReactNode }) {
     connectionEpochRef.current += 1
     connectionAbortRef.current?.abort()
     connectionAbortRef.current = null
+    pendingConnectionRef.current = null
+    repositoryPrivacyRef.current = null
     repositorySessionRef.current = null
   }, [])
 
@@ -297,6 +302,8 @@ export function RepositoryProvider({ children }: { children: ReactNode }) {
     connectionEpochRef.current = epoch
     const controller = new AbortController()
     connectionAbortRef.current = controller
+    pendingConnectionRef.current = controller
+    repositoryPrivacyRef.current = null
     const session = Object.freeze({ id: epoch, signal: controller.signal })
     repositorySessionRef.current = session
     setRepositorySession(session)
@@ -315,6 +322,7 @@ export function RepositoryProvider({ children }: { children: ReactNode }) {
       // Fetch repository metadata
       const repoData = await fetchRepoViaProxy(owner, repoName, { signal: controller.signal })
       if (!isCurrentConnection(epoch, controller)) return false
+      repositoryPrivacyRef.current = repoData.isPrivate
       setRepo(repoData)
 
       // Fetch file tree
@@ -377,6 +385,8 @@ export function RepositoryProvider({ children }: { children: ReactNode }) {
       setIsLoading(false)
       setLoadingStage('idle')
       return false
+    } finally {
+      if (pendingConnectionRef.current === controller) pendingConnectionRef.current = null
     }
   }, [githubToken, isCurrentConnection, resetRepositoryState, startIndexing])
 
@@ -384,10 +394,29 @@ export function RepositoryProvider({ children }: { children: ReactNode }) {
     connectionEpochRef.current += 1
     connectionAbortRef.current?.abort()
     connectionAbortRef.current = null
+    pendingConnectionRef.current = null
+    repositoryPrivacyRef.current = null
     repositorySessionRef.current = null
     setRepositorySession(null)
     resetRepositoryState({ isLoading: false, loadingStage: 'idle' })
   }, [resetRepositoryState])
+
+  useEffect(() => {
+    const handleCredentialRevocation = () => {
+      if (pendingConnectionRef.current || repositoryPrivacyRef.current === true) {
+        disconnectRepository()
+      }
+    }
+    const handleCrossTabRevocation = (event: StorageEvent) => {
+      if (isPrivateRepositoryRevocation(event)) handleCredentialRevocation()
+    }
+    window.addEventListener(PRIVATE_REPOSITORY_ACCESS_REVOKED_EVENT, handleCredentialRevocation)
+    window.addEventListener('storage', handleCrossTabRevocation)
+    return () => {
+      window.removeEventListener(PRIVATE_REPOSITORY_ACCESS_REVOKED_EVENT, handleCredentialRevocation)
+      window.removeEventListener('storage', handleCrossTabRevocation)
+    }
+  }, [disconnectRepository])
   
   const updateCodeIndex = useCallback((index: CodeIndex) => {
     const residentIndex = makeContentResident(index)
@@ -407,12 +436,7 @@ export function RepositoryProvider({ children }: { children: ReactNode }) {
     const existingFile = codeIndex?.files?.get(path)
     if (typeof existingFile?.content === 'string') return existingFile.content
 
-    // Check contentStore (covers IDB-backed repos)
-    const storedContent = await codeIndex.contentStore.get(path)
-    if (!requestIsCurrent()) return null
-    if (storedContent !== null) return storedContent
-
-    // Lazy repo: file exists in index with empty content — fetch on demand with critical priority
+    // Lazy repo: fetch on demand with critical priority before the generic store path.
     if (existingFile && codeIndex.contentStore instanceof LazyContentStore) {
       try {
         const fq = codeIndex.contentStore.getFetchQueue()
@@ -420,7 +444,7 @@ export function RepositoryProvider({ children }: { children: ReactNode }) {
         if (!requestIsCurrent()) return null
         // Update IndexedFile content in-place for subsequent sync access
         existingFile.content = content
-        existingFile.lineCount = content.split('\n').length
+        recordResolvedFileLineCount(codeIndex, path, content)
         invalidateLinesCache(existingFile)
         codeIndex.contentStore.put(path, content)
         return content
@@ -430,6 +454,11 @@ export function RepositoryProvider({ children }: { children: ReactNode }) {
         return null
       }
     }
+
+    // Check contentStore (covers IDB-backed repos).
+    const storedContent = await codeIndex.contentStore.get(path)
+    if (!requestIsCurrent()) return null
+    if (storedContent !== null) return storedContent
 
     if (!repo || controller === null) return null
 
@@ -444,7 +473,7 @@ export function RepositoryProvider({ children }: { children: ReactNode }) {
       if (!requestIsCurrent()) return null
       if (existingFile) {
         existingFile.content = content
-        existingFile.lineCount = content.split('\n').length
+        recordResolvedFileLineCount(codeIndex, path, content)
         invalidateLinesCache(existingFile)
         codeIndex.contentStore.put(path, content)
       }
@@ -498,15 +527,77 @@ export function RepositoryProvider({ children }: { children: ReactNode }) {
     const renameMap = new Map(renames.map(r => [r.from, r.to]))
     const basename = (p: string) => p.split('/').pop() || p
     const currentIndex = codeIndexRef.current
-    let residentIndex = makeContentResident(currentIndex)
-    if (currentIndex.contentStore instanceof IDBContentStore) {
-      const hydrated = await hydrateCodeIndexContent(currentIndex)
-      if (hydrated.missingPaths.length > 0) {
-        throw new Error(`Cannot rename files with missing content: ${hydrated.missingPaths.join(', ')}`)
+    const sourcePaths = renames.map(rename => rename.from)
+    const resolvedContent = new Map<string, string>()
+    const missingPaths: string[] = []
+
+    try {
+      if (currentIndex.contentStore instanceof LazyContentStore) {
+        for (const path of sourcePaths) {
+          const content = await currentIndex.contentStore.get(path)
+          if (!isCurrentConnection(epoch, controller)) return 0
+          if (content === null) missingPaths.push(path)
+          else resolvedContent.set(path, content)
+        }
+      } else {
+        for await (const batch of resolveFileContentBatches(currentIndex, sourcePaths, {
+          batchSize: 50,
+          signal: controller.signal,
+        })) {
+          if (!isCurrentConnection(epoch, controller)) return 0
+          for (const [path, content] of batch.contents) resolvedContent.set(path, content)
+          missingPaths.push(...batch.missingPaths)
+        }
       }
-      residentIndex = hydrated.index
+    } catch (error) {
+      if (!isCurrentConnection(epoch, controller)) return 0
+      throw error
     }
-    codeIndexRef.current = residentIndex
+
+    if (!isCurrentConnection(epoch, controller) || codeIndexRef.current !== currentIndex) return 0
+    if (missingPaths.length > 0) {
+      throw new Error(`Cannot rename files with missing content: ${missingPaths.join(', ')}`)
+    }
+
+    const snapshots = renames.map(({ from, to }) => ({
+      from,
+      to,
+      file: currentIndex.files.get(from),
+      meta: currentIndex.meta.get(from),
+      content: resolvedContent.get(from),
+    }))
+    const nextFiles = new Map(currentIndex.files)
+    const nextMeta = new Map(currentIndex.meta)
+    for (const { from } of snapshots) {
+      nextFiles.delete(from)
+      nextMeta.delete(from)
+    }
+    for (const { to, file, meta, content } of snapshots) {
+      if (file) nextFiles.set(to, { ...file, path: to, name: basename(to), content })
+      if (meta) nextMeta.set(to, { ...meta, path: to, name: basename(to) })
+    }
+
+    // Shared IDB cache entries are immutable. The renamed files carry a small
+    // session-local source overlay while all untouched files remain IDB-backed.
+    const store = currentIndex.contentStore
+    if (store instanceof IDBContentStore) {
+      store.applySessionOverlay({
+        deletedPaths: snapshots.map(({ from }) => from),
+        entries: snapshots.flatMap(({ to, content }) => (
+          content === undefined ? [] : [{ path: to, content }]
+        )),
+      })
+    } else {
+      for (const { from } of snapshots) store.delete(from)
+      for (const { to, content } of snapshots) {
+        if (content !== undefined) store.put(to, content)
+      }
+      await store.flush()
+      if (!isCurrentConnection(epoch, controller) || codeIndexRef.current !== currentIndex) return 0
+    }
+
+    const nextIndex = { ...currentIndex, files: nextFiles, meta: nextMeta }
+    codeIndexRef.current = nextIndex
 
     // 1. Rebuild the file tree (handles cross-directory moves).
     setFiles(prev => {
@@ -517,50 +608,19 @@ export function RepositoryProvider({ children }: { children: ReactNode }) {
       return buildTreeFromFiles(flat)
     })
 
-    // 2. Re-key the code index (files + metadata).
-    setCodeIndex(prev => {
-      const resident = prev === currentIndex ? residentIndex : makeContentResident(prev)
-      const newFiles = new Map(resident.files)
-      const newMeta = new Map(resident.meta)
-      for (const { from, to } of renames) {
-        const f = newFiles.get(from)
-        if (f) {
-          newFiles.delete(from)
-          newFiles.set(to, { ...f, path: to, name: basename(to) })
-        }
-        const m = newMeta.get(from)
-        if (m) {
-          newMeta.delete(from)
-          newMeta.set(to, m)
-        }
-      }
-      const next = { ...resident, files: newFiles, meta: newMeta }
-      codeIndexRef.current = next
-      return next
-    })
+    // 2. Publish the already-built index only after every async boundary above.
+    setCodeIndex(nextIndex)
 
-    // 3. Move cached content to the new keys (async for IDB-backed stores).
-    //    The content store instance is stable across index updates.
-    const store = codeIndexRef.current.contentStore
-    await Promise.all(renames.map(async ({ from, to }) => {
-      const content = codeIndexRef.current.files.get(from)?.content
-        ?? store.getSync(from)
-        ?? (await store.get(from))
-      if (!isCurrentConnection(epoch, controller)) return
-      if (content != null) store.put(to, content)
-      store.delete(from)
-    }))
-    if (!isCurrentConnection(epoch, controller)) return 0
-
-    // 4. Re-key exact-path maps (edits + parsed cache) and pins.
+    // 3. Re-key exact-path maps (edits + parsed cache) and pins.
     const rekeyExact = <T,>(prev: Map<string, T>): Map<string, T> => {
       if (prev.size === 0) return prev
       const next = new Map(prev)
-      for (const { from, to } of renames) {
-        if (next.has(from)) {
-          next.set(to, next.get(from)!)
-          next.delete(from)
-        }
+      const entries = renames
+        .filter(({ from }) => prev.has(from))
+        .map(({ from, to }) => ({ from, to, value: prev.get(from)! }))
+      for (const { from } of entries) next.delete(from)
+      for (const { to, value } of entries) {
+        next.set(to, value)
       }
       return next
     }
@@ -594,76 +654,86 @@ export function RepositoryProvider({ children }: { children: ReactNode }) {
 
   const getPinnedContents = useCallback(async (): Promise<PinnedContentsResult> => {
     const { MAX_SINGLE_FILE_BYTES, MAX_PINNED_BYTES } = PINNED_CONTEXT_CONFIG
-    const resolvedPaths = new Set<string>()
+    const requestedIndex = codeIndex
+    const orderedPaths = new Map<string, boolean>()
     const skipped: string[] = []
     let content = ''
-    let totalBytes = 0
+    let outputBytes = 0
     let fileCount = 0
+    const encoder = new TextEncoder()
 
-    // Collect all paths we need content for
-    const pathsToFetch: string[] = []
     for (const [, pin] of pinnedFiles) {
       if (pin.type === 'file') {
-        if (!resolvedPaths.has(pin.path)) {
-          resolvedPaths.add(pin.path)
-          pathsToFetch.push(pin.path)
-        }
+        orderedPaths.set(pin.path, true)
       } else {
         const prefix = pin.path.endsWith('/') ? pin.path : `${pin.path}/`
         for (const [filePath] of codeIndex.files) {
           if (!filePath.startsWith(prefix)) continue
-          if (!resolvedPaths.has(filePath)) {
-            resolvedPaths.add(filePath)
-            pathsToFetch.push(filePath)
-          }
+          if (!orderedPaths.has(filePath)) orderedPaths.set(filePath, false)
         }
       }
     }
 
-    // Batch-fetch all content at once
-    const contentMap = await codeIndex.contentStore.getBatch(pathsToFetch)
+    const paths = [...orderedPaths.keys()]
+    let exhaustedAt = -1
+    for (let offset = 0; offset < paths.length; offset += 20) {
+      const batchPaths = paths.slice(offset, offset + 20)
+      const contentMap = await requestedIndex.contentStore.getBatch(batchPaths)
+      if (codeIndexRef.current !== requestedIndex) {
+        throw new DOMException('Repository changed while resolving pinned content', 'AbortError')
+      }
 
-    // Assemble output in original pin order
-    resolvedPaths.clear()
-    for (const [, pin] of pinnedFiles) {
-      const addFile = (filePath: string) => {
-        if (resolvedPaths.has(filePath)) return
-        resolvedPaths.add(filePath)
-
-        const fileContent = contentMap.get(filePath)
-        if (fileContent === undefined) return
-
-        if (fileContent.length > MAX_SINGLE_FILE_BYTES) {
-          skipped.push(filePath)
-          return
+      for (let batchIndex = 0; batchIndex < batchPaths.length; batchIndex++) {
+        const filePath = batchPaths[batchIndex]
+        let fileContent = contentMap.get(filePath)
+        if (
+          fileContent === undefined
+          && orderedPaths.get(filePath)
+          && requestedIndex.contentStore instanceof LazyContentStore
+        ) {
+          fileContent = await requestedIndex.contentStore.get(filePath) ?? undefined
+          if (codeIndexRef.current !== requestedIndex) {
+            throw new DOMException('Repository changed while resolving pinned content', 'AbortError')
+          }
         }
-        if (totalBytes + fileContent.length > MAX_PINNED_BYTES) {
+
+        if (fileContent === undefined) {
           skipped.push(filePath)
-          return
+          continue
+        }
+        const fileBytes = encoder.encode(fileContent).byteLength
+        if (fileBytes > MAX_SINGLE_FILE_BYTES) {
+          skipped.push(filePath)
+          continue
         }
 
         const ext = filePath.split('.').pop() ?? ''
-        content += `### \`${filePath}\`\n\`\`\`${ext}\n${fileContent}\n\`\`\`\n\n`
-        totalBytes += fileContent.length
+        const section = `### \`${filePath}\`\n\`\`\`${ext}\n${fileContent}\n\`\`\`\n\n`
+        const sectionBytes = encoder.encode(section).byteLength
+        if (outputBytes + sectionBytes > MAX_PINNED_BYTES) {
+          exhaustedAt = offset + batchIndex
+          break
+        }
+
+        content += section
+        outputBytes += sectionBytes
         fileCount++
       }
+      if (exhaustedAt >= 0) break
+    }
 
-      if (pin.type === 'file') {
-        addFile(pin.path)
-      } else {
-        const prefix = pin.path.endsWith('/') ? pin.path : `${pin.path}/`
-        for (const [filePath] of codeIndex.files) {
-          if (filePath.startsWith(prefix)) addFile(filePath)
-        }
+    if (exhaustedAt >= 0) {
+      for (let index = exhaustedAt; index < paths.length; index++) {
+        if (!skipped.includes(paths[index])) skipped.push(paths[index])
       }
     }
 
-    return { content, fileCount, totalBytes, skipped }
+    return { content, fileCount, totalBytes: outputBytes, skipped }
   }, [pinnedFiles, codeIndex])
 
   // B5: Compute codebaseAnalysis once when indexing completes.
   // Lazy-tier repos (contentStore is a LazyContentStore, size >= LAZY_CONTENT_THRESHOLD_KB)
-  // have no in-memory or IDB content yet — every file's `content` is ''. Running
+  // have no in-memory or IDB content yet — every file's `content` is absent. Running
   // analyzeCodebase here would call getFileContent() for every file, which falls
   // through to LazyContentStore.get() and enqueues a real network fetch for the
   // entire repo the instant indexing reports isComplete, defeating the lazy tier.

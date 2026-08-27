@@ -16,6 +16,20 @@ interface ProvidersProps {
   children: ReactNode
 }
 
+function RepositoryScopedToursProvider({ children }: ProvidersProps) {
+  const { repo } = useRepositoryData()
+  const repoKey = repo?.fullName
+  const repoVisibility = repo ? (repo.isPrivate ? 'private' : 'public') : undefined
+
+  // Remounting on repository changes prevents any previous repository's tour
+  // state from appearing during the next render.
+  return (
+    <ToursProvider key={repoKey ?? 'no-repository'} repoKey={repoKey} repoVisibility={repoVisibility}>
+      {children}
+    </ToursProvider>
+  )
+}
+
 export function Providers({ children }: ProvidersProps) {
   return (
     <SessionProvider refetchOnWindowFocus={false}>
@@ -23,7 +37,7 @@ export function Providers({ children }: ProvidersProps) {
         <APIKeysProvider>
           <GitHubTokenProvider>
             <RepositoryProvider>
-              <ToursProvider>
+              <RepositoryScopedToursProvider>
                 <DocsProvider>
                   <ChangelogProvider>
                     <AppProvider>
@@ -32,7 +46,7 @@ export function Providers({ children }: ProvidersProps) {
                     </AppProvider>
                   </ChangelogProvider>
                 </DocsProvider>
-              </ToursProvider>
+              </RepositoryScopedToursProvider>
             </RepositoryProvider>
           </GitHubTokenProvider>
         </APIKeysProvider>

@@ -139,6 +139,8 @@ describe('useBatchOperations', () => {
     const sessionB = { id: 2, signal: new AbortController().signal }
     let current = sessionA
     let resolve!: (content: Map<string, string>) => void
+    const indexedFile = codeIndex.files.get('src/utils.ts')!
+    codeIndex.files.set('src/utils.ts', { ...indexedFile, content: undefined })
     codeIndex.contentStore.getBatch = vi.fn(() => new Promise<Map<string, string>>(done => { resolve = done }))
     const overrides: Record<string, unknown> = {
       repositorySession: sessionA,
@@ -171,6 +173,7 @@ describe('useBatchOperations', () => {
         setFixCache,
         setShowFix,
         setValidationResults,
+        repositoryKey: 'owner/repo',
         repositorySession: DEFAULT_SESSION,
         isRepositorySessionCurrent: session => session === DEFAULT_SESSION,
         ...overrides,
@@ -415,6 +418,10 @@ describe('useBatchOperations', () => {
       await act(async () => result.current.batchValidate([issue]))
 
       expect(validateFinding).toHaveBeenCalledWith(issue, '', expect.objectContaining({ apiKey: 'sk-test' }))
+      expect(validateFinding).toHaveBeenCalledWith(issue, '', expect.objectContaining({
+        repositoryKey: 'owner/repo',
+        repositorySessionId: '1',
+      }))
       expect(result.current.validationProgress.failed).toBe(0)
     })
 

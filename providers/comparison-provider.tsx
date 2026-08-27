@@ -5,6 +5,8 @@ import {
   useContext,
   useState,
   useCallback,
+  useRef,
+  useEffect,
   type ReactNode,
 } from "react"
 import type { FileNode } from "@/types/repository"
@@ -20,6 +22,10 @@ import { buildFileTree } from "@/lib/github/fetcher"
 import { flattenFiles } from "@/lib/code/code-index"
 import { toast } from "sonner"
 import { createRepositoryCoverage } from '@/lib/repository'
+import {
+  PRIVATE_REPOSITORY_ACCESS_REVOKED_EVENT,
+  isPrivateRepositoryRevocation,
+} from '@/lib/auth/credential-events'
 
 interface ComparisonContextType {
   repos: Map<string, ComparisonRepo>
@@ -93,6 +99,92 @@ function parseDependencies(content: string): RepoDependencies {
 
 export function ComparisonProvider({ children }: { children: ReactNode }) {
   const [repos, setRepos] = useState<Map<string, ComparisonRepo>>(new Map())
+  const reposRef = useRef(repos)
+  const operationsRef = useRef(new Map<string, { generation: number; controller: AbortController }>())
+  const generationRef = useRef(new Map<string, number>())
+
+  const commitRepos = useCallback((next: Map<string, ComparisonRepo>) => {
+    reposRef.current = next
+    setRepos(next)
+  }, [])
+
+  const invalidateOperation = useCallback((id: string) => {
+    const operation = operationsRef.current.get(id)
+    operation?.controller.abort()
+    operationsRef.current.delete(id)
+  }, [])
+
+  const beginOperation = useCallback((id: string) => {
+    const generation = (generationRef.current.get(id) ?? 0) + 1
+    generationRef.current.set(id, generation)
+    const operation = { generation, controller: new AbortController() }
+    operationsRef.current.set(id, operation)
+    return operation
+  }, [])
+
+  const loadRepo = useCallback(async (
+    id: string,
+    owner: string,
+    repoName: string,
+    operation: { generation: number; controller: AbortController },
+  ): Promise<boolean> => {
+    const isCurrent = () => operationsRef.current.get(id) === operation && reposRef.current.has(id)
+
+    try {
+      const signal = operation.controller.signal
+      const repoData = await fetchRepoViaProxy(owner, repoName, { signal })
+      if (!isCurrent()) return false
+
+      const indexing = new Map(reposRef.current)
+      const current = indexing.get(id)
+      if (current) indexing.set(id, { ...current, repo: repoData, status: "indexing", error: undefined })
+      commitRepos(indexing)
+
+      const tree = await fetchTreeViaProxy(repoData.owner, repoData.name, repoData.defaultBranch, { signal })
+      if (!isCurrent()) return false
+      const fileTree = buildFileTree(tree)
+      const coverage = createRepositoryCoverage(tree, repoData.size)
+      const metrics = computeMetrics(repoData, fileTree)
+
+      let dependencies: RepoDependencies | undefined
+      try {
+        const packageContent = await fetchFileViaProxy(
+          repoData.owner,
+          repoData.name,
+          repoData.defaultBranch,
+          "package.json",
+          { signal },
+        )
+        if (isCurrent()) dependencies = parseDependencies(packageContent)
+      } catch {
+        if (signal.aborted || !isCurrent()) return false
+      }
+
+      if (!isCurrent()) return false
+      const ready = new Map(reposRef.current)
+      ready.set(id, {
+        id,
+        repo: repoData,
+        files: fileTree,
+        metrics,
+        status: "ready",
+        dependencies,
+        treeItems: tree.tree,
+        coverage,
+      })
+      commitRepos(ready)
+      return true
+    } catch (err) {
+      if (operation.controller.signal.aborted || !isCurrent()) return false
+      const message = err instanceof Error ? err.message : "Failed to load repository"
+      const failed = new Map(reposRef.current)
+      const current = failed.get(id)
+      if (current) failed.set(id, { ...current, status: "error", error: message })
+      commitRepos(failed)
+      toast.error(`Failed to load ${id}: ${message}`)
+      return false
+    }
+  }, [commitRepos])
 
   const isAtCapacity = repos.size >= MAX_COMPARISON_REPOS
 
@@ -108,14 +200,15 @@ export function ComparisonProvider({ children }: { children: ReactNode }) {
       const { owner, repo: repoName } = parsed
       const id = `${owner}/${repoName}`.toLowerCase()
 
-      // Check duplicates
-      if (repos.has(id)) {
+      // Reserve the slot before the first await so concurrent additions cannot
+      // observe the same capacity and both enter the map.
+      if (reposRef.current.has(id)) {
         toast.error(`${id} is already loaded.`)
         return false
       }
 
       // Check capacity
-      if (repos.size >= MAX_COMPARISON_REPOS) {
+      if (reposRef.current.size >= MAX_COMPARISON_REPOS) {
         toast.error(
           `Maximum ${MAX_COMPARISON_REPOS} repos. Remove one first.`
         )
@@ -156,114 +249,78 @@ export function ComparisonProvider({ children }: { children: ReactNode }) {
         status: "loading",
       }
 
-      setRepos((prev) => new Map(prev).set(id, placeholder))
-
-      try {
-        // Fetch metadata
-        const repoData = await fetchRepoViaProxy(owner, repoName)
-
-        // Update status to indexing
-        setRepos((prev) => {
-          const next = new Map(prev)
-          const current = next.get(id)
-          if (current) {
-            next.set(id, { ...current, repo: repoData, status: "indexing" })
-          }
-          return next
-        })
-
-        // Fetch tree
-        const tree = await fetchTreeViaProxy(
-          repoData.owner,
-          repoData.name,
-          repoData.defaultBranch
-        )
-        const fileTree = buildFileTree(tree)
-        const coverage = createRepositoryCoverage(tree, repoData.size)
-
-        // Compute metrics from tree metadata
-        const metrics = computeMetrics(repoData, fileTree)
-
-        // Attempt to fetch package.json for dependency analysis
-        let dependencies: RepoDependencies | undefined
-        try {
-          const packageContent = await fetchFileViaProxy(
-            repoData.owner,
-            repoData.name,
-            repoData.defaultBranch,
-            "package.json"
-          )
-          dependencies = parseDependencies(packageContent)
-        } catch {
-          // No package.json or fetch failed — not an error, just skip
-        }
-
-        // Mark ready
-        setRepos((prev) => {
-          const next = new Map(prev)
-          next.set(id, {
-            id,
-            repo: repoData,
-            files: fileTree,
-            metrics,
-            status: "ready",
-            dependencies,
-            treeItems: tree.tree,
-            coverage,
-          })
-          return next
-        })
-
-        return true
-      } catch (err) {
-        const message =
-          err instanceof Error ? err.message : "Failed to load repository"
-
-        setRepos((prev) => {
-          const next = new Map(prev)
-          const current = next.get(id)
-          if (current) {
-            next.set(id, { ...current, status: "error", error: message })
-          }
-          return next
-        })
-
-        toast.error(`Failed to load ${id}: ${message}`)
-        return false
-      }
+      const operation = beginOperation(id)
+      commitRepos(new Map(reposRef.current).set(id, placeholder))
+      return loadRepo(id, owner, repoName, operation)
     },
-    [repos]
+    [beginOperation, commitRepos, loadRepo]
   )
 
   const removeRepo = useCallback((id: string) => {
-    setRepos((prev) => {
-      const next = new Map(prev)
-      next.delete(id)
-      return next
-    })
-  }, [])
+    invalidateOperation(id)
+    const next = new Map(reposRef.current)
+    next.delete(id)
+    commitRepos(next)
+  }, [commitRepos, invalidateOperation])
 
   const retryRepo = useCallback(
     async (id: string): Promise<boolean> => {
-      const existing = repos.get(id)
+      const existing = reposRef.current.get(id)
       if (!existing) return false
 
-      // Remove and re-add
-      removeRepo(id)
-      return addRepo(
-        `https://github.com/${existing.repo.owner}/${existing.repo.name}`
-      )
+      invalidateOperation(id)
+      const operation = beginOperation(id)
+      const retrying = new Map(reposRef.current)
+      retrying.set(id, { ...existing, status: "loading", error: undefined })
+      commitRepos(retrying)
+      return loadRepo(id, existing.repo.owner, existing.repo.name, operation)
     },
-    [repos, removeRepo, addRepo]
+    [beginOperation, commitRepos, invalidateOperation, loadRepo]
   )
 
   const clearAll = useCallback(() => {
-    setRepos(new Map())
+    for (const operation of operationsRef.current.values()) operation.controller.abort()
+    operationsRef.current.clear()
+    commitRepos(new Map())
+  }, [commitRepos])
+
+  const handleCredentialRevocation = useCallback(() => {
+    for (const operation of operationsRef.current.values()) operation.controller.abort()
+    operationsRef.current.clear()
+    generationRef.current.clear()
+
+    // A ready repository with explicit public metadata is safe to retain.
+    // Loading/indexing/error entries may still contain private data or lack
+    // enough metadata to classify them, so remove them on revocation.
+    const publicReady = new Map(
+      Array.from(reposRef.current).filter(([, entry]) => entry.status === 'ready' && !entry.repo.isPrivate),
+    )
+    commitRepos(publicReady)
+  }, [commitRepos])
+
+  useEffect(() => {
+    const handleSameWindowRevocation = () => handleCredentialRevocation()
+    const handleCrossTabRevocation = (event: StorageEvent) => {
+      if (isPrivateRepositoryRevocation(event)) handleCredentialRevocation()
+    }
+
+    window.addEventListener(PRIVATE_REPOSITORY_ACCESS_REVOKED_EVENT, handleSameWindowRevocation)
+    window.addEventListener('storage', handleCrossTabRevocation)
+    return () => {
+      window.removeEventListener(PRIVATE_REPOSITORY_ACCESS_REVOKED_EVENT, handleSameWindowRevocation)
+      window.removeEventListener('storage', handleCrossTabRevocation)
+    }
+  }, [handleCredentialRevocation])
+
+  useEffect(() => () => {
+    for (const operation of operationsRef.current.values()) operation.controller.abort()
+    operationsRef.current.clear()
+    generationRef.current.clear()
   }, [])
 
   const getRepoList = useCallback((): ComparisonRepo[] => {
-    return Array.from(repos.values())
-  }, [repos])
+    return Array.from(reposRef.current.values())
+  }, [])
 
   return (
     <ComparisonContext.Provider

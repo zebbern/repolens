@@ -1,6 +1,8 @@
 // IndexedDB CRUD for tour data — follows the repo-cache.ts pattern.
 
 import type { Tour } from '@/types/tours'
+import { withCacheMutationLock, type CacheMutationCoordinator } from '@/lib/cache/cache-mutation-lock'
+import { getGitHubCredentialPrincipal } from '@/lib/github/client'
 
 const DB_NAME = 'repolens-cache'
 const TOURS_STORE = 'tours'
@@ -58,6 +60,54 @@ function wrapRequest<T>(request: IDBRequest<T>): Promise<T> {
   })
 }
 
+interface TourCacheReadOptions {
+  principal?: string | null
+}
+
+function effectivePrincipal(options: TourCacheReadOptions): string | null {
+  return options.principal === undefined ? getGitHubCredentialPrincipal() : options.principal
+}
+
+function canReadTour(tour: Tour, principal: string | null): boolean {
+  if (tour.visibility === 'public') return true
+  if (tour.visibility !== 'private') return false
+  return typeof principal === 'string' && principal.length > 0 && tour.principal === principal
+}
+
+function transactionDone<T>(
+  tx: IDBTransaction,
+  run: (store: IDBObjectStore) => T,
+): Promise<T> {
+  return new Promise((resolve, reject) => {
+    let result!: T
+    let settled = false
+    const settle = (callback: () => void) => {
+      if (settled) return
+      settled = true
+      callback()
+    }
+
+    tx.oncomplete = () => settle(() => resolve(result))
+    tx.onerror = () => settle(() => reject(
+      tx.error ?? new DOMException('Transaction failed', 'UnknownError'),
+    ))
+    tx.onabort = () => settle(() => reject(
+      tx.error ?? new DOMException('Transaction aborted', 'AbortError'),
+    ))
+
+    try {
+      result = run(tx.objectStore(TOURS_STORE))
+    } catch (error) {
+      try {
+        tx.abort()
+      } catch {
+        // The transaction already completed or aborted.
+      }
+      settle(() => reject(error))
+    }
+  })
+}
+
 /** Reset the cached DB connection. Exported for tests only. */
 export function _resetDBConnection(): void {
   dbPromise = null
@@ -68,13 +118,17 @@ export function _resetDBConnection(): void {
 // ---------------------------------------------------------------------------
 
 /** Retrieve all tours for a given repository, sorted by updatedAt descending. */
-export async function getToursByRepo(repoKey: string): Promise<Tour[]> {
+export async function getToursByRepo(repoKey: string, options: TourCacheReadOptions = {}): Promise<Tour[]> {
   try {
-    const db = await getDB()
-    const tx = db.transaction(TOURS_STORE, 'readonly')
-    const store = tx.objectStore(TOURS_STORE)
-    const index = store.index('repoKey')
-    const tours: Tour[] = await wrapRequest(index.getAll(repoKey))
+    const tours = await withCacheMutationLock(undefined, async () => {
+      const db = await getDB()
+      const tx = db.transaction(TOURS_STORE, 'readonly')
+      const store = tx.objectStore(TOURS_STORE)
+      const index = store.index('repoKey')
+      const tours = await wrapRequest(index.getAll(repoKey))
+      const principal = effectivePrincipal(options)
+      return tours.filter(tour => canReadTour(tour, principal))
+    })
 
     tours.sort((a, b) => b.updatedAt - a.updatedAt)
     return tours
@@ -84,12 +138,15 @@ export async function getToursByRepo(repoKey: string): Promise<Tour[]> {
 }
 
 /** Retrieve a single tour by id, or `null` if not found. */
-export async function getTour(id: string): Promise<Tour | null> {
+export async function getTour(id: string, options: TourCacheReadOptions = {}): Promise<Tour | null> {
   try {
-    const db = await getDB()
-    const tx = db.transaction(TOURS_STORE, 'readonly')
-    const store = tx.objectStore(TOURS_STORE)
-    const result = await wrapRequest(store.get(id))
+    const result = await withCacheMutationLock(undefined, async () => {
+      const db = await getDB()
+      const tx = db.transaction(TOURS_STORE, 'readonly')
+      const store = tx.objectStore(TOURS_STORE)
+      const tour = await wrapRequest(store.get(id))
+      return tour && canReadTour(tour, effectivePrincipal(options)) ? tour : null
+    })
     return result ?? null
   } catch {
     return null
@@ -97,57 +154,50 @@ export async function getTour(id: string): Promise<Tour | null> {
 }
 
 /** Persist (upsert) a tour record. Automatically updates `updatedAt`. */
-export async function saveTour(tour: Tour): Promise<void> {
-  try {
+export async function saveTour(
+  tour: Tour,
+  options: TourCacheReadOptions & { coordinator?: CacheMutationCoordinator } = {},
+): Promise<void> {
+  await withCacheMutationLock(undefined, async () => {
     const db = await getDB()
-    const record: Tour = { ...tour, updatedAt: Date.now() }
-
-    await new Promise<void>((resolve, reject) => {
-      const tx = db.transaction(TOURS_STORE, 'readwrite')
-      const store = tx.objectStore(TOURS_STORE)
-      store.put(record)
-
-      tx.oncomplete = () => resolve()
-      tx.onerror = () => reject(tx.error)
-    })
-  } catch {
-    // Cache write failure is non-critical — silently ignore.
-  }
+    const principal = effectivePrincipal(options)
+    if (tour.visibility === 'private' && (!principal || principal.length === 0)) {
+      throw new Error('Cannot cache private tour without a credential principal')
+    }
+    const record: Tour = {
+      ...tour,
+      ...(tour.visibility === 'private' && principal ? { principal } : { principal: undefined }),
+      updatedAt: Date.now(),
+    }
+    const tx = db.transaction(TOURS_STORE, 'readwrite')
+    await transactionDone(tx, store => { store.put(record) })
+  }, options.coordinator)
 }
 
 /** Delete a single tour by id. */
-export async function deleteTour(id: string): Promise<void> {
-  try {
+export async function deleteTour(
+  id: string,
+  options: { coordinator?: CacheMutationCoordinator } = {},
+): Promise<void> {
+  await withCacheMutationLock(undefined, async () => {
     const db = await getDB()
-    await new Promise<void>((resolve) => {
-      const tx = db.transaction(TOURS_STORE, 'readwrite')
-      tx.objectStore(TOURS_STORE).delete(id)
-      tx.oncomplete = () => resolve()
-      tx.onerror = () => resolve()
-    })
-  } catch {
-    // Silently ignore.
-  }
+    const tx = db.transaction(TOURS_STORE, 'readwrite')
+    await transactionDone(tx, store => { store.delete(id) })
+  }, options.coordinator)
 }
 
 /** Delete all tours for a given repository. */
-export async function deleteToursForRepo(repoKey: string): Promise<void> {
-  try {
+export async function deleteToursForRepo(
+  repoKey: string,
+  options: { coordinator?: CacheMutationCoordinator } = {},
+): Promise<void> {
+  await withCacheMutationLock(undefined, async () => {
     const db = await getDB()
-    const tx = db.transaction(TOURS_STORE, 'readwrite')
-    const store = tx.objectStore(TOURS_STORE)
-    const index = store.index('repoKey')
-    const keys = await wrapRequest(index.getAllKeys(repoKey))
-
-    for (const key of keys) {
-      store.delete(key)
-    }
-
-    await new Promise<void>((resolve) => {
-      tx.oncomplete = () => resolve()
-      tx.onerror = () => resolve()
+    const readTx = db.transaction(TOURS_STORE, 'readonly')
+    const keys = await wrapRequest(readTx.objectStore(TOURS_STORE).index('repoKey').getAllKeys(repoKey))
+    const deleteTx = db.transaction(TOURS_STORE, 'readwrite')
+    await transactionDone(deleteTx, store => {
+      for (const key of keys) store.delete(key)
     })
-  } catch {
-    // Silently ignore.
-  }
+  }, options.coordinator)
 }

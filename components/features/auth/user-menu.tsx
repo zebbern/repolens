@@ -4,6 +4,15 @@ import { signOut, useSession } from "next-auth/react"
 import Image from "next/image"
 import { LogOut, User } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { clearPrivateRepoCache } from "@/lib/cache/repo-cache"
+import { clearGitHubCache } from '@/lib/github/client'
+import { clearScanCache } from '@/lib/code/scanner/scanner'
+import { clearValidationCache } from '@/lib/code/scanner/ai-validator'
+import {
+  notifyPrivateRepositoryAccessRevoked,
+  notifyPrivateRepositoryAccessRevocationFinished,
+} from '@/lib/auth/credential-events'
+import { toast } from 'sonner'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -55,7 +64,29 @@ export function UserMenu() {
         </div>
         <DropdownMenuSeparator />
         <DropdownMenuItem
-          onClick={() => signOut()}
+          onClick={async () => {
+            notifyPrivateRepositoryAccessRevoked()
+            clearGitHubCache()
+            clearScanCache()
+            clearValidationCache()
+
+            let signOutFailed = false
+            try {
+              await signOut()
+            } catch {
+              signOutFailed = true
+              toast.error('Sign-out failed; please retry')
+            }
+
+            let cleanupFailed = false
+            try {
+              await clearPrivateRepoCache()
+            } catch {
+              cleanupFailed = true
+              toast.error('Private repository cleanup failed; retry cleanup after signing out')
+            }
+            notifyPrivateRepositoryAccessRevocationFinished(!cleanupFailed && !signOutFailed)
+          }}
           className="text-text-secondary cursor-pointer"
         >
           <LogOut className="mr-2 h-3.5 w-3.5" />

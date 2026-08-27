@@ -19,10 +19,16 @@ export async function getAccessToken(
   if (pat) return pat
 
   // 2. OAuth JWT fallback
-  const token = await getToken({
-    req: request,
-    secret: process.env.AUTH_SECRET ?? process.env.NEXTAUTH_SECRET,
-  })
+  try {
+    const token = await getToken({
+      req: request,
+      secret: process.env.AUTH_SECRET ?? process.env.NEXTAUTH_SECRET,
+    })
 
-  return (token?.accessToken as string) ?? undefined
+    return (token?.accessToken as string) ?? undefined
+  } catch {
+    // Malformed Authorization headers must not turn an unauthenticated
+    // request into a server error.
+    return undefined
+  }
 }

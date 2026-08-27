@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useMemo, useCallback } from "react"
+import { useState, useMemo, useCallback, useRef, useEffect } from "react"
 import type { BlameData, CommitDetail } from "@/types/git-history"
 import type { GitHubCommit } from "@/types/repository"
 import type { RepositorySession } from '@/providers/repository-provider'
@@ -80,6 +80,28 @@ export function useGitHistory(
   const [error, setError] = useState<string | null>(null)
   const [hasMore, setHasMore] = useState(false)
   const [currentPage, setCurrentPage] = useState(1)
+  const operationRef = useRef<{ generation: number; controller: AbortController } | null>(null)
+  const generationRef = useRef(0)
+
+  const beginOperation = useCallback(() => {
+    operationRef.current?.controller.abort()
+    const operation = { generation: ++generationRef.current, controller: new AbortController() }
+    operationRef.current = operation
+    return operation
+  }, [])
+
+  const isOperationCurrent = useCallback((
+    operation: { generation: number; controller: AbortController },
+    session: RepositorySession | null,
+  ) => operationRef.current === operation
+    && !operation.controller.signal.aborted
+    && isRepositorySessionCurrent(session), [isRepositorySessionCurrent])
+
+  useEffect(() => () => {
+    operationRef.current?.controller.abort()
+    operationRef.current = null
+    generationRef.current += 1
+  }, [repositorySession])
 
   const commitsByDate = useMemo(
     () => groupCommitsByDate(commits),
@@ -99,14 +121,17 @@ export function useGitHistory(
   ) => {
     const requestSession = repositorySession
     if (!isRepositorySessionCurrent(requestSession)) return
+    const operation = beginOperation()
     setIsLoading(true)
     setError(null)
     try {
-      const data = await fetchBlameViaProxy(owner, name, ref, path)
-      if (!isRepositorySessionCurrent(requestSession)) return
+      const data = await fetchBlameViaProxy(owner, name, ref, path, {
+        signal: operation.controller.signal,
+      })
+      if (!isOperationCurrent(operation, requestSession)) return
       setBlameData(data)
     } catch (err) {
-      if (!isRepositorySessionCurrent(requestSession)) return
+      if (!isOperationCurrent(operation, requestSession)) return
       const message = err instanceof Error ? err.message : 'Failed to load blame data'
       // Detect auth errors
       if (message.includes('401') || message.toLowerCase().includes('unauthorized') || message.toLowerCase().includes('authentication')) {
@@ -115,9 +140,9 @@ export function useGitHistory(
         setError(message)
       }
     } finally {
-      if (isRepositorySessionCurrent(requestSession)) setIsLoading(false)
+      if (isOperationCurrent(operation, requestSession)) setIsLoading(false)
     }
-  }, [repositorySession, isRepositorySessionCurrent])
+  }, [beginOperation, isOperationCurrent, repositorySession, isRepositorySessionCurrent])
 
   const fetchCommits = useCallback(async (
     owner: string,
@@ -126,14 +151,16 @@ export function useGitHistory(
   ) => {
     const requestSession = repositorySession
     if (!isRepositorySessionCurrent(requestSession)) return
+    const operation = beginOperation()
     setIsLoading(true)
     setError(null)
     try {
       const data = await fetchCommitsViaProxy(owner, name, {
         sha: opts?.sha,
         perPage: PER_PAGE,
+        signal: operation.controller.signal,
       })
-      if (!isRepositorySessionCurrent(requestSession)) return
+      if (!isOperationCurrent(operation, requestSession)) return
       if (opts?.sha) {
         // Paginated load — append (skip first since it's the sha itself)
         setCommits(prev => [...prev, ...data.slice(1)])
@@ -142,13 +169,14 @@ export function useGitHistory(
       }
       setHasMore(data.length >= PER_PAGE)
       setCommitsSession(requestSession)
+      setCurrentPage(opts?.sha ? page => page + 1 : 1)
     } catch (err) {
-      if (!isRepositorySessionCurrent(requestSession)) return
+      if (!isOperationCurrent(operation, requestSession)) return
       setError(err instanceof Error ? err.message : 'Failed to load commits')
     } finally {
-      if (isRepositorySessionCurrent(requestSession)) setIsLoading(false)
+      if (isOperationCurrent(operation, requestSession)) setIsLoading(false)
     }
-  }, [repositorySession, isRepositorySessionCurrent])
+  }, [beginOperation, isOperationCurrent, repositorySession, isRepositorySessionCurrent])
 
   const fetchFileHistory = useCallback(async (
     owner: string,
@@ -157,19 +185,23 @@ export function useGitHistory(
   ) => {
     const requestSession = repositorySession
     if (!isRepositorySessionCurrent(requestSession)) return
+    const operation = beginOperation()
     setIsLoading(true)
     setError(null)
     try {
-      const data = await fetchFileCommitsViaProxy(owner, name, path, { perPage: PER_PAGE })
-      if (!isRepositorySessionCurrent(requestSession)) return
+      const data = await fetchFileCommitsViaProxy(owner, name, path, {
+        perPage: PER_PAGE,
+        signal: operation.controller.signal,
+      })
+      if (!isOperationCurrent(operation, requestSession)) return
       setFileCommits(data)
     } catch (err) {
-      if (!isRepositorySessionCurrent(requestSession)) return
+      if (!isOperationCurrent(operation, requestSession)) return
       setError(err instanceof Error ? err.message : 'Failed to load file history')
     } finally {
-      if (isRepositorySessionCurrent(requestSession)) setIsLoading(false)
+      if (isOperationCurrent(operation, requestSession)) setIsLoading(false)
     }
-  }, [repositorySession, isRepositorySessionCurrent])
+  }, [beginOperation, isOperationCurrent, repositorySession, isRepositorySessionCurrent])
 
   const fetchCommitDetail = useCallback(async (
     owner: string,
@@ -178,20 +210,23 @@ export function useGitHistory(
   ) => {
     const requestSession = repositorySession
     if (!isRepositorySessionCurrent(requestSession)) return
+    const operation = beginOperation()
     setIsLoading(true)
     setError(null)
     try {
-      const data = await fetchCommitDetailViaProxy(owner, name, sha)
-      if (!isRepositorySessionCurrent(requestSession)) return
+      const data = await fetchCommitDetailViaProxy(owner, name, sha, {
+        signal: operation.controller.signal,
+      })
+      if (!isOperationCurrent(operation, requestSession)) return
       setSelectedCommit(data)
       setViewMode('commit-detail')
     } catch (err) {
-      if (!isRepositorySessionCurrent(requestSession)) return
+      if (!isOperationCurrent(operation, requestSession)) return
       setError(err instanceof Error ? err.message : 'Failed to load commit details')
     } finally {
-      if (isRepositorySessionCurrent(requestSession)) setIsLoading(false)
+      if (isOperationCurrent(operation, requestSession)) setIsLoading(false)
     }
-  }, [repositorySession, isRepositorySessionCurrent])
+  }, [beginOperation, isOperationCurrent, repositorySession, isRepositorySessionCurrent])
 
   const loadMoreCommits = useCallback(async (
     owner: string,
@@ -200,7 +235,6 @@ export function useGitHistory(
     if (!isRepositorySessionCurrent(repositorySession)) return
     if (commits.length === 0 || !hasMore) return
     const lastSha = commits[commits.length - 1].sha
-    setCurrentPage(prev => prev + 1)
     await fetchCommits(owner, name, { sha: lastSha })
   }, [commits, hasMore, fetchCommits, repositorySession, isRepositorySessionCurrent])
 
@@ -209,6 +243,9 @@ export function useGitHistory(
   }, [])
 
   const reset = useCallback(() => {
+    operationRef.current?.controller.abort()
+    operationRef.current = null
+    generationRef.current += 1
     setViewMode('timeline')
     setBlameData(null)
     setCommits([])
@@ -223,10 +260,13 @@ export function useGitHistory(
 
   const hydrateCommits = useCallback((data: { commits: GitHubCommit[]; hasMore: boolean }) => {
     if (!isRepositorySessionCurrent(repositorySession)) return
+    beginOperation()
     setCommits(data.commits)
     setHasMore(data.hasMore)
     setCommitsSession(repositorySession)
-  }, [repositorySession, isRepositorySessionCurrent])
+    setCurrentPage(1)
+    setIsLoading(false)
+  }, [beginOperation, repositorySession, isRepositorySessionCurrent])
 
   return {
     viewMode,

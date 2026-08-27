@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import type { MutableRefObject } from 'react'
 import type { CodeIndex } from '@/lib/code/code-index'
 import { createEmptyIndex, indexFile } from '@/lib/code/code-index'
+import { MAX_FILE_CONTENT_CHARS } from '../client-tool-executor'
 import { handleToolCall } from '../tool-call-handler'
 import type { ToolCallInfo, AddToolOutputFn } from '../tool-call-handler'
 
@@ -11,11 +12,7 @@ vi.mock('@/lib/github/client', () => ({
   fetchFileCommitsViaProxy: vi.fn(),
   fetchBlameViaProxy: vi.fn(),
   fetchCommitDetailViaProxy: vi.fn(),
-}))
-
-// Mock fetchFileContent (used by readFile fallback)
-vi.mock('@/lib/github/fetcher', () => ({
-  fetchFileContent: vi.fn(),
+  fetchFileViaProxy: vi.fn(),
 }))
 
 import {
@@ -23,8 +20,8 @@ import {
   fetchFileCommitsViaProxy,
   fetchBlameViaProxy,
   fetchCommitDetailViaProxy,
+  fetchFileViaProxy,
 } from '@/lib/github/client'
-import { fetchFileContent } from '@/lib/github/fetcher'
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -162,7 +159,7 @@ describe('handleToolCall', () => {
   it('preserves partial coverage when a missing-file GitHub fallback also fails', async () => {
     const index = buildMockIndex()
     index.coverage = PARTIAL_COVERAGE
-    vi.mocked(fetchFileContent).mockRejectedValueOnce(new Error('fallback failed'))
+    vi.mocked(fetchFileViaProxy).mockRejectedValueOnce(new Error('fallback failed'))
 
     await handleToolCall(
       { toolName: 'readFile', input: { path: 'missing.ts' }, toolCallId: 'missing' },
@@ -178,6 +175,47 @@ describe('handleToolCall', () => {
       repositoryCoverage: PARTIAL_COVERAGE,
       coverageWarning: expect.stringContaining('Do not imply repository-wide completeness'),
     })
+  })
+
+  it('uses the authenticated proxy fallback and applies requested line ranges', async () => {
+    vi.mocked(fetchFileViaProxy).mockResolvedValueOnce('line 1\nline 2\nline 3\nline 4\nline 5')
+
+    await handleToolCall(
+      { toolName: 'readFile', input: { path: 'missing.ts', startLine: 3, endLine: 4 }, toolCallId: 'ranged' },
+      addToolOutput as unknown as AddToolOutputFn,
+      createMockRef(buildMockIndex()),
+      undefined,
+      { repoInfo: { owner: 'acme', name: 'repo', defaultBranch: 'main', token: 'ghp_test' } },
+    )
+
+    expect(fetchFileViaProxy).toHaveBeenCalledWith('acme', 'repo', 'main', 'missing.ts')
+    const parsed = unwrapToolResult(addToolOutput.mock.calls[0][0].output as string)
+    expect(parsed.content).toBe('line 3\nline 4')
+    expect(parsed.startLine).toBe(3)
+    expect(parsed.endLine).toBe(4)
+    expect(parsed).not.toHaveProperty('lineCount')
+    expect(parsed.totalLines).toBe(5)
+  })
+
+  it('truncates proxy ranges at a complete-line boundary and reports the next line', async () => {
+    const firstLine = 'a'.repeat(MAX_FILE_CONTENT_CHARS - 10)
+    const secondLine = 'b'.repeat(50)
+    vi.mocked(fetchFileViaProxy).mockResolvedValueOnce(`${firstLine}\n${secondLine}\nline 3`)
+
+    await handleToolCall(
+      { toolName: 'readFile', input: { path: 'missing.ts', startLine: 1, endLine: 3 }, toolCallId: 'bounded-range' },
+      addToolOutput as unknown as AddToolOutputFn,
+      createMockRef(buildMockIndex()),
+      undefined,
+      { repoInfo: { owner: 'acme', name: 'repo', defaultBranch: 'main', token: 'ghp_test' } },
+    )
+
+    const parsed = unwrapToolResult(addToolOutput.mock.calls[0][0].output as string)
+    expect(parsed.content).toBe(firstLine)
+    expect(parsed.startLine).toBe(1)
+    expect(parsed.endLine).toBe(1)
+    expect(parsed.nextStartLine).toBe(2)
+    expect(parsed.warning).toMatch(/complete-line boundary/i)
   })
 
   // ─────────────────────────────────────────────────────────────────────────

@@ -31,13 +31,29 @@ export function saveKeys(keys: APIKeysState): void {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(keys))
 }
 
+function isStoredProviderModel(value: unknown): value is ProviderModel {
+  if (!value || typeof value !== 'object') return false
+  const model = value as Record<string, unknown>
+  const contextLength = model.contextLength
+  return typeof model.id === 'string'
+    && model.id !== ''
+    && typeof model.name === 'string'
+    && model.name !== ''
+    && API_KEY_PROVIDERS.includes(model.provider as AIProvider)
+    && (contextLength === undefined || (typeof contextLength === 'number' && Number.isFinite(contextLength)))
+}
+
 /** Load a previously-selected model from localStorage. Returns null if absent/invalid. */
 export function loadSelectedModel(): ProviderModel | null {
   try {
     const stored = localStorage.getItem(MODEL_STORAGE_KEY)
     if (!stored) return null
-    return JSON.parse(stored) as ProviderModel
+    const parsed: unknown = JSON.parse(stored)
+    if (isStoredProviderModel(parsed)) return parsed
+    localStorage.removeItem(MODEL_STORAGE_KEY)
+    return null
   } catch {
+    localStorage.removeItem(MODEL_STORAGE_KEY)
     return null
   }
 }

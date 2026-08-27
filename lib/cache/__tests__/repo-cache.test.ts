@@ -7,9 +7,11 @@ import {
 } from 'fake-indexeddb'
 import {
   getCachedRepo,
+  listCachedRepos,
   setCachedRepo,
   clearCachedRepo,
   clearAllCache,
+  clearPrivateRepoCache,
   isReusableCachedRepo,
   getContentStoreKey,
   publishCachedRepo,
@@ -17,6 +19,8 @@ import {
 } from '../repo-cache'
 import { IDBContentStore } from '@/lib/code/content-store'
 import type { FileNode, RepositoryCoverage } from '@/types/repository'
+import type { Tour } from '@/types/tours'
+import { getTour, saveTour, _resetDBConnection } from '../tour-cache'
 import { installFakeWebLocks } from './fake-web-lock-manager'
 import {
   CacheCoordinationUnavailableError,
@@ -74,6 +78,28 @@ async function publishIdbRepo(
   return reader
 }
 
+async function removeRepoVisibility(key: string): Promise<void> {
+  const db = await new Promise<IDBDatabase>((resolve, reject) => {
+    const request = indexedDB.open('repolens-cache', 2)
+    request.onsuccess = () => resolve(request.result)
+    request.onerror = () => reject(request.error)
+  })
+  await new Promise<void>((resolve, reject) => {
+    const tx = db.transaction('repos', 'readwrite')
+    const store = tx.objectStore('repos')
+    const request = store.get(key)
+    request.onsuccess = () => {
+      const record = request.result as Record<string, unknown>
+      delete record.visibility
+      store.put(record)
+    }
+    request.onerror = () => reject(request.error)
+    tx.oncomplete = () => resolve()
+    tx.onerror = () => reject(tx.error)
+  })
+  db.close()
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -84,6 +110,7 @@ describe('repo-cache (IndexedDB)', () => {
     // fake-indexeddb provides a proper IDBFactory that works reliably in Node.
     globalThis.indexedDB = new IDBFactory()
     globalThis.IDBKeyRange = IDBKeyRange
+    _resetDBConnection()
     installFakeWebLocks()
   })
 
@@ -116,6 +143,99 @@ describe('repo-cache (IndexedDB)', () => {
     expect(cached!.sha).toBe('sha123')
     expect(cached!.content).toEqual({ kind: 'inline', files: SAMPLE_FILES })
     expect(cached!.tree).toEqual(SAMPLE_TREE)
+  })
+
+  it('does not reuse a complete legacy record when visibility is missing', async () => {
+    await setCachedRepo('owner', 'legacy', 'sha-legacy', SAMPLE_FILES, SAMPLE_TREE, SAMPLE_COVERAGE)
+    await removeRepoVisibility('owner/legacy')
+
+    expect(await getCachedRepo('owner', 'legacy')).toBeNull()
+    expect(await listCachedRepos()).toEqual([])
+  })
+
+  it('clears private records without deleting public cache records', async () => {
+    await setCachedRepo('owner', 'private', 'sha-private', SAMPLE_FILES, SAMPLE_TREE, SAMPLE_COVERAGE, {
+      visibility: 'private',
+      principal: 'github-user-1',
+    })
+    await setCachedRepo('owner', 'public', 'sha-public', SAMPLE_FILES, SAMPLE_TREE, SAMPLE_COVERAGE, {
+      visibility: 'public',
+    })
+
+    await clearPrivateRepoCache()
+
+    expect(await getCachedRepo('owner', 'private')).toBeNull()
+    expect((await getCachedRepo('owner', 'public'))?.sha).toBe('sha-public')
+  })
+
+  it('does not hydrate a private record for a different principal after a cold start', async () => {
+    await setCachedRepo('owner', 'private', 'sha-private', SAMPLE_FILES, SAMPLE_TREE, SAMPLE_COVERAGE, {
+      visibility: 'private',
+      principal: 'oauth:account-a',
+    })
+
+    await expect(getCachedRepo('owner', 'private', { principal: 'oauth:account-b' })).resolves.toBeNull()
+    await expect(withHydratedCachedRepo('owner', 'private', 'sha-private', {
+      principal: 'oauth:account-b',
+    }, vi.fn())).resolves.toBe(false)
+  })
+
+  it('lists public records but hides private records without the effective principal', async () => {
+    await setCachedRepo('owner', 'public', 'sha-public', SAMPLE_FILES, SAMPLE_TREE, SAMPLE_COVERAGE, {
+      visibility: 'public',
+    })
+    await setCachedRepo('owner', 'private', 'sha-private', SAMPLE_FILES, SAMPLE_TREE, SAMPLE_COVERAGE, {
+      visibility: 'private',
+      principal: 'pat:account-a',
+    })
+
+    await expect(listCachedRepos()).resolves.toEqual([
+      expect.objectContaining({ key: 'owner/public', visibility: 'public' }),
+    ])
+    await expect(listCachedRepos({ principal: 'pat:account-b' })).resolves.toEqual([
+      expect.objectContaining({ key: 'owner/public', visibility: 'public' }),
+    ])
+    await expect(listCachedRepos({ principal: 'pat:account-a' })).resolves.toEqual([
+      expect.objectContaining({ key: 'owner/private', visibility: 'private', principal: 'pat:account-a' }),
+      expect.objectContaining({ key: 'owner/public', visibility: 'public' }),
+    ])
+  })
+
+  it('clears legacy records whose visibility is unknown', async () => {
+    await setCachedRepo('owner', 'legacy', 'sha-legacy', SAMPLE_FILES, SAMPLE_TREE, SAMPLE_COVERAGE)
+    await removeRepoVisibility('owner/legacy')
+    await setCachedRepo('owner', 'public', 'sha-public', SAMPLE_FILES, SAMPLE_TREE, SAMPLE_COVERAGE, {
+      visibility: 'public',
+    })
+
+    await clearPrivateRepoCache()
+
+    expect(await getCachedRepo('owner', 'legacy')).toBeNull()
+    expect((await getCachedRepo('owner', 'public'))?.sha).toBe('sha-public')
+  })
+
+  it('clears private and legacy-unknown tours while preserving explicitly public tours', async () => {
+    const makeTour = (id: string, visibility?: Tour['visibility']): Tour => {
+      const tour: Tour = {
+        id,
+        name: id,
+        description: 'tour',
+        repoKey: 'owner/repo',
+        stops: [],
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      }
+      return visibility ? { ...tour, visibility } : tour
+    }
+    await saveTour(makeTour('private-tour', 'private'), { principal: 'oauth:account-a' })
+    await saveTour(makeTour('legacy-tour'))
+    await saveTour(makeTour('public-tour', 'public'))
+
+    await clearPrivateRepoCache()
+
+    await expect(getTour('private-tour')).resolves.toBeNull()
+    await expect(getTour('legacy-tour')).resolves.toBeNull()
+    await expect(getTour('public-tour')).resolves.toMatchObject({ visibility: 'public' })
   })
 
   it('overwrites existing entry when setCachedRepo is called again', async () => {
@@ -476,5 +596,21 @@ describe('repo-cache (IndexedDB)', () => {
       coordinator: fallback,
     }, consume)).resolves.toBe(false)
     expect(consume).not.toHaveBeenCalled()
+  })
+
+  it('invalidates an IDB manifest when one declared source record is missing', async () => {
+    await publishIdbRepo('owner', 'repo', 'sha', [
+      { path: 'src/present.ts', content: 'present' },
+      { path: 'src/missing.ts', content: 'missing' },
+    ])
+    const store = new IDBContentStore(getContentStoreKey('owner', 'repo', 'sha'))
+    store.delete('src/missing.ts')
+    await store.flush()
+    const consume = vi.fn()
+
+    await expect(withHydratedCachedRepo('owner', 'repo', 'sha', {}, consume)).resolves.toBe(false)
+
+    expect(consume).not.toHaveBeenCalled()
+    expect(await getCachedRepo('owner', 'repo')).toBeNull()
   })
 })

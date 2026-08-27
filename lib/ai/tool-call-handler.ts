@@ -1,12 +1,12 @@
 import type { MutableRefObject } from 'react'
 import type { CodeIndex } from '@/lib/code/code-index'
 import { executeToolLocally, MAX_FILE_CONTENT_CHARS, type ToolExecutorOptions } from './client-tool-executor'
-import { fetchFileContent } from '@/lib/github/fetcher'
 import {
   fetchCommitsViaProxy,
   fetchFileCommitsViaProxy,
   fetchBlameViaProxy,
   fetchCommitDetailViaProxy,
+  fetchFileViaProxy,
 } from '@/lib/github/client'
 import { coverageNotice } from '@/lib/repository'
 import type { RepositoryCoverage } from '@/types/repository'
@@ -73,7 +73,7 @@ function repositoryErrorText(message: string, coverage: RepositoryCoverage | und
  * feeds the result (or error) back through `addToolOutput`.
  *
  * For `readFile` calls that return "File not found", an async fallback fetches
- * the file from GitHub via `fetchFileContent` when `options.repoInfo` is set.
+ * the file from GitHub via the authenticated proxy when `options.repoInfo` is set.
  */
 export async function handleToolCall(
   toolCall: ToolCallInfo,
@@ -191,21 +191,62 @@ export async function handleToolCall(
       try {
         const parsed = JSON.parse(result) as Record<string, unknown>
         if (typeof parsed.error === 'string' && parsed.error.includes('File not found')) {
-          const { owner, name, defaultBranch, token } = options.repoInfo
-          const input = toolCall.input as { path: string }
-          const content = await fetchFileContent(owner, name, defaultBranch, input.path, { token })
+          const { owner, name, defaultBranch } = options.repoInfo
+          const input = toolCall.input as { path: string; startLine?: number; endLine?: number }
+          const content = await fetchFileViaProxy(owner, name, defaultBranch, input.path)
           const lines = content.split('\n')
-          const truncated = content.length > MAX_FILE_CONTENT_CHARS
-            ? content.slice(0, MAX_FILE_CONTENT_CHARS)
-            : content
-          const output: Record<string, unknown> = {
-            path: input.path,
-            content: truncated,
-            lineCount: lines.length,
-            totalLines: lines.length,
-          }
-          if (truncated !== content) {
-            output.warning = `File truncated from ${content.length} to ${MAX_FILE_CONTENT_CHARS} characters. Use startLine/endLine to read specific sections.`
+          const hasRange = input.startLine !== undefined || input.endLine !== undefined
+          let output: Record<string, unknown>
+          if (hasRange) {
+            const start = Math.max(1, input.startLine ?? 1) - 1
+            const end = Math.min(lines.length, input.endLine ?? lines.length)
+            const requested = lines.slice(start, end).join('\n')
+            let rangedContent = requested
+            let returnedEndLine: number | undefined = end
+            let nextStartLine: number | undefined
+            if (requested.length > MAX_FILE_CONTENT_CHARS) {
+              const boundedPrefix = requested.slice(0, MAX_FILE_CONTENT_CHARS)
+              const lastCompleteLineBreak = boundedPrefix.lastIndexOf('\n')
+              if (lastCompleteLineBreak >= 0) {
+                const completePrefix = boundedPrefix.slice(0, lastCompleteLineBreak + 1)
+                const completeLineCount = completePrefix.split('\n').length - 1
+                rangedContent = boundedPrefix.slice(0, lastCompleteLineBreak)
+                returnedEndLine = start + completeLineCount
+                nextStartLine = returnedEndLine + 1
+              } else {
+                // A partial line cannot be resumed with this line-oriented API.
+                // Omit it instead of claiming that the line was fully returned.
+                rangedContent = ''
+                returnedEndLine = undefined
+                nextStartLine = start + 1
+              }
+            }
+            output = {
+              path: input.path,
+              content: rangedContent,
+              startLine: start + 1,
+              ...(returnedEndLine === undefined ? {} : { endLine: returnedEndLine }),
+              ...(nextStartLine === undefined ? {} : { nextStartLine }),
+              totalLines: lines.length,
+            }
+            if (rangedContent !== requested) {
+              output.warning = returnedEndLine === undefined
+                ? `No complete line fits within the ${MAX_FILE_CONTENT_CHARS}-character limit; line ${start + 1} was omitted. Request a different range.`
+                : `File range truncated at a complete-line boundary within the ${MAX_FILE_CONTENT_CHARS}-character limit. Continue at line ${nextStartLine}.`
+            }
+          } else {
+            const truncated = content.length > MAX_FILE_CONTENT_CHARS
+              ? content.slice(0, MAX_FILE_CONTENT_CHARS)
+              : content
+            output = {
+              path: input.path,
+              content: truncated,
+              lineCount: lines.length,
+              totalLines: lines.length,
+            }
+            if (truncated !== content) {
+              output.warning = `File truncated from ${content.length} to ${MAX_FILE_CONTENT_CHARS} characters. Use startLine/endLine to read specific sections.`
+            }
           }
           const notice = coverageNotice(repositoryCoverage)
           if (notice) {

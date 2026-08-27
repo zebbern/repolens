@@ -17,6 +17,10 @@ export interface Tour {
   description: string
   /** Repository key in `owner/repo` format */
   repoKey: string
+  /** Repository visibility, when known. Legacy tours may omit this field. */
+  visibility?: 'public' | 'private'
+  /** Credential principal that owns a private tour. */
+  principal?: string
   stops: TourStop[]
   /** Unix-ms timestamp */
   createdAt: number

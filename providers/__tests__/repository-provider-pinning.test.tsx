@@ -37,7 +37,9 @@ vi.mock('@/providers/github-token-provider', () => ({
 }))
 
 import { RepositoryProvider, useRepository } from '../repository-provider'
-import { batchIndexFiles, createEmptyIndex } from '@/lib/code/code-index'
+import { batchIndexFiles, batchIndexMetadataOnly, createEmptyIndex, createEmptyIndexWithStore } from '@/lib/code/code-index'
+import { LazyContentStore } from '@/lib/code/content-store'
+import { FetchQueue } from '@/lib/code/fetch-queue'
 import { PINNED_CONTEXT_CONFIG } from '@/config/constants'
 
 // ---------------------------------------------------------------------------
@@ -233,7 +235,7 @@ describe('RepositoryProvider — Pin Logic', () => {
     const contents = await result.current.getPinnedContents()
 
     expect(contents.fileCount).toBe(2)
-    expect(contents.totalBytes).toBeGreaterThan(0)
+    expect(contents.totalBytes).toBe(new TextEncoder().encode(contents.content).byteLength)
     expect(contents.content).toContain('src/utils.ts')
     expect(contents.content).toContain('export const foo = 1')
     expect(contents.content).toContain('src/bar.ts')
@@ -332,6 +334,57 @@ describe('RepositoryProvider — Pin Logic', () => {
     expect(contents.content).toContain('src/lib/a.ts')
     expect(contents.content).toContain('src/lib/b.ts')
     expect(contents.content).not.toContain('src/other/c.ts')
+  })
+
+  it('bounds directory-pin reads and stops after the output budget is exhausted', async () => {
+    const { result } = renderHook(() => useRepository(), { wrapper: createWrapper() })
+    const index = buildIndex(Array.from({ length: 60 }, (_, fileIndex) => ({
+      path: `src/file-${String(fileIndex).padStart(2, '0')}.ts`,
+      content: 'x'.repeat(6_000),
+    })))
+    const getBatch = vi.spyOn(index.contentStore, 'getBatch')
+
+    act(() => {
+      result.current.updateCodeIndex(index)
+      result.current.pinFile('src', 'directory')
+    })
+
+    const contents = await result.current.getPinnedContents()
+    const requested = getBatch.mock.calls.flatMap(([paths]) => paths)
+
+    expect(Math.max(...getBatch.mock.calls.map(([paths]) => paths.length))).toBeLessThanOrEqual(20)
+    expect(requested.length).toBeLessThan(index.files.size)
+    expect(new TextEncoder().encode(contents.content).byteLength).toBeLessThanOrEqual(
+      PINNED_CONTEXT_CONFIG.MAX_PINNED_BYTES,
+    )
+    expect(contents.skipped.length).toBeGreaterThan(0)
+  })
+
+  it('loads an explicitly pinned lazy file and reports unavailable source', async () => {
+    const fetchContent = vi.fn(async (path: string) => {
+      if (path === 'src/available.ts') return 'export const available = true'
+      throw new Error('not found')
+    })
+    const store = new LazyContentStore('acme/lazy', new FetchQueue({ fetchFn: fetchContent }))
+    store.registerPaths(['src/available.ts', 'src/missing.ts'])
+    const index = batchIndexMetadataOnly(createEmptyIndexWithStore(store), [
+      { path: 'src/available.ts', language: 'typescript', lineCount: 1 },
+      { path: 'src/missing.ts', language: 'typescript', lineCount: 1 },
+    ])
+    const { result } = renderHook(() => useRepository(), { wrapper: createWrapper() })
+
+    act(() => {
+      result.current.updateCodeIndex(index)
+      result.current.pinFile('src/available.ts')
+      result.current.pinFile('src/missing.ts')
+    })
+
+    const contents = await result.current.getPinnedContents()
+
+    expect(fetchContent).toHaveBeenCalledWith('src/available.ts')
+    expect(fetchContent).toHaveBeenCalledWith('src/missing.ts')
+    expect(contents.content).toContain('export const available = true')
+    expect(contents.skipped).toContain('src/missing.ts')
   })
 
   it('getPinnedContents deduplicates files pinned individually and via directory', async () => {

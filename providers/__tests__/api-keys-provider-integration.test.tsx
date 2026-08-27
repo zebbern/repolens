@@ -8,6 +8,7 @@ import { APIKeysProvider, useAPIKeys } from '../api-keys-provider'
 // ---------------------------------------------------------------------------
 
 const STORAGE_KEY = 'codedoc-api-keys'
+const MODEL_STORAGE_KEY = 'codedoc-selected-model'
 
 function wrapper({ children }: { children: ReactNode }) {
   return <APIKeysProvider>{children}</APIKeysProvider>
@@ -30,9 +31,10 @@ function makeModelsResponse(models: { id: string; name?: string }[]) {
   }
 }
 
-function makeFailResponse() {
+function makeFailResponse(status = 401) {
   return {
     ok: false,
+    status,
     json: () => Promise.resolve({ error: 'Invalid key' }),
   }
 }
@@ -104,6 +106,21 @@ describe('APIKeysProvider', () => {
       })
 
       expect(result.current.apiKeys.openai.key).toBe('')
+    })
+
+    it('does not restore a model whose provider has no stored key', async () => {
+      localStorage.setItem(MODEL_STORAGE_KEY, JSON.stringify({
+        id: 'gpt-4o',
+        name: 'GPT-4o',
+        provider: 'openai',
+      }))
+      globalThis.fetch = vi.fn()
+
+      const { result } = renderHook(() => useAPIKeys(), { wrapper })
+
+      await waitFor(() => expect(result.current.isHydrated).toBe(true))
+      expect(result.current.selectedModel).toBeNull()
+      expect(localStorage.getItem(MODEL_STORAGE_KEY)).toBeNull()
     })
   })
 
@@ -251,7 +268,7 @@ describe('APIKeysProvider', () => {
       })
     })
 
-    it('marks key as isValid:false on network error', async () => {
+    it('preserves unresolved key validity on an initial network error', async () => {
       const stored = makeStoredKeys({
         google: { key: 'AIza-bad-key', isValid: null, lastValidated: null },
       })
@@ -261,12 +278,11 @@ describe('APIKeysProvider', () => {
 
       const { result } = renderHook(() => useAPIKeys(), { wrapper })
 
-      await waitFor(() => {
-        expect(result.current.apiKeys.google.isValid).toBe(false)
-      })
+      await waitFor(() => expect(result.current.modelFetchErrors.google).toBeDefined())
+      expect(result.current.apiKeys.google.isValid).toBeNull()
     })
 
-    it('returns empty models list when fetch fails', async () => {
+    it('keeps an empty models list when the initial fetch fails transiently', async () => {
       const stored = makeStoredKeys({
         openai: { key: 'sk-key', isValid: null, lastValidated: null },
       })
@@ -276,11 +292,31 @@ describe('APIKeysProvider', () => {
 
       const { result } = renderHook(() => useAPIKeys(), { wrapper })
 
-      await waitFor(() => {
-        expect(result.current.apiKeys.openai.isValid).toBe(false)
-      })
+      await waitFor(() => expect(result.current.modelFetchErrors.openai).toBeDefined())
 
+      expect(result.current.apiKeys.openai.isValid).toBeNull()
       expect(result.current.models).toHaveLength(0)
+    })
+
+    it('ignores validation results for a key that was replaced while validating', async () => {
+      let resolveFetch!: (value: unknown) => void
+      globalThis.fetch = vi.fn().mockReturnValue(new Promise(resolve => { resolveFetch = resolve }))
+      const { result } = renderHook(() => useAPIKeys(), { wrapper })
+      await waitFor(() => expect(result.current.isHydrated).toBe(true))
+
+      act(() => { result.current.setAPIKey('openai', 'sk-old') })
+      let validation!: Promise<boolean>
+      act(() => { validation = result.current.validateAPIKey('openai') })
+      const validationSignal = vi.mocked(globalThis.fetch).mock.calls[0][1]?.signal
+      act(() => { result.current.setAPIKey('openai', 'sk-new') })
+      expect(validationSignal).toBeInstanceOf(AbortSignal)
+      expect(validationSignal?.aborted).toBe(true)
+      resolveFetch(makeModelsResponse([{ id: 'old-model' }]))
+      await act(async () => { await validation })
+
+      expect(result.current.apiKeys.openai.key).toBe('sk-new')
+      expect(result.current.apiKeys.openai.isValid).toBeNull()
+      expect(result.current.models).toEqual([])
     })
   })
 
@@ -306,6 +342,172 @@ describe('APIKeysProvider', () => {
       })
 
       expect(result.current.selectedModel!.id).toBe('gpt-4o')
+    })
+
+    it('replaces a persisted selection that is no longer offered by its provider', async () => {
+      const stored = makeStoredKeys({
+        openai: { key: 'sk-key', isValid: true, lastValidated: null },
+      })
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(stored))
+      localStorage.setItem(MODEL_STORAGE_KEY, JSON.stringify({
+        id: 'retired-model',
+        name: 'Retired model',
+        provider: 'openai',
+      }))
+      globalThis.fetch = vi.fn().mockResolvedValue(
+        makeModelsResponse([{ id: 'gpt-4o', name: 'GPT-4o' }]),
+      )
+
+      const { result } = renderHook(() => useAPIKeys(), { wrapper })
+
+      await waitFor(() => expect(result.current.models).toHaveLength(1))
+      expect(result.current.selectedModel).toMatchObject({
+        id: 'gpt-4o',
+        provider: 'openai',
+      })
+    })
+
+    it('discards a provider model and selection when its key changes', async () => {
+      const mockFetch = vi.fn()
+      globalThis.fetch = mockFetch
+      const { result } = renderHook(() => useAPIKeys(), { wrapper })
+      await waitFor(() => expect(result.current.isHydrated).toBe(true))
+
+      act(() => { result.current.setAPIKey('openai', 'sk-openai-old') })
+      mockFetch.mockResolvedValueOnce(makeModelsResponse([{ id: 'gpt-4o', name: 'GPT-4o' }]))
+      await act(async () => { await result.current.fetchModels('openai') })
+
+      act(() => { result.current.setAPIKey('google', 'AI-google') })
+      mockFetch.mockResolvedValueOnce(makeModelsResponse([{ id: 'gemini-pro', name: 'Gemini Pro' }]))
+      await act(async () => { await result.current.fetchModels('google') })
+
+      expect(result.current.selectedModel?.provider).toBe('openai')
+      expect(result.current.models.map(model => model.provider)).toEqual(['openai', 'google'])
+
+      act(() => { result.current.setAPIKey('openai', 'sk-openai-new') })
+
+      expect(result.current.apiKeys.openai.key).toBe('sk-openai-new')
+      expect(result.current.models.map(model => model.provider)).toEqual(['google'])
+      expect(result.current.selectedModel).toBeNull()
+    })
+
+    it('discards stale provider state when a model refresh rejects the key', async () => {
+      const mockFetch = vi.fn()
+      globalThis.fetch = mockFetch
+      const { result } = renderHook(() => useAPIKeys(), { wrapper })
+      await waitFor(() => expect(result.current.isHydrated).toBe(true))
+
+      act(() => { result.current.setAPIKey('openai', 'sk-openai') })
+      mockFetch.mockResolvedValueOnce(makeModelsResponse([{ id: 'gpt-4o', name: 'GPT-4o' }]))
+      await act(async () => { await result.current.fetchModels('openai') })
+
+      mockFetch.mockResolvedValueOnce(makeFailResponse())
+      await act(async () => { await result.current.fetchModels('openai') })
+
+      expect(result.current.apiKeys.openai.isValid).toBe(false)
+      expect(result.current.models).toEqual([])
+      expect(result.current.selectedModel).toBeNull()
+      expect(result.current.modelFetchErrors.openai).toMatch(/Failed to load OpenAI models/)
+
+      act(() => { result.current.removeAPIKey('openai') })
+      expect(result.current.modelFetchErrors.openai).toBeUndefined()
+    })
+
+    it.each([
+      ['rate limit', makeFailResponse(429)],
+      ['server error', makeFailResponse(503)],
+      ['network error', new Error('Network error')],
+    ])('preserves valid provider state after a transient %s', async (_name, failure) => {
+      const mockFetch = vi.fn()
+      globalThis.fetch = mockFetch
+      const { result } = renderHook(() => useAPIKeys(), { wrapper })
+      await waitFor(() => expect(result.current.isHydrated).toBe(true))
+
+      act(() => { result.current.setAPIKey('openai', 'sk-openai') })
+      mockFetch.mockResolvedValueOnce(makeModelsResponse([{ id: 'gpt-4o', name: 'GPT-4o' }]))
+      await act(async () => { await result.current.fetchModels('openai') })
+
+      if (failure instanceof Error) {
+        mockFetch.mockRejectedValueOnce(failure)
+      } else {
+        mockFetch.mockResolvedValueOnce(failure)
+      }
+      await act(async () => { await result.current.fetchModels('openai') })
+
+      expect(result.current.apiKeys.openai.isValid).toBe(true)
+      expect(result.current.models).toEqual([{
+        id: 'gpt-4o',
+        name: 'GPT-4o',
+        provider: 'openai',
+        contextLength: undefined,
+      }])
+      expect(result.current.selectedModel?.id).toBe('gpt-4o')
+      expect(result.current.modelFetchErrors.openai).toMatch(/Failed to load OpenAI models/)
+    })
+
+    it('clears stale provider models and selection after an authoritative empty refresh', async () => {
+      const mockFetch = vi.fn()
+      globalThis.fetch = mockFetch
+      const { result } = renderHook(() => useAPIKeys(), { wrapper })
+      await waitFor(() => expect(result.current.isHydrated).toBe(true))
+
+      act(() => { result.current.setAPIKey('openai', 'sk-openai') })
+      mockFetch.mockResolvedValueOnce(makeModelsResponse([{ id: 'gpt-4o', name: 'GPT-4o' }]))
+      await act(async () => { await result.current.fetchModels('openai') })
+
+      mockFetch.mockResolvedValueOnce(makeModelsResponse([]))
+      await act(async () => { await result.current.fetchModels('openai') })
+
+      expect(result.current.apiKeys.openai.isValid).toBe(true)
+      expect(result.current.models).toEqual([])
+      expect(result.current.selectedModel).toBeNull()
+      expect(result.current.modelFetchErrors.openai).toBeUndefined()
+    })
+
+    it('preserves a valid provider during transient revalidation and exposes the error', async () => {
+      const mockFetch = vi.fn()
+      globalThis.fetch = mockFetch
+      const { result } = renderHook(() => useAPIKeys(), { wrapper })
+      await waitFor(() => expect(result.current.isHydrated).toBe(true))
+
+      act(() => { result.current.setAPIKey('openai', 'sk-openai') })
+      mockFetch.mockResolvedValueOnce(makeModelsResponse([{ id: 'gpt-4o', name: 'GPT-4o' }]))
+      await act(async () => { await result.current.fetchModels('openai') })
+
+      mockFetch.mockRejectedValueOnce(new Error('Network error'))
+      let isValid = true
+      await act(async () => { isValid = await result.current.validateAPIKey('openai') })
+
+      expect(isValid).toBe(false)
+      expect(result.current.apiKeys.openai.isValid).toBe(true)
+      expect(result.current.models).toHaveLength(1)
+      expect(result.current.selectedModel?.id).toBe('gpt-4o')
+      expect(result.current.modelFetchErrors.openai).toMatch(/Failed to validate OpenAI API key/)
+    })
+
+    it('clears a transient validation error after a successful empty model response', async () => {
+      const mockFetch = vi.fn()
+      globalThis.fetch = mockFetch
+      const { result } = renderHook(() => useAPIKeys(), { wrapper })
+      await waitFor(() => expect(result.current.isHydrated).toBe(true))
+
+      act(() => { result.current.setAPIKey('openai', 'sk-openai') })
+      mockFetch.mockResolvedValueOnce(makeModelsResponse([{ id: 'gpt-4o', name: 'GPT-4o' }]))
+      await act(async () => { await result.current.fetchModels('openai') })
+
+      mockFetch.mockRejectedValueOnce(new Error('Network error'))
+      await act(async () => { await result.current.validateAPIKey('openai') })
+      expect(result.current.modelFetchErrors.openai).toBeDefined()
+
+      mockFetch.mockResolvedValueOnce(makeModelsResponse([]))
+      let isValid = false
+      await act(async () => { isValid = await result.current.validateAPIKey('openai') })
+
+      expect(isValid).toBe(true)
+      expect(result.current.apiKeys.openai.isValid).toBe(true)
+      expect(result.current.models).toEqual([])
+      expect(result.current.selectedModel).toBeNull()
+      expect(result.current.modelFetchErrors.openai).toBeUndefined()
     })
   })
 })

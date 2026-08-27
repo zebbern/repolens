@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, type FormEvent } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -15,17 +15,28 @@ interface APIKeyInputProps {
 export function APIKeyInput({ provider }: APIKeyInputProps) {
   const { apiKeys, models, setAPIKey, validateAPIKey, removeAPIKey } = useAPIKeys()
   const [showKey, setShowKey] = useState(false)
-  const [isValidating, setIsValidating] = useState(false)
+  const [validationTarget, setValidationTarget] = useState<string | null>(null)
   
   const config = apiKeys[provider]
   const providerInfo = PROVIDERS[provider]
   const providerModels = models.filter(m => m.provider === provider)
+  const currentValidationTarget = `${provider}:${config.key}`
+  const isValidating = validationTarget === currentValidationTarget
 
   const handleValidate = async () => {
     if (!config.key) return
-    setIsValidating(true)
-    await validateAPIKey(provider)
-    setIsValidating(false)
+    const requestTarget = currentValidationTarget
+    setValidationTarget(requestTarget)
+    try {
+      await validateAPIKey(provider)
+    } finally {
+      setValidationTarget(current => current === requestTarget ? null : current)
+    }
+  }
+
+  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    void handleValidate()
   }
 
   const handleRemove = () => {
@@ -41,7 +52,7 @@ export function APIKeyInput({ provider }: APIKeyInputProps) {
 
   return (
     <div className="space-y-4">
-      <div className="space-y-2">
+      <form className="space-y-2" onSubmit={handleSubmit}>
         <div className="flex items-center justify-between">
           <Label htmlFor={`${provider}-key`} className="text-text-secondary">
             API Key
@@ -61,7 +72,9 @@ export function APIKeyInput({ provider }: APIKeyInputProps) {
           <div className="relative flex-1">
             <Input
               id={`${provider}-key`}
+              name={`${provider}-api-key`}
               type={showKey ? "text" : "password"}
+              autoComplete="off"
               value={config.key}
               onChange={(e) => setAPIKey(provider, e.target.value)}
               placeholder={`Enter your ${providerInfo.name} API key`}
@@ -80,7 +93,7 @@ export function APIKeyInput({ provider }: APIKeyInputProps) {
           </div>
           
           <Button
-            onClick={handleValidate}
+            type="submit"
             disabled={!config.key || isValidating}
             className="bg-primary text-primary-foreground hover:bg-primary/90"
           >
@@ -94,7 +107,7 @@ export function APIKeyInput({ provider }: APIKeyInputProps) {
             )}
           </Button>
         </div>
-      </div>
+      </form>
 
       {/* Status */}
       {config.key && (

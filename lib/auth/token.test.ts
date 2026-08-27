@@ -28,11 +28,11 @@ describe('getAccessToken', () => {
   })
 
   /** Helper: build a mock NextRequest with optional X-GitHub-Token header. */
-  function mockRequest(pat?: string) {
+  function mockRequest(pat?: string, authorization?: string) {
     return {
       headers: {
         get: (name: string) =>
-          name === 'X-GitHub-Token' ? (pat ?? null) : null,
+          name === 'X-GitHub-Token' ? (pat ?? null) : name === 'Authorization' ? (authorization ?? null) : null,
       },
     } as Parameters<typeof getAccessToken>[0]
   }
@@ -83,6 +83,27 @@ describe('getAccessToken', () => {
     const result = await getAccessToken(mockRequest())
 
     expect(result).toBeUndefined()
+  })
+
+  it('ignores malformed Bearer authorization headers safely', async () => {
+    mockGetToken.mockRejectedValue(new Error('Malformed bearer token'))
+
+    const result = await getAccessToken(mockRequest(undefined, 'Bearer %'))
+
+    expect(result).toBeUndefined()
+    expect(mockGetToken).toHaveBeenCalledOnce()
+  })
+
+  it('decodes a well-formed bearer JWT instead of forwarding it as a GitHub token', async () => {
+    mockGetToken.mockResolvedValue({
+      accessToken: 'gho_decoded',
+      sub: 'user-4',
+    } as Awaited<ReturnType<typeof getToken>>)
+
+    const result = await getAccessToken(mockRequest(undefined, 'Bearer eyJhbGciOiJIUzI1NiJ9.payload.signature'))
+
+    expect(result).toBe('gho_decoded')
+    expect(mockGetToken).toHaveBeenCalledOnce()
   })
 
   it('returns undefined when token has no accessToken field', async () => {

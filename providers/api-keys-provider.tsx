@@ -44,9 +44,86 @@ export function APIKeysProvider({ children }: { children: ReactNode }) {
   const [isHydrated, setIsHydrated] = useState(false)
   const [modelFetchErrors, setModelFetchErrors] = useState<Partial<Record<AIProvider, string>>>({})
   const selectedModelRef = useRef<ProviderModel | null>(null)
-
   // Ref to always have current apiKeys for internal use
   const apiKeysRef = useRef(apiKeys)
+  const providerRequestsRef = useRef(new Map<AIProvider, { generation: number; controller: AbortController; settled: boolean }>())
+  const providerGenerationRef = useRef(new Map<AIProvider, number>())
+  const loadingRequestsRef = useRef(0)
+
+  const beginProviderRequest = useCallback((provider: AIProvider) => {
+    const previous = providerRequestsRef.current.get(provider)
+    if (previous) {
+      previous.controller.abort()
+      if (!previous.settled) {
+        previous.settled = true
+        loadingRequestsRef.current = Math.max(0, loadingRequestsRef.current - 1)
+      }
+    }
+    const generation = (providerGenerationRef.current.get(provider) ?? 0) + 1
+    providerGenerationRef.current.set(provider, generation)
+    const request = { generation, controller: new AbortController(), settled: false }
+    providerRequestsRef.current.set(provider, request)
+    loadingRequestsRef.current += 1
+    setIsLoadingModels(true)
+    return request
+  }, [])
+
+  const endProviderRequest = useCallback((provider: AIProvider, request: { generation: number; controller: AbortController; settled: boolean }) => {
+    if (request.settled) return
+    request.settled = true
+    if (providerRequestsRef.current.get(provider) === request) providerRequestsRef.current.delete(provider)
+    loadingRequestsRef.current = Math.max(0, loadingRequestsRef.current - 1)
+    if (loadingRequestsRef.current === 0) setIsLoadingModels(false)
+  }, [])
+
+  const isProviderRequestCurrent = useCallback((provider: AIProvider, key: string, request: { generation: number; controller: AbortController; settled: boolean }) => (
+    providerRequestsRef.current.get(provider) === request
+    && !request.settled
+    && !request.controller.signal.aborted
+    && apiKeysRef.current[provider].key === key
+  ), [])
+
+  const invalidateProviderRequest = useCallback((provider: AIProvider) => {
+    const request = providerRequestsRef.current.get(provider)
+    if (request) {
+      request.controller.abort()
+      if (!request.settled) {
+        request.settled = true
+        loadingRequestsRef.current = Math.max(0, loadingRequestsRef.current - 1)
+        if (loadingRequestsRef.current === 0) setIsLoadingModels(false)
+      }
+    }
+    providerRequestsRef.current.delete(provider)
+  }, [])
+
+  const discardProviderState = useCallback((provider: AIProvider, clearError = true) => {
+    setModels(current => current.filter(model => model.provider !== provider))
+    if (selectedModelRef.current?.provider === provider) {
+      selectedModelRef.current = null
+      setSelectedModel(null)
+    }
+    if (clearError) {
+      setModelFetchErrors(current => {
+        if (!(provider in current)) return current
+        const next = { ...current }
+        delete next[provider]
+        return next
+      })
+    }
+  }, [])
+
+  const reconcileProviderSelection = useCallback((provider: AIProvider, providerModels: ProviderModel[]) => {
+    const current = selectedModelRef.current
+    if (current && current.provider !== provider) return
+
+    const next = (current && providerModels.find(model => model.id === current.id))
+      || findDefaultModel(providerModels, provider)
+    if (next && next !== current) {
+      selectedModelRef.current = next
+      setSelectedModel(next)
+    }
+  }, [])
+
   useEffect(() => { apiKeysRef.current = apiKeys }, [apiKeys])
 
   // Keep ref in sync with state so callbacks can read current value without re-creation
@@ -58,9 +135,11 @@ export function APIKeysProvider({ children }: { children: ReactNode }) {
     const storedModel = loadSelectedModel()
     queueMicrotask(() => {
       if (storedKeys) setAPIKeys(storedKeys)
-      if (storedModel) {
+      if (storedModel && storedKeys?.[storedModel.provider]?.key && storedKeys[storedModel.provider].isValid === true) {
         setSelectedModel(storedModel)
         selectedModelRef.current = storedModel
+      } else if (storedModel) {
+        saveSelectedModel(null)
       }
       setIsHydrated(true)
     })
@@ -79,81 +158,107 @@ export function APIKeysProvider({ children }: { children: ReactNode }) {
   }, [selectedModel, isHydrated])
 
   const setAPIKey = useCallback((provider: AIProvider, key: string) => {
-    setAPIKeys(prev => ({
-      ...prev,
-      [provider]: {
-        key,
-        isValid: null,
-        lastValidated: null,
-      },
-    }))
-  }, [])
+    invalidateProviderRequest(provider)
+    discardProviderState(provider)
+    setAPIKeys(prev => {
+      const next = {
+        ...prev,
+        [provider]: { key, isValid: null, lastValidated: null },
+      }
+      apiKeysRef.current = next
+      return next
+    })
+  }, [discardProviderState, invalidateProviderRequest])
 
   const removeAPIKey = useCallback((provider: AIProvider) => {
-    setAPIKeys(prev => ({
-      ...prev,
-      [provider]: { ...DEFAULT_KEY_CONFIG },
-    }))
-    // Remove models from this provider
-    setModels(prev => prev.filter(m => m.provider !== provider))
-  }, [])
+    invalidateProviderRequest(provider)
+    discardProviderState(provider)
+    setAPIKeys(prev => {
+      const next = { ...prev, [provider]: { ...DEFAULT_KEY_CONFIG } }
+      apiKeysRef.current = next
+      return next
+    })
+  }, [discardProviderState, invalidateProviderRequest])
 
   const validateAPIKey = useCallback(async (provider: AIProvider): Promise<boolean> => {
     const key = apiKeysRef.current[provider].key
     if (!key) return false
+    const request = beginProviderRequest(provider)
 
     try {
-      const { models: providerModels, isValid } = await fetchProviderModels(provider, key)
+      const { models: providerModels, isValid } = await fetchProviderModels(provider, key, {
+        signal: request.controller.signal,
+      })
+      if (!isProviderRequestCurrent(provider, key, request)) return false
+
+      if (!isValid) {
+        const errorMsg = `Failed to validate ${PROVIDERS[provider].name} API key — check your key and try again`
+        discardProviderState(provider, false)
+        setAPIKeys(prev => ({
+          ...prev,
+          [provider]: {
+            ...prev[provider],
+            isValid: false,
+            lastValidated: new Date(),
+          },
+        }))
+        setModelFetchErrors(prev => ({ ...prev, [provider]: errorMsg }))
+        toast.error(errorMsg)
+        return false
+      }
 
       setAPIKeys(prev => ({
         ...prev,
         [provider]: {
           ...prev[provider],
-          isValid,
+          isValid: true,
           lastValidated: new Date(),
         },
       }))
 
-      if (isValid && providerModels.length > 0) {
+      if (providerModels.length > 0) {
         setModels(prev => {
           const filtered = prev.filter(m => m.provider !== provider)
           return [...filtered, ...providerModels]
         })
 
-        // Auto-select a default model if none is currently selected
-        if (!selectedModelRef.current) {
-          const defaultModel = findDefaultModel(providerModels, provider)
-          if (defaultModel) {
-            selectedModelRef.current = defaultModel
-            setSelectedModel(defaultModel)
-          }
-        }
+        reconcileProviderSelection(provider, providerModels)
+      } else {
+        discardProviderState(provider, false)
       }
+      setModelFetchErrors(prev => {
+        if (!(provider in prev)) return prev
+        const next = { ...prev }
+        delete next[provider]
+        return next
+      })
 
-      return isValid
+      return true
     } catch {
-      setAPIKeys(prev => ({
-        ...prev,
-        [provider]: {
-          ...prev[provider],
-          isValid: false,
-          lastValidated: new Date(),
-        },
-      }))
-      toast.error(`Failed to validate ${PROVIDERS[provider].name} API key — check your key and try again`)
+      if (!isProviderRequestCurrent(provider, key, request)) return false
+      const errorMsg = `Failed to validate ${PROVIDERS[provider].name} API key — try again`
+      setModelFetchErrors(prev => ({ ...prev, [provider]: errorMsg }))
+      toast.error(errorMsg)
       return false
+    } finally {
+      endProviderRequest(provider, request)
     }
-  }, [])
+  }, [beginProviderRequest, discardProviderState, endProviderRequest, isProviderRequestCurrent, reconcileProviderSelection])
 
   const fetchModelsInternal = useCallback(async (provider: AIProvider): Promise<ProviderModel[]> => {
     const key = apiKeysRef.current[provider].key
     if (!key) return []
+    const request = beginProviderRequest(provider)
 
     try {
-      const { models: providerModels, isValid } = await fetchProviderModels(provider, key)
+      const { models: providerModels, isValid } = await fetchProviderModels(provider, key, {
+        signal: request.controller.signal,
+      })
+      if (!isProviderRequestCurrent(provider, key, request)) return []
 
       if (!isValid) {
         const errorMsg = `Failed to load ${PROVIDERS[provider].name} models — check your API key`
+        discardProviderState(provider, false)
         setAPIKeys(prev => ({
           ...prev,
           [provider]: {
@@ -167,10 +272,14 @@ export function APIKeysProvider({ children }: { children: ReactNode }) {
         return []
       }
 
-      setModels(prev => {
-        const filtered = prev.filter(m => m.provider !== provider)
-        return [...filtered, ...providerModels]
-      })
+      if (providerModels.length > 0) {
+        setModels(prev => {
+          const filtered = prev.filter(m => m.provider !== provider)
+          return [...filtered, ...providerModels]
+        })
+      } else {
+        discardProviderState(provider, false)
+      }
 
       // Mark valid and clear any previous fetch error
       setAPIKeys(prev => ({
@@ -187,39 +296,24 @@ export function APIKeysProvider({ children }: { children: ReactNode }) {
         return next
       })
 
-      // Auto-select a default model if none is currently selected
-      if (!selectedModelRef.current) {
-        const defaultModel = findDefaultModel(providerModels, provider)
-        if (defaultModel) {
-          selectedModelRef.current = defaultModel
-          setSelectedModel(defaultModel)
-        }
+      if (providerModels.length > 0) {
+        reconcileProviderSelection(provider, providerModels)
       }
 
       return providerModels
     } catch {
-      const errorMsg = `Failed to load ${PROVIDERS[provider].name} models — check your API key`
-      setAPIKeys(prev => ({
-        ...prev,
-        [provider]: {
-          ...prev[provider],
-          isValid: false,
-          lastValidated: new Date(),
-        },
-      }))
+      if (!isProviderRequestCurrent(provider, key, request)) return []
+      const errorMsg = `Failed to load ${PROVIDERS[provider].name} models — try again`
       setModelFetchErrors(prev => ({ ...prev, [provider]: errorMsg }))
       toast.error(errorMsg)
       return []
+    } finally {
+      endProviderRequest(provider, request)
     }
-  }, []) // No dependencies — reads from refs
+  }, [beginProviderRequest, discardProviderState, endProviderRequest, isProviderRequestCurrent, reconcileProviderSelection])
 
   const fetchModels = useCallback(async (provider: AIProvider): Promise<ProviderModel[]> => {
-    setIsLoadingModels(true)
-    try {
-      return await fetchModelsInternal(provider)
-    } finally {
-      setIsLoadingModels(false)
-    }
+    return fetchModelsInternal(provider)
   }, [fetchModelsInternal])
 
   // Auto-fetch models once hydration is complete for providers with stored keys
@@ -239,12 +333,7 @@ export function APIKeysProvider({ children }: { children: ReactNode }) {
 
     // Fetch models for all providers with keys in parallel
     const fetchAll = async () => {
-      setIsLoadingModels(true)
-      try {
-        await Promise.all(providersWithKeys.map(provider => fetchModelsInternal(provider)))
-      } finally {
-        setIsLoadingModels(false)
-      }
+      await Promise.all(providersWithKeys.map(provider => fetchModelsInternal(provider)))
     }
     fetchAll()
   }, [isHydrated, apiKeys, fetchModelsInternal])

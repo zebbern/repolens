@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach } from 'vitest'
 import type { AIProvider, APIKeysState, ProviderModel } from '@/types/types'
 import {
   isValidAPIKeysState,
@@ -169,6 +169,19 @@ describe('loadSelectedModel', () => {
   it('returns null for invalid JSON', () => {
     localStorage.setItem(MODEL_STORAGE_KEY, 'not-json')
     expect(loadSelectedModel()).toBeNull()
+  })
+
+  it.each([
+    null,
+    {},
+    { id: 'gpt-4o', name: 'GPT-4o', provider: 'unknown' },
+    { id: 42, name: 'GPT-4o', provider: 'openai' },
+    { id: 'gpt-4o', name: null, provider: 'openai' },
+  ])('rejects and removes malformed stored model data: %j', value => {
+    localStorage.setItem(MODEL_STORAGE_KEY, JSON.stringify(value))
+
+    expect(loadSelectedModel()).toBeNull()
+    expect(localStorage.getItem(MODEL_STORAGE_KEY)).toBeNull()
   })
 })
 

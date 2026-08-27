@@ -11,7 +11,7 @@ if (!jwtCallback || !sessionCallback) {
 
 describe('authConfig callbacks', () => {
   describe('jwt callback', () => {
-    it('sets accessToken, githubUsername, and githubAvatar when account is present', async () => {
+    it('sets accessToken, githubUserId, githubUsername, and githubAvatar when account is present', async () => {
       const token: JWT = { sub: 'user-1' }
       const account = {
         access_token: 'gho_abc123',
@@ -28,12 +28,13 @@ describe('authConfig callbacks', () => {
         token,
         user: { id: 'user-1' },
         account,
-        profile: profile as never,
+        profile,
         trigger: 'signIn',
       } as Parameters<typeof jwtCallback>[0])
 
       expect(result).toMatchObject({
         sub: 'user-1',
+        githubUserId: 'user-1',
         accessToken: 'gho_abc123',
         githubUsername: 'octocat',
         githubAvatar: 'https://avatars.githubusercontent.com/u/1?v=4',
@@ -44,6 +45,7 @@ describe('authConfig callbacks', () => {
       const token: JWT = {
         sub: 'user-1',
         accessToken: 'existing-token',
+        githubUserId: 'user-1',
         githubUsername: 'octocat',
         githubAvatar: 'https://example.com/avatar.png',
       }
@@ -73,12 +75,13 @@ describe('authConfig callbacks', () => {
         token,
         user: { id: 'user-2' },
         account,
-        profile: profile as never,
+        profile,
         trigger: 'signIn',
       } as Parameters<typeof jwtCallback>[0])
 
       expect(result).toMatchObject({
         sub: 'user-2',
+        githubUserId: 'user-2',
         accessToken: 'gho_xyz',
         githubUsername: undefined,
         githubAvatar: undefined,
@@ -87,7 +90,7 @@ describe('authConfig callbacks', () => {
   })
 
   describe('session callback', () => {
-    it('populates session.user with githubUsername and githubAvatar from token', async () => {
+    it('populates session.user with the stable ID, githubUsername, and githubAvatar from token', async () => {
       const session = {
         user: { name: 'Octocat', email: 'octo@example.com' },
         expires: '2099-01-01T00:00:00.000Z',
@@ -95,6 +98,7 @@ describe('authConfig callbacks', () => {
       const token: JWT = {
         sub: 'user-1',
         accessToken: 'gho_secret',
+        githubUserId: 'user-1',
         githubUsername: 'octocat',
         githubAvatar: 'https://avatars.githubusercontent.com/u/1?v=4',
       }
@@ -106,12 +110,28 @@ describe('authConfig callbacks', () => {
 
       expect(result.user).toMatchObject({
         name: 'Octocat',
+        githubUserId: 'user-1',
         githubUsername: 'octocat',
         githubAvatar: 'https://avatars.githubusercontent.com/u/1?v=4',
       })
     })
 
-    it('sets undefined when token lacks github fields', async () => {
+    it('falls back to the persisted githubUserId when the JWT subject is absent', async () => {
+      const session = {
+        user: { name: 'Octocat' },
+        expires: '2099-01-01T00:00:00.000Z',
+      } as Session
+      const token: JWT = { githubUserId: 'user-2' }
+
+      const result = await sessionCallback({
+        session,
+        token,
+      } as Parameters<typeof sessionCallback>[0])
+
+      expect(result.user).toMatchObject({ githubUserId: 'user-2' })
+    })
+
+    it('sets stable ID from sub while leaving optional GitHub profile fields undefined', async () => {
       const session = {
         user: { name: 'Anon' },
         expires: '2099-01-01T00:00:00.000Z',
@@ -124,6 +144,7 @@ describe('authConfig callbacks', () => {
       } as Parameters<typeof sessionCallback>[0])
 
       expect(result.user).toMatchObject({
+        githubUserId: 'user-2',
         githubUsername: undefined,
         githubAvatar: undefined,
       })
@@ -137,6 +158,7 @@ describe('authConfig callbacks', () => {
       const token: JWT = {
         sub: 'user-1',
         accessToken: 'gho_secret',
+        githubUserId: 'user-1',
         githubUsername: 'octocat',
         githubAvatar: 'https://example.com/avatar.png',
       }

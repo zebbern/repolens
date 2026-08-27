@@ -2,6 +2,8 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 
+vi.mock('sonner', () => ({ toast: { error: vi.fn() } }))
+
 // ---------------------------------------------------------------------------
 // Mock the useGitHubToken hook
 // ---------------------------------------------------------------------------
@@ -29,10 +31,13 @@ vi.mock('@/providers/github-token-provider', () => ({
 }))
 
 import { GitHubTokenInput } from '../github-token-input'
+import { toast } from 'sonner'
 
 describe('GitHubTokenInput', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mockSetToken.mockResolvedValue(undefined)
+    mockRemoveToken.mockResolvedValue(undefined)
     mockTokenState = {
       token: null,
       isValid: null,
@@ -96,6 +101,17 @@ describe('GitHubTokenInput', () => {
     await user.click(screen.getByRole('button', { name: /test/i }))
 
     expect(mockValidateToken).toHaveBeenCalled()
+  })
+
+  it('validates a newly entered token when Enter submits the token form', async () => {
+    mockValidateToken.mockResolvedValue(true)
+    const user = userEvent.setup()
+    render(<GitHubTokenInput />)
+
+    await user.type(screen.getByLabelText('Personal Access Token'), 'ghp_keyboard{Enter}')
+
+    expect(mockSetToken).toHaveBeenCalledWith('ghp_keyboard')
+    expect(mockValidateToken).toHaveBeenCalledWith('ghp_keyboard')
   })
 
   it('shows success status after successful validation', () => {
@@ -188,6 +204,89 @@ describe('GitHubTokenInput', () => {
     }
   })
 
+  it('reports token-removal cleanup failures to the user', async () => {
+    mockTokenState = {
+      ...mockTokenState,
+      token: 'ghp_to_remove',
+      isValid: true,
+    }
+    mockRemoveToken.mockRejectedValueOnce(new Error('cleanup failed'))
+
+    const user = userEvent.setup()
+    render(<GitHubTokenInput />)
+    const removeButton = screen.getAllByRole('button').find(
+      (btn) => btn.querySelector('.lucide-trash-2') !== null,
+    )
+
+    await user.click(removeButton!)
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith('cleanup failed'))
+  })
+
+  it('preserves an in-progress edit when the provider replaces a non-null token', async () => {
+    mockTokenState = {
+      ...mockTokenState,
+      token: 'ghp_original',
+    }
+
+    const user = userEvent.setup()
+    const { rerender } = render(<GitHubTokenInput />)
+    const input = screen.getByLabelText('Personal Access Token')
+
+    await user.clear(input)
+    await user.type(input, 'ghp_draft')
+
+    mockTokenState = {
+      ...mockTokenState,
+      token: 'ghp_replaced_elsewhere',
+    }
+    rerender(<GitHubTokenInput />)
+
+    expect(input).toHaveValue('ghp_draft')
+  })
+
+  it('updates a clean input when the provider replaces a non-null token', async () => {
+    mockTokenState = {
+      ...mockTokenState,
+      token: 'ghp_original',
+    }
+
+    const { rerender } = render(<GitHubTokenInput />)
+    const input = screen.getByLabelText('Personal Access Token')
+
+    mockTokenState = {
+      ...mockTokenState,
+      token: 'ghp_replaced_elsewhere',
+    }
+    rerender(<GitHubTokenInput />)
+
+    await waitFor(() => expect(input).toHaveValue('ghp_replaced_elsewhere'))
+  })
+
+  it('clears an in-progress edit after provider revocation so blur cannot restore it', async () => {
+    mockTokenState = {
+      ...mockTokenState,
+      token: 'ghp_original',
+    }
+
+    const user = userEvent.setup()
+    const { rerender } = render(<GitHubTokenInput />)
+    const input = screen.getByLabelText('Personal Access Token')
+
+    await user.clear(input)
+    await user.type(input, 'ghp_draft')
+
+    mockTokenState = {
+      ...mockTokenState,
+      token: null,
+    }
+    rerender(<GitHubTokenInput />)
+
+    await waitFor(() => expect(input).toHaveValue(''))
+    await user.tab()
+
+    expect(mockSetToken).not.toHaveBeenCalled()
+  })
+
   it('disables Test button when no token is present', () => {
     mockTokenState = {
       ...mockTokenState,
@@ -198,5 +297,20 @@ describe('GitHubTokenInput', () => {
 
     const testButton = screen.getByRole('button', { name: /test/i })
     expect(testButton).toBeDisabled()
+  })
+
+  it('enables Test for a newly entered token and validates it without a prior blur', async () => {
+    mockValidateToken.mockResolvedValue(true)
+    const user = userEvent.setup()
+    render(<GitHubTokenInput />)
+    const input = screen.getByPlaceholderText(/ghp_/)
+
+    await user.type(input, 'ghp_new_token')
+    const testButton = screen.getByRole('button', { name: /test/i })
+    expect(testButton).toBeEnabled()
+    await user.click(testButton)
+
+    expect(mockSetToken).toHaveBeenCalledWith('ghp_new_token')
+    expect(mockValidateToken).toHaveBeenCalledWith('ghp_new_token')
   })
 })

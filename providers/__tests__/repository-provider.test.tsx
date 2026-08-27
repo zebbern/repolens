@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { renderHook, act } from '@testing-library/react'
+import { renderHook, act, waitFor } from '@testing-library/react'
 import { render, screen } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import React, { useState } from 'react'
@@ -17,6 +17,7 @@ vi.mock('@/lib/github/client', () => ({
   fetchFileViaProxy: vi.fn(),
   setGitHubPAT: vi.fn(),
   getGitHubPAT: vi.fn(),
+  getGitHubCredentialPrincipal: vi.fn(() => null),
   clearGitHubCache: vi.fn(),
 }))
 
@@ -256,6 +257,10 @@ describe('B5 lazy-tier analysis gate', () => {
 
     await act(async () => {
       await result.current.connectRepository('https://github.com/acme/bigrepo')
+    })
+
+    await waitFor(() => {
+      expect(result.current.indexingProgress.isComplete).toBe(true)
     })
 
     // Sanity: confirm the lazy tier was actually reached (not IDB or in-memory tier)

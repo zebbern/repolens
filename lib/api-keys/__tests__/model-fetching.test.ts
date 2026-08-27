@@ -78,7 +78,7 @@ describe('fetchProviderModels', () => {
     expect(result.models[0].provider).toBe('google')
   })
 
-  it('returns empty models and isValid=false on non-ok response', async () => {
+  it('returns empty models and isValid=false on a 401 response', async () => {
     mockFetch.mockResolvedValueOnce({
       ok: false,
       status: 401,
@@ -89,7 +89,27 @@ describe('fetchProviderModels', () => {
     expect(result.isValid).toBe(false)
   })
 
-  it('returns isValid=false when response has empty models array', async () => {
+  it('returns empty models and isValid=false on a 403 response', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 403,
+    })
+
+    const result = await fetchProviderModels('openai', 'bad-key')
+    expect(result.models).toEqual([])
+    expect(result.isValid).toBe(false)
+  })
+
+  it.each([429, 500, 503])('rejects a transient HTTP %s response without classifying the key as invalid', async (status) => {
+    mockFetch.mockResolvedValueOnce({
+      ok: false,
+      status,
+    })
+
+    await expect(fetchProviderModels('openai', 'sk-key')).rejects.toThrow(String(status))
+  })
+
+  it('treats a successful empty models array as valid credentials', async () => {
     mockFetch.mockResolvedValueOnce({
       ok: true,
       json: async () => ({ models: [] }),
@@ -97,10 +117,10 @@ describe('fetchProviderModels', () => {
 
     const result = await fetchProviderModels('openai', 'sk-key')
     expect(result.models).toEqual([])
-    expect(result.isValid).toBe(false)
+    expect(result.isValid).toBe(true)
   })
 
-  it('handles missing models field in response', async () => {
+  it('treats a successful response without a models field as valid credentials', async () => {
     mockFetch.mockResolvedValueOnce({
       ok: true,
       json: async () => ({}),
@@ -108,7 +128,7 @@ describe('fetchProviderModels', () => {
 
     const result = await fetchProviderModels('openai', 'sk-key')
     expect(result.models).toEqual([])
-    expect(result.isValid).toBe(false)
+    expect(result.isValid).toBe(true)
   })
 
   it('propagates fetch errors (network failure)', async () => {

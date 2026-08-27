@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, type Mock } from 'vitest'
-import { render, screen, act, renderHook } from '@testing-library/react'
+import { render, screen, act, renderHook, waitFor } from '@testing-library/react'
+import { StrictMode } from 'react'
 import type { ReactNode } from 'react'
 import { ToursProvider, useTours } from '../tours-provider'
 import type { Tour, TourStop } from '@/types/tours'
@@ -14,11 +15,16 @@ vi.mock('@/lib/cache/tour-cache', () => ({
   deleteTour: vi.fn().mockResolvedValue(undefined),
 }))
 
+vi.mock('@/lib/github/client', () => ({
+  getGitHubCredentialPrincipal: vi.fn().mockReturnValue(null),
+}))
+
 import {
   getToursByRepo as mockGetToursByRepo,
   saveTour as mockSaveTour,
   deleteTour as mockDeleteTour,
 } from '@/lib/cache/tour-cache'
+import { getGitHubCredentialPrincipal as mockGetGitHubCredentialPrincipal } from '@/lib/github/client'
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -53,6 +59,7 @@ describe('ToursProvider', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     ;(mockGetToursByRepo as Mock).mockResolvedValue([])
+    ;(mockGetGitHubCredentialPrincipal as Mock).mockReturnValue(null)
   })
 
   // ---- Initial state -----------------------------------------------------
@@ -91,9 +98,92 @@ describe('ToursProvider', () => {
       await result.current.loadTours('owner/repo')
     })
 
-    expect(mockGetToursByRepo).toHaveBeenCalledWith('owner/repo')
+    expect(mockGetToursByRepo).toHaveBeenCalledWith('owner/repo', { principal: null })
     expect(result.current.tours).toHaveLength(1)
     expect(result.current.tours[0].id).toBe('cached-tour')
+  })
+
+  it('passes the current credential principal to tour cache reads and writes', async () => {
+    ;(mockGetGitHubCredentialPrincipal as Mock).mockReturnValue('oauth:account-a')
+    const tour = makeTour({ id: 'principal-tour', visibility: 'private' })
+    ;(mockGetToursByRepo as Mock).mockResolvedValue([tour])
+    const { result } = renderHook(() => useTours(), { wrapper })
+
+    await act(async () => { await result.current.loadTours('owner/repo') })
+    expect(mockGetToursByRepo).toHaveBeenCalledWith('owner/repo', { principal: 'oauth:account-a' })
+
+    await act(async () => { await result.current.saveTour(tour) })
+    expect(mockSaveTour).toHaveBeenCalledWith(tour, { principal: 'oauth:account-a' })
+  })
+
+  it('clears the previous repository synchronously and ignores its stale load', async () => {
+    const tourA = makeTour({ id: 'tour-a', repoKey: 'owner/a' })
+    const tourB = makeTour({ id: 'tour-b', repoKey: 'owner/b' })
+    let resolveA!: (value: Tour[]) => void
+    ;(mockGetToursByRepo as Mock)
+      .mockReturnValueOnce(new Promise<Tour[]>(resolve => { resolveA = resolve }))
+      .mockResolvedValueOnce([tourB])
+
+    const { result } = renderHook(() => useTours(), { wrapper })
+    let loadA!: Promise<void>
+    act(() => { loadA = result.current.loadTours('owner/a') })
+    expect(result.current.tours).toEqual([])
+    act(() => { void result.current.loadTours('owner/b') })
+    expect(result.current.tours).toEqual([])
+
+    resolveA([tourA])
+    await act(async () => { await loadA; await Promise.resolve() })
+    await waitFor(() => expect(result.current.tours).toEqual([tourB]))
+    expect(result.current.tours).not.toContainEqual(tourA)
+  })
+
+  it('resets tours and playback when the repository prop changes', async () => {
+    const tourA = makeTour({ id: 'tour-a', repoKey: 'owner/a' })
+    let resolveStale!: (value: Tour[]) => void
+    ;(mockGetToursByRepo as Mock)
+      .mockResolvedValueOnce([tourA])
+      .mockReturnValueOnce(new Promise<Tour[]>(resolve => { resolveStale = resolve }))
+    let context: ReturnType<typeof useTours> | null = null
+    function Consumer() {
+      context = useTours()
+      return null
+    }
+    const { rerender } = render(
+      <ToursProvider repoKey="owner/a"><Consumer /></ToursProvider>,
+    )
+
+    await act(async () => { await context!.loadTours('owner/a') })
+    act(() => {
+      context!.startTour(tourA)
+      context!.goToStop(1)
+    })
+    expect(context!.activeTour?.id).toBe('tour-a')
+    expect(context!.activeStopIndex).toBe(1)
+    expect(context!.isPlaying).toBe(true)
+
+    let staleLoad!: Promise<void>
+    act(() => { staleLoad = context!.loadTours('owner/a') })
+    rerender(<ToursProvider repoKey="owner/b"><Consumer /></ToursProvider>)
+
+    expect(context!.tours).toEqual([])
+    expect(context!.activeTour).toBeNull()
+    expect(context!.activeStopIndex).toBe(0)
+    expect(context!.isPlaying).toBe(false)
+
+    resolveStale([tourA])
+    await act(async () => { await staleLoad })
+    expect(context!.tours).toEqual([])
+  })
+
+  it('does not load a repository outside the provider scope', async () => {
+    const { result } = renderHook(() => useTours(), {
+      wrapper: ({ children }) => <ToursProvider repoKey="owner/current">{children}</ToursProvider>,
+    })
+
+    await act(async () => { await result.current.loadTours('owner/other') })
+
+    expect(mockGetToursByRepo).not.toHaveBeenCalled()
+    expect(result.current.tours).toEqual([])
   })
 
   // ---- createTour --------------------------------------------------------
@@ -118,6 +208,55 @@ describe('ToursProvider', () => {
     expect(result.current.tours).toHaveLength(1)
   })
 
+  it('createTour persists the current repository visibility', async () => {
+    const { result } = renderHook(() => useTours(), {
+      wrapper: ({ children }) => <ToursProvider repoKey="owner/repo" repoVisibility="private">{children}</ToursProvider>,
+    })
+
+    let created: Tour | undefined
+    await act(async () => {
+      created = await result.current.createTour('Private Tour', 'Description', 'owner/repo')
+    })
+
+    expect(created?.visibility).toBe('private')
+    expect(mockSaveTour).toHaveBeenCalledWith(expect.objectContaining({ visibility: 'private' }), { principal: null })
+  })
+
+  it('saveTour attaches the current repository visibility to a legacy tour', async () => {
+    const tour = makeTour()
+    const { result } = renderHook(() => useTours(), {
+      wrapper: ({ children }) => <ToursProvider repoKey="owner/repo" repoVisibility="public">{children}</ToursProvider>,
+    })
+
+    await act(async () => {
+      await result.current.saveTour(tour)
+    })
+
+    expect(mockSaveTour).toHaveBeenCalledWith(expect.objectContaining({ visibility: 'public' }), { principal: null })
+  })
+
+  it('rejects saving a tour outside the current repository scope', async () => {
+    const { result } = renderHook(() => useTours(), {
+      wrapper: ({ children }) => <ToursProvider repoKey="owner/current">{children}</ToursProvider>,
+    })
+
+    await expect(act(async () => {
+      await result.current.saveTour(makeTour({ repoKey: 'owner/other' }))
+    })).rejects.toThrow('outside the current repository scope')
+    expect(mockSaveTour).not.toHaveBeenCalled()
+  })
+
+  it('does not start a tour outside the current repository scope', () => {
+    const { result } = renderHook(() => useTours(), {
+      wrapper: ({ children }) => <ToursProvider repoKey="owner/current">{children}</ToursProvider>,
+    })
+
+    act(() => { result.current.startTour(makeTour({ repoKey: 'owner/other' })) })
+
+    expect(result.current.activeTour).toBeNull()
+    expect(result.current.isPlaying).toBe(false)
+  })
+
   // ---- deleteTour --------------------------------------------------------
 
   it('deleteTour removes the tour from state and calls deleteTour on cache', async () => {
@@ -137,6 +276,61 @@ describe('ToursProvider', () => {
 
     expect(mockDeleteTour).toHaveBeenCalledWith('to-delete')
     expect(result.current.tours).toHaveLength(0)
+  })
+
+  it('does not delete a tour that is outside the current repository scope', async () => {
+    const currentTour = makeTour({ id: 'current', repoKey: 'owner/current' })
+    ;(mockGetToursByRepo as Mock).mockResolvedValue([currentTour])
+    const { result } = renderHook(() => useTours(), {
+      wrapper: ({ children }) => <ToursProvider repoKey="owner/current">{children}</ToursProvider>,
+    })
+
+    await act(async () => { await result.current.loadTours('owner/current') })
+    await act(async () => { await result.current.deleteTour('other-repo-tour') })
+
+    expect(mockDeleteTour).not.toHaveBeenCalled()
+    expect(result.current.tours).toEqual([currentTour])
+  })
+
+  it('does not persist through callbacks retained after the provider unmounts', async () => {
+    const { result, unmount } = renderHook(() => useTours(), {
+      wrapper: ({ children }) => <ToursProvider repoKey="owner/current">{children}</ToursProvider>,
+    })
+    const staleSave = result.current.saveTour
+    unmount()
+
+    await expect(staleSave(makeTour({ repoKey: 'owner/current' }))).rejects.toThrow('provider is inactive')
+    expect(mockSaveTour).not.toHaveBeenCalled()
+  })
+
+  it('does not persist stop mutations through callbacks retained after unmount', () => {
+    const { result, unmount } = renderHook(() => useTours(), {
+      wrapper: ({ children }) => <ToursProvider repoKey="owner/current">{children}</ToursProvider>,
+    })
+    act(() => { result.current.startTour(makeTour({ repoKey: 'owner/current' })) })
+    const staleAddStop = result.current.addStop
+    unmount()
+
+    staleAddStop({ filePath: 'src/stale.ts', startLine: 1, endLine: 1, annotation: 'stale' })
+
+    expect(mockSaveTour).not.toHaveBeenCalled()
+  })
+
+  it('remains active after StrictMode effect replay', async () => {
+    const { result } = renderHook(() => useTours(), {
+      reactStrictMode: true,
+      wrapper: ({ children }) => (
+        <StrictMode>
+          <ToursProvider repoKey="owner/current">{children}</ToursProvider>
+        </StrictMode>
+      ),
+    })
+
+    await act(async () => {
+      await result.current.saveTour(makeTour({ repoKey: 'owner/current' }))
+    })
+
+    expect(mockSaveTour).toHaveBeenCalled()
   })
 
   it('deleteTour stops playback if the deleted tour is the active one', async () => {

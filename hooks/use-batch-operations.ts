@@ -33,6 +33,7 @@ export interface BatchOperationsOptions {
   setFixCache: React.Dispatch<React.SetStateAction<Map<string, FixSuggestion | null>>>
   setShowFix: React.Dispatch<React.SetStateAction<Set<string>>>
   setValidationResults: React.Dispatch<React.SetStateAction<Map<string, ValidationResult>>>
+  repositoryKey?: string
   repositorySession: RepositorySession | null
   isRepositorySessionCurrent: (session: RepositorySession | null) => boolean
 }
@@ -69,6 +70,7 @@ export function useBatchOperations({
   setFixCache,
   setShowFix,
   setValidationResults,
+  repositoryKey,
   repositorySession,
   isRepositorySessionCurrent,
 }: BatchOperationsOptions) {
@@ -191,6 +193,7 @@ export function useBatchOperations({
 
     const operation = beginOperation('validation', criticalHigh.length, requestSession)
     if (!operation) return
+    if (!requestSession) return
 
     let completed = 0
     let failed = 0
@@ -223,6 +226,9 @@ export function useBatchOperations({
               provider: selectedProvider,
               model: selectedModel.id,
               apiKey,
+              repositoryKey,
+              repositorySessionId: String(requestSession.id),
+              signal: operation.controller.signal,
             })
             if (!isOperationCurrent(operation)) return
             setValidationResults((prev) => new Map(prev).set(issue.id, result))
@@ -249,7 +255,7 @@ export function useBatchOperations({
     } finally {
       finishOperation(operation)
     }
-  }, [selectedProvider, selectedModel, apiKeys, codeIndex, validateFinding, setValidationResults, repositorySession, isRepositorySessionCurrent, beginOperation, finishOperation, isOperationCurrent])
+  }, [selectedProvider, selectedModel, apiKeys, codeIndex, validateFinding, setValidationResults, repositoryKey, repositorySession, isRepositorySessionCurrent, beginOperation, finishOperation, isOperationCurrent])
 
   // -----------------------------------------------------------------------
   // Batch fix generation (async — fetches content from contentStore)

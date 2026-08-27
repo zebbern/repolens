@@ -18,6 +18,7 @@ import {
 import type { CodeIndex } from '@/lib/code/code-index'
 import { batchIndexFiles, batchIndexMetadataOnly, createEmptyIndex, createEmptyIndexWithStore } from '@/lib/code/code-index'
 import { openIndexedDB } from '@/lib/code/open-indexed-db'
+import { getGitHubCredentialPrincipal } from '@/lib/github/client'
 
 const DB_NAME = 'repolens-cache'
 const STORE_NAME = 'repos'
@@ -73,6 +74,9 @@ export interface CachedRepo {
   description?: string | null
   stars?: number
   language?: string | null
+  /** Visibility is recorded so credential removal can purge private data only. */
+  visibility?: 'public' | 'private'
+  principal?: string
 }
 
 export function isReusableCachedRepo(entry: CachedRepo): entry is CachedRepo & {
@@ -87,6 +91,8 @@ export function isReusableCachedRepo(entry: CachedRepo): entry is CachedRepo & {
     || !isCoverageComplete(entry.coverage)
     || entry.key !== getRepoKey(entry.owner, entry.repo)
     || !entry.content
+    || (entry.visibility !== 'public' && entry.visibility !== 'private')
+    || (entry.visibility === 'private' && !entry.principal)
   ) return false
 
   const runtimeContent: unknown = entry.content
@@ -137,6 +143,8 @@ export interface CachedRepoMeta {
   description?: string | null
   stars?: number
   language?: string | null
+  visibility?: 'public' | 'private'
+  principal?: string
 }
 
 // ---------------------------------------------------------------------------
@@ -264,6 +272,29 @@ async function getAllRepoRecords(db: IDBDatabase, signal?: AbortSignal): Promise
   return records
 }
 
+async function clearPrivateTours(db: IDBDatabase, signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted) throw signal.reason
+  const tx = db.transaction(TOURS_STORE_NAME, 'readwrite', { durability: 'strict' })
+  const done = transactionDone(tx, signal)
+  const requestResult = new Promise<void>((resolve, reject) => {
+    const request = tx.objectStore(TOURS_STORE_NAME).openCursor()
+    request.onerror = () => reject(request.error ?? new DOMException('Failed to read tour cache', 'UnknownError'))
+    request.onsuccess = () => {
+      const cursor = request.result
+      if (!cursor) {
+        resolve()
+        return
+      }
+
+      const tour = cursor.value as { visibility?: 'public' | 'private' }
+      if (tour.visibility !== 'public') cursor.delete()
+      cursor.continue()
+    }
+  })
+  await Promise.all([requestResult, done])
+  if (signal?.aborted) throw signal.reason
+}
+
 function sameManifestIdentity(current: CachedRepo, candidate: CachedRepo): boolean {
   return current.key === candidate.key
     && current.owner === candidate.owner
@@ -294,6 +325,11 @@ async function invalidateCachedRecord(
 ): Promise<void> {
   await deleteRecordContent(record, signal)
   await deleteRepoManifestIfIdentity(db, record, signal)
+}
+
+function canReadPrivateCache(record: CachedRepo, principal?: string | null): boolean {
+  if (record.visibility !== 'private') return true
+  return typeof principal === 'string' && principal.length > 0 && record.principal === principal
 }
 
 /** Run an LRU eviction pass while the origin-wide mutation lease is held. */
@@ -337,7 +373,7 @@ async function evictLRU(db: IDBDatabase, lease: CacheMutationLease): Promise<voi
 export async function getCachedRepo(
   owner: string,
   repo: string,
-  options: { signal?: AbortSignal; coordinator?: CacheMutationCoordinator } = {},
+  options: { signal?: AbortSignal; coordinator?: CacheMutationCoordinator; principal?: string | null } = {},
 ): Promise<ReusableCachedRepo | null> {
   const throwIfAborted = () => {
     if (options.signal?.aborted) {
@@ -358,6 +394,8 @@ export async function getCachedRepo(
         await invalidateCachedRecord(db, entry, lease.signal)
         return null
       }
+      const principal = options.principal === undefined ? getGitHubCredentialPrincipal() : options.principal
+      if (entry && !canReadPrivateCache(entry, principal)) return null
 
       // Touch timestamp so LRU eviction keeps frequently-accessed repos.
       if (entry) {
@@ -400,6 +438,7 @@ export async function withHydratedCachedRepo(
     /** @deprecated Storage representation is selected by the cached discriminator. */
     useIDB?: boolean
     coordinator?: CacheMutationCoordinator
+    principal?: string | null
   },
   consume: (result: HydratedCachedRepo) => void | Promise<void>,
 ): Promise<boolean> {
@@ -417,6 +456,8 @@ export async function withHydratedCachedRepo(
         await invalidateCachedRecord(db, entry, lease.signal)
         return false
       }
+      const principal = options.principal === undefined ? getGitHubCredentialPrincipal() : options.principal
+      if (!canReadPrivateCache(entry, principal)) return false
       if (entry.sha !== expectedSha) return false
 
       let index: CodeIndex
@@ -426,7 +467,12 @@ export async function withHydratedCachedRepo(
           break
         case 'idb': {
           const store = new IDBContentStore(entry.content.storeKey, lease.signal, { kind: 'disabled' })
-          store.registerPaths(entry.content.files.map(file => file.path))
+          const paths = entry.content.files.map(file => file.path)
+          if (!await store.containsAllDurablePaths(paths)) {
+            await invalidateCachedRecord(db, entry, lease.signal)
+            return false
+          }
+          store.registerPaths(paths)
           index = batchIndexMetadataOnly(createEmptyIndexWithStore(store), entry.content.files)
           break
         }
@@ -467,11 +513,14 @@ export async function publishCachedRepo(
   content: CachedContent,
   tree: FileNode[],
   coverage: RepositoryCoverage,
-  meta?: { description?: string | null; stars?: number; language?: string | null },
+  meta?: { description?: string | null; stars?: number; language?: string | null; visibility?: 'public' | 'private'; principal?: string },
   options: CachePublicationOptions = {},
 ): Promise<void> {
   void options
   if (!isCoverageComplete(coverage)) return
+  if (meta?.visibility === 'private' && !meta.principal) {
+    throw new Error(`Cannot cache private repository ${owner}/${repo} without a credential principal`)
+  }
   const key = getRepoKey(owner, repo)
   if (content.kind === 'idb' && content.storeKey !== getContentStoreKey(owner, repo, sha)) {
     throw new Error(`Invalid content store key for ${key}@${sha}`)
@@ -482,6 +531,7 @@ export async function publishCachedRepo(
   throwIfCacheMutationAborted(lease)
   const previous = await getRepoRecord(db, key, lease.signal)
   throwIfCacheMutationAborted(lease)
+  const visibility = meta?.visibility ?? 'public'
   const record: CachedRepo = {
     schemaVersion: REPO_CACHE_SCHEMA_VERSION,
     coverage,
@@ -493,10 +543,12 @@ export async function publishCachedRepo(
     timestamp: Date.now(),
     content,
     tree,
+    visibility,
     ...(meta && {
       description: meta.description,
       stars: meta.stars,
       language: meta.language,
+      ...(visibility === 'private' && meta.principal ? { principal: meta.principal } : {}),
     }),
   }
 
@@ -538,7 +590,7 @@ export async function setCachedRepo(
   files: Array<{ path: string; content: string; language?: string }>,
   tree: FileNode[],
   coverage: RepositoryCoverage,
-  meta?: { description?: string | null; stars?: number; language?: string | null },
+  meta?: { description?: string | null; stars?: number; language?: string | null; visibility?: 'public' | 'private'; principal?: string },
   options: CachePublicationOptions & {
     signal?: AbortSignal
     coordinator?: CacheMutationCoordinator
@@ -578,7 +630,7 @@ export async function clearCachedRepo(
 }
 
 /** List lightweight metadata for all cached repos, sorted by most-recent first. */
-export async function listCachedRepos(): Promise<CachedRepoMeta[]> {
+export async function listCachedRepos(options: { principal?: string | null } = {}): Promise<CachedRepoMeta[]> {
   try {
     return await withCacheMutationLock(undefined, async lease => {
       if (!lease.crossContextSafe) return []
@@ -593,8 +645,9 @@ export async function listCachedRepos(): Promise<CachedRepoMeta[]> {
       })
       const reusable: ReusableCachedRepo[] = []
       for (const record of records) {
-        if (isReusableCachedRepo(record)) reusable.push(record)
-        else await invalidateCachedRecord(db, record, lease.signal)
+        const principal = options.principal === undefined ? getGitHubCredentialPrincipal() : options.principal
+        if (isReusableCachedRepo(record) && canReadPrivateCache(record, principal)) reusable.push(record)
+        else if (!isReusableCachedRepo(record)) await invalidateCachedRecord(db, record, lease.signal)
       }
 
       return reusable.map((r) => ({
@@ -607,12 +660,35 @@ export async function listCachedRepos(): Promise<CachedRepoMeta[]> {
         description: r.description,
         stars: r.stars,
         language: r.language,
+        visibility: r.visibility,
+        principal: r.principal,
       }))
       .sort((a, b) => b.timestamp - a.timestamp)
     })
   } catch {
     return []
   }
+}
+
+/** Remove cached private repository data while preserving public repositories. */
+export async function clearPrivateRepoCache(
+  options: { signal?: AbortSignal; coordinator?: CacheMutationCoordinator } = {},
+): Promise<void> {
+  return withCacheMutationLock(options.signal, async lease => {
+    requireCrossContextCacheCoordination(lease)
+    const db = await openDB(lease.signal)
+    const records = await getAllRepoRecords(db, lease.signal)
+    throwIfCacheMutationAborted(lease)
+    for (const record of records) {
+      // Records written before visibility metadata existed may contain private
+      // source. Preserve only entries explicitly known to be public.
+      if (record.visibility === 'public') continue
+      await invalidateCachedRecord(db, record, lease.signal)
+    }
+    throwIfCacheMutationAborted(lease)
+    await clearPrivateTours(db, lease.signal)
+    throwIfCacheMutationAborted(lease)
+  }, options.coordinator)
 }
 
 /** Clear all cached repos. */

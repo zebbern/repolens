@@ -71,6 +71,32 @@ describe('useGitHistory', () => {
     expect(result.current.error).toBeNull()
   })
 
+  it('keeps the newest commit-detail response when SHA requests overlap', async () => {
+    let resolveOld!: (value: unknown) => void
+    let resolveNew!: (value: unknown) => void
+    mockFetchCommitDetail
+      .mockReturnValueOnce(new Promise(resolve => { resolveOld = resolve }))
+      .mockReturnValueOnce(new Promise(resolve => { resolveNew = resolve }))
+    const { result } = renderHook(() => useGitHistory())
+
+    let oldRequest!: Promise<void>
+    act(() => { oldRequest = result.current.fetchCommitDetail('owner', 'repo', 'oldsha') })
+    const oldSignal = mockFetchCommitDetail.mock.calls[0][3]?.signal
+    let newRequest!: Promise<void>
+    act(() => { newRequest = result.current.fetchCommitDetail('owner', 'repo', 'newsha') })
+
+    expect(oldSignal).toBeInstanceOf(AbortSignal)
+    expect(oldSignal?.aborted).toBe(true)
+
+    resolveNew({ sha: 'newsha', files: [] })
+    await act(async () => { await newRequest })
+    resolveOld({ sha: 'oldsha', files: [] })
+    await act(async () => { await oldRequest })
+
+    expect(result.current.selectedCommit?.sha).toBe('newsha')
+    expect(result.current.isLoading).toBe(false)
+  })
+
   it('returns initial empty state', () => {
     const { result } = renderHook(() => useGitHistory())
 
@@ -96,6 +122,7 @@ describe('useGitHistory', () => {
 
     expect(result.current.commits).toEqual(data)
     expect(result.current.isLoading).toBe(false)
+    expect(mockFetchCommits.mock.calls[0][2]?.signal).toBeInstanceOf(AbortSignal)
   })
 
   it('fetchBlame sets blameData', async () => {
@@ -114,6 +141,7 @@ describe('useGitHistory', () => {
 
     expect(result.current.blameData).toEqual(blameData)
     expect(result.current.isLoading).toBe(false)
+    expect(mockFetchBlame.mock.calls[0][4]?.signal).toBeInstanceOf(AbortSignal)
   })
 
   it('fetchBlame surfaces auth error message', async () => {
@@ -155,6 +183,7 @@ describe('useGitHistory', () => {
 
     expect(result.current.selectedCommit).toEqual(detail)
     expect(result.current.viewMode).toBe('commit-detail')
+    expect(mockFetchCommitDetail.mock.calls[0][3]?.signal).toBeInstanceOf(AbortSignal)
   })
 
   it('setViewMode changes viewMode', () => {

@@ -80,6 +80,29 @@ const STRING_LITERAL_SUPPRESSED_IDS = new Set(['eval-usage', 'sql-injection', 'i
 const EXTRACT_SECRET_VALUE = /[:=]\s*["'`]([^"'`]{4,})["'`]/
 const SSRF_FILE_VALIDATION = /\b(?:ALLOWED_(?:HOSTS|DOMAINS)|allowedOrigins|allowlist|whitelist|isValidUrl|validateUrl)\b/i
 
+// Credential assignments that resolve their value at runtime are not
+// hardcoded credentials. Keep this separate from rule-level exclusions so
+// only the credential rules receive this semantic suppression.
+const RUNTIME_CREDENTIAL_REFERENCE = /^(?:\$\{[A-Za-z_][A-Za-z0-9_]*\}|\$[A-Za-z_][A-Za-z0-9_]*|\$env:[A-Za-z_][A-Za-z0-9_]*|\$\{env:[A-Za-z_][A-Za-z0-9_]*\}|\$\{[A-Za-z_][A-Za-z0-9_]*(?::?\?[^}]*)\}|\$\{\{\s*(?:secrets|env|vars)\.[A-Za-z_][A-Za-z0-9_]*\s*\}\})$/i
+const BATCH_CREDENTIAL_REFERENCE = /^%[A-Za-z_][A-Za-z0-9_]*%$/
+const CREDENTIAL_ASSIGNMENT = /[:=]\s*(["'])([^"']*)\1/
+const SINGLE_QUOTE_LITERAL_FILE = /(?:^|[/\\])(?:Dockerfile|Containerfile)(?:\.[^/\\]+)?$|\.(?:sh|bash|zsh|ksh|fish|ps1|psm1|psd1|command)$/i
+const POWERSHELL_SCRIPT_FILE = /\.(?:ps1|psm1|psd1)$/i
+const BATCH_SCRIPT_FILE = /\.(?:bat|cmd)$/i
+
+function isRuntimeCredentialReference(matchedText: string, ruleId: string, path: string): boolean {
+  if (ruleId !== 'hardcoded-secret' && ruleId !== 'hardcoded-password') return false
+
+  const assignment = matchedText.match(CREDENTIAL_ASSIGNMENT)
+  if (!assignment) return false
+
+  if (assignment[1] === "'" && SINGLE_QUOTE_LITERAL_FILE.test(path)) return false
+  const value = assignment[2]?.trim()
+  if (!value) return false
+  if (BATCH_CREDENTIAL_REFERENCE.test(value)) return BATCH_SCRIPT_FILE.test(path)
+  return RUNTIME_CREDENTIAL_REFERENCE.test(value)
+}
+
 // ---------------------------------------------------------------------------
 // Scan memoization — avoids redundant O(n) scans when multiple components
 // (code-browser + issues-panel) call scanIssues with the same codeIndex.
@@ -252,7 +275,11 @@ function runRegexRules(
 
         // Test compiled regex against the line
         regex.lastIndex = 0
-        if (!regex.test(lineContent)) continue
+        let ruleMatch = regex.exec(lineContent)
+        while (ruleMatch && isRuntimeCredentialReference(ruleMatch[0], rule.id, path)) {
+          ruleMatch = regex.exec(lineContent)
+        }
+        if (!ruleMatch) continue
 
         // Per-rule line exclusion
         if (rule.excludePattern && rule.excludePattern.test(lineContent)) continue
@@ -271,12 +298,17 @@ function runRegexRules(
           && rule.id !== 'eslint-disable'
         ) continue
         if ((lineCtx.isTestFile || lineCtx.isGeneratedFile || lineCtx.isExampleFile) && rule.category !== 'security') continue
-        if (lineCtx.isTypeAnnotation && SECRET_RULE_IDS.test(rule.id)) continue
+        if (
+          lineCtx.isTypeAnnotation
+          && SECRET_RULE_IDS.test(rule.id)
+          && !(POWERSHELL_SCRIPT_FILE.test(path) && CREDENTIAL_ASSIGNMENT.test(ruleMatch[0]))
+        ) continue
         if (lineCtx.isStringLiteral && STRING_LITERAL_SUPPRESSED_IDS.has(rule.id)) continue
 
         // --- Entropy check for secret rules ---
         if (ENTROPY_CHECKED_RULE_IDS.test(rule.id)) {
-          const valueMatch = lineContent.match(EXTRACT_SECRET_VALUE)
+          const valueSource = rule.id === 'hardcoded-secret' ? ruleMatch[0] : lineContent
+          const valueMatch = valueSource.match(EXTRACT_SECRET_VALUE)
           if (valueMatch) {
             const secretValue = valueMatch[1]
             if (!isLikelyRealSecret(secretValue)) continue

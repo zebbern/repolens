@@ -246,7 +246,7 @@ export function verifyToken(token: string) {
     file: {
       path: 'src/config/aws.ts',
       content: `export const awsConfig = {
-  accessKeyId: "AKIAIOSFODNN7EXAMPLE",
+  accessKeyId: "AKIAIOSFODNN7EXAMPL1",
   secretAccessKey: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
   region: "us-east-1",
 }`,

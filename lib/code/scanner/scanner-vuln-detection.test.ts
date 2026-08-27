@@ -1,7 +1,7 @@
 /**
  * Comprehensive vulnerability detection test suite.
  *
- * Tests 126 scenarios across 10 categories (A–J), validating that the scanner
+ * Tests vulnerability scenarios across 10 categories (A–J), validating that the scanner
  * correctly detects vulnerabilities AND suppresses false positives.
  *
  * Pattern: createEmptyIndex() → indexFile() → scanIssues() → assert on ruleId,
@@ -50,6 +50,15 @@ describe('Category A: Secrets & Credentials', () => {
     expect(hits[0].severity).toBe('critical')
     expect(hits[0].cwe).toBe('CWE-798')
   })
+
+  it.each(['AKIAIOSFODNN7EXAMPLE', 'ASIAIOSFODNN7EXAMPLE'])(
+    'A1b: does not flag the non-working AWS documentation key %s',
+    (key) => {
+      const result = scanCode('src/docs.ts', `// Example: ${key}`, 'typescript')
+      const hits = issuesForRule(result.issues, 'hardcoded-aws-key')
+      expect(hits).toHaveLength(0)
+    },
+  )
 
   it('A2: detects ASIA-prefixed AWS temporary key', () => {
     const result = scanCode('src/config.ts', 'const key = "ASIAXYZ123456789ABCD"', 'typescript')
@@ -117,6 +126,73 @@ describe('Category A: Secrets & Credentials', () => {
     const result = scanCode('src/config.ts', 'password: process.env.DB_PASSWORD', 'typescript')
     const hits = issuesForRule(result.issues, 'hardcoded-password')
     expect(hits).toHaveLength(0)
+  })
+
+  it.each([
+    ['shell environment password', 'src/deploy.sh', '-e POSTGRES_PASSWORD="$DB_PASSWORD" \\', 'shell', 'hardcoded-password'],
+    ['braced shell password', 'src/deploy.sh', 'PASSWORD="${DB_PASSWORD}"', 'shell', 'hardcoded-password'],
+    ['PowerShell environment password', 'src/deploy.ps1', '$env:PASSWORD = "$env:DB_PASSWORD"', 'powershell', 'hardcoded-password'],
+    ['braced PowerShell environment password', 'src/deploy.ps1', 'PASSWORD = "${env:DB_PASSWORD}"', 'powershell', 'hardcoded-password'],
+    ['batch environment password', 'src/deploy.cmd', 'PASSWORD="%DB_PASSWORD%"', 'batch', 'hardcoded-password'],
+    ['required shell environment password', 'src/deploy.sh', 'PASSWORD="${DB_PASSWORD:?required}"', 'shell', 'hardcoded-password'],
+    ['GitHub secret expression', 'src/deploy.ts', 'password: "${{ secrets.DB_PASSWORD }}"', 'typescript', 'hardcoded-password'],
+    ['GitHub environment expression', 'src/deploy.ts', 'password: "${{ env.DB_PASSWORD }}"', 'typescript', 'hardcoded-password'],
+    ['GitHub secret assigned to a secret', 'src/deploy.ts', 'api_secret: "${{ secrets.API_SECRET }}"', 'typescript', 'hardcoded-secret'],
+  ])('A10b: FALSE POSITIVE — %s is not flagged', (_name, path, code, lang, ruleId) => {
+    const result = scanCode(path, code, lang)
+    expect(issuesForRule(result.issues, ruleId)).toHaveLength(0)
+  })
+
+  it('A10h: FALSE POSITIVE — runtime password reference after an earlier assignment is not flagged', () => {
+    const result = scanCode(
+      'src/deploy.sh',
+      'if [ "$mode" = "release" ]; then POSTGRES_PASSWORD="$DB_PASSWORD"; fi',
+      'shell',
+    )
+    const hits = issuesForRule(result.issues, 'hardcoded-password')
+    expect(hits).toHaveLength(0)
+  })
+
+  it('A10i: detects literal production password after reference suppression', () => {
+    const result = scanCode('src/config.ts', 'POSTGRES_PASSWORD="real-production-password"', 'typescript')
+    const hits = issuesForRule(result.issues, 'hardcoded-password')
+    expect(hits.length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('A10ia: detects a nonempty hardcoded shell fallback', () => {
+    const result = scanCode('src/deploy.sh', 'PASSWORD="${DB_PASSWORD:-real-production-password}"', 'shell')
+    const hits = issuesForRule(result.issues, 'hardcoded-password')
+    expect(hits.length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('A10j: detects a literal password after a runtime reference on the same line', () => {
+    const result = scanCode(
+      'src/config.ts',
+      'PASSWORD="$DB_PASSWORD"; ADMIN_PASSWORD="real-production-password"',
+      'typescript',
+    )
+    const hits = issuesForRule(result.issues, 'hardcoded-password')
+    expect(hits.length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('A10ja: detects a literal secret after a runtime reference on the same line', () => {
+    const result = scanCode(
+      'src/deploy.sh',
+      'API_SECRET="$API_SECRET"; ADMIN_SECRET="a1b2c3d4e5f6g7h8i9j0"',
+      'shell',
+    )
+    const hits = issuesForRule(result.issues, 'hardcoded-secret')
+    expect(hits.length).toBeGreaterThanOrEqual(1)
+  })
+
+  it.each([
+    ['POSIX shell', 'src/deploy.sh', "PASSWORD='$DB_PASSWORD'", 'shell'],
+    ['PowerShell', 'src/deploy.ps1', "$env:PASSWORD = '$env:DB_PASSWORD'", 'powershell'],
+    ['braced PowerShell', 'src/deploy.ps1', "PASSWORD = '${env:DB_PASSWORD}'", 'powershell'],
+  ])('A10k: detects a single-quoted %s variable because the shell treats it literally', (_name, path, code, lang) => {
+    const result = scanCode(path, code, lang)
+    const hits = issuesForRule(result.issues, 'hardcoded-password')
+    expect(hits.length).toBeGreaterThanOrEqual(1)
   })
 
   it('A11: FALSE POSITIVE — placeholder api_key not flagged', () => {

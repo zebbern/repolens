@@ -55,6 +55,29 @@ describe('supply-chain-npmrc-auth', () => {
     const hits = issuesForRule(issues, 'supply-chain-npmrc-auth')
     expect(hits).toHaveLength(0)
   })
+
+  it('does not flag quoted environment interpolation in .npmrc', () => {
+    const issues = scanWithFiles([
+      {
+        path: '.npmrc',
+        content: [
+          '//registry.npmjs.org/:_authToken="${NPM_TOKEN}"',
+          '//registry.example.com/:_password=\'${NPM_PASSWORD?}\'',
+          '//registry.legacy.example.com/:_authToken="$NPM_TOKEN"',
+        ].join('\n'),
+      },
+    ])
+    const hits = issuesForRule(issues, 'supply-chain-npmrc-auth')
+    expect(hits).toHaveLength(0)
+  })
+
+  it('still detects a quoted literal token in .npmrc', () => {
+    const issues = scanWithFiles([
+      { path: '.npmrc', content: '//registry.npmjs.org/:_authToken="npm_1234567890abcdefghijklmnop"' },
+    ])
+    const hits = issuesForRule(issues, 'supply-chain-npmrc-auth')
+    expect(hits.length).toBeGreaterThanOrEqual(1)
+  })
 })
 
 // ============================================================================

@@ -39,8 +39,10 @@ describe('SECURITY_RULES', () => {
     const rule = SECURITY_RULES.find(r => r.id === 'hardcoded-aws-key')!
 
     it.each([
-      { input: 'const key = "AKIAIOSFODNN7EXAMPLE"', shouldMatch: true, desc: 'detects AWS access key' },
-      { input: 'const key = "ASIAIOSFODNN7EXAMPLE"', shouldMatch: true, desc: 'detects AWS temp key' },
+      { input: 'const key = "AKIAIOSFODNN7EXAMPL1"', shouldMatch: true, desc: 'detects AWS access key' },
+      { input: 'const key = "ASIAXYZ123456789ABCD"', shouldMatch: true, desc: 'detects AWS temp key' },
+      { input: 'const key = "AKIAIOSFODNN7EXAMPLE"', shouldMatch: false, desc: 'ignores AWS documentation access key' },
+      { input: 'const key = "ASIAIOSFODNN7EXAMPLE"', shouldMatch: false, desc: 'ignores AWS documentation temp key' },
       { input: 'const key = "some-random-string"', shouldMatch: false, desc: 'ignores non-AWS string' },
     ])('$desc', ({ input, shouldMatch }) => {
       expect(matchesRule(rule, input)).toBe(shouldMatch)

@@ -20,7 +20,7 @@ export const SECURITY_RULES: ScanRule[] = [
     cwe: 'CWE-798',
     owasp: 'A07:2021 Identification and Authentication Failures',
     learnMoreUrl: 'https://cwe.mitre.org/data/definitions/798.html',
-    pattern: '(?:AKIA|ASIA)[A-Z0-9]{16}',
+    pattern: '(?:AKIA|ASIA)(?!IOSFODNN7EXAMPLE\\b)[A-Z0-9]{16}',
     patternOptions: { regex: true, caseSensitive: true },
     confidence: 'high',
   },

@@ -297,7 +297,7 @@ export function validatePassword(input: string): string | null {
     description: 'Obvious hardcoded AWS key, eval(req), hardcoded password — must fire as TP',
     file: {
       path: 'src/config/secrets.ts',
-      content: `export const AWS_KEY = "AKIAIOSFODNN7EXAMPLE"
+      content: `export const AWS_KEY = "AKIAIOSFODNN7EXAMPL1"
 
 export function dangerous(req: any) {
   const result = eval(req.body.code)

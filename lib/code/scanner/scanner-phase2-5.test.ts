@@ -486,6 +486,93 @@ describe('Phase 3: Supply Chain Scanner', () => {
       expect(hits[0].severity).toBe('critical')
     })
 
+    it('does not treat an artifact name after a run step as shell code', () => {
+      const workflow = [
+        'name: CI',
+        'on: pull_request',
+        'jobs:',
+        '  build:',
+        '    runs-on: ubuntu-latest',
+        '    steps:',
+        '      - name: Build',
+        '        run: npm run build',
+        '      - uses: actions/upload-artifact@v4',
+        '        with:',
+        '          name: npm-package-create-t3-app@${{ steps.package-version.outputs.current-version }}-pr-${{ github.event.number }} # encode the PR number into the artifact name',
+      ].join('\n')
+      const result = scanCode('.github/workflows/ci.yml', workflow, 'yaml')
+      const hits = issuesForRule(result.issues, 'gha-script-injection')
+      expect(hits).toHaveLength(0)
+    })
+
+    it('does not treat an action input named run as an inline shell step', () => {
+      const workflow = [
+        'name: CI',
+        'on: issues',
+        'jobs:',
+        '  build:',
+        '    runs-on: ubuntu-latest',
+        '    steps:',
+        '      - uses: example/wrapper-action@v1',
+        '        with:',
+        '          run: echo "${{ github.event.issue.title }}"',
+      ].join('\n')
+      const result = scanCode('.github/workflows/ci.yml', workflow, 'yaml')
+      const hits = issuesForRule(result.issues, 'gha-script-injection')
+      expect(hits).toHaveLength(0)
+    })
+
+    it('does not flag the integer github.event.number in a run step', () => {
+      const workflow = [
+        'name: CI',
+        'on: pull_request',
+        'jobs:',
+        '  build:',
+        '    runs-on: ubuntu-latest',
+        '    steps:',
+        '      - name: Print PR number',
+        '        run: echo "${{ github.event.number }}"',
+      ].join('\n')
+      const result = scanCode('.github/workflows/ci.yml', workflow, 'yaml')
+      const hits = issuesForRule(result.issues, 'gha-script-injection')
+      expect(hits).toHaveLength(0)
+    })
+
+    it('detects an untrusted pull request body in a block run step', () => {
+      const workflow = [
+        'name: CI',
+        'on: pull_request',
+        'jobs:',
+        '  build:',
+        '    runs-on: ubuntu-latest',
+        '    steps:',
+        '      - name: Process PR',
+        '        run: |',
+        '          echo "${{ github.event.pull_request.body }}"',
+        '        env:',
+        '          CI: true',
+      ].join('\n')
+      const result = scanCode('.github/workflows/ci.yml', workflow, 'yaml')
+      const hits = issuesForRule(result.issues, 'gha-script-injection')
+      expect(hits).toHaveLength(1)
+      expect(hits[0].line).toBe(9)
+    })
+
+    it('detects script injection in an indentationless steps sequence', () => {
+      const workflow = [
+        'name: CI',
+        'on: issues',
+        'jobs:',
+        '  build:',
+        '    runs-on: ubuntu-latest',
+        '    steps:',
+        '    - run: echo "${{ github.event.issue.title }}"',
+      ].join('\n')
+      const result = scanCode('.github/workflows/ci.yml', workflow, 'yaml')
+      const hits = issuesForRule(result.issues, 'gha-script-injection')
+      expect(hits).toHaveLength(1)
+    })
+
     it('B13: detects write-all permissions', () => {
       const workflow = [
         'name: CI',
@@ -502,7 +589,7 @@ describe('Phase 3: Supply Chain Scanner', () => {
       expect(hits.length).toBeGreaterThanOrEqual(1)
     })
 
-    it('B14: detects dangerous pull_request_target + checkout', () => {
+    it('does not flag pull_request_target with default base checkout', () => {
       const workflow = [
         'name: PR Handler',
         'on: pull_request_target',
@@ -515,8 +602,171 @@ describe('Phase 3: Supply Chain Scanner', () => {
       ].join('\n')
       const result = scanCode('.github/workflows/pr.yml', workflow, 'yaml')
       const hits = issuesForRule(result.issues, 'gha-dangerous-trigger')
-      expect(hits.length).toBeGreaterThanOrEqual(1)
+      expect(hits).toHaveLength(0)
+    })
+
+    it.each([
+      ['PR head SHA with a quoted action', '"actions/checkout@v4"', 'ref: ${{ github.event.pull_request.head.sha }}'],
+      ['PR head ref', 'actions/checkout@v4', 'ref: ${{ github.event.pull_request.head.ref }}'],
+      ['github.head_ref', 'actions/checkout@v4', 'ref: ${{ github.head_ref }}'],
+      ['refs/pull head', 'actions/checkout@v4', 'ref: refs/pull/${{ github.event.number }}/head'],
+      ['PR merge SHA', 'actions/checkout@v4', 'ref: ${{ github.event.pull_request.merge_commit_sha }}'],
+      ['refs/pull merge', 'actions/checkout@v4', 'ref: refs/pull/${{ github.event.number }}/merge'],
+      ['PR head repository', 'actions/checkout@v4', 'repository: ${{ github.event.pull_request.head.repo.full_name }}'],
+    ])('flags pull_request_target checkout using %s', (_name, action, option) => {
+      const workflow = [
+        'name: PR Handler',
+        'on: pull_request_target',
+        'jobs:',
+        '  build:',
+        '    runs-on: ubuntu-latest',
+        '    steps:',
+        `      - uses: ${action}`,
+        '        with:',
+        `          ${option}`,
+      ].join('\n')
+      const result = scanCode('.github/workflows/pr.yml', workflow, 'yaml')
+      const hits = issuesForRule(result.issues, 'gha-dangerous-trigger')
+      expect(hits).toHaveLength(1)
       expect(hits[0].severity).toBe('critical')
+    })
+
+    it.each([
+      { name: 'constrained repository name', expression: '${{ github.event.repository.name }}', expectedCount: 0 },
+      { name: 'untrusted PR head ref', expression: '${{ github.event.pull_request.head.ref }}', expectedCount: 1 },
+      { name: 'free-form commit author name', expression: '${{ github.event.commits[0].author.name }}', expectedCount: 1 },
+      { name: 'bracket-notation issue title', expression: "${{ github.event['issue']['title'] }}", expectedCount: 1 },
+      { name: 'root bracket-notation issue title', expression: '${{ github.event["issue"].title }}', expectedCount: 1 },
+    ])('classifies $name correctly in a run step', ({ expression, expectedCount }) => {
+      const workflow = [
+        'name: CI',
+        'on: push',
+        'jobs:',
+        '  build:',
+        '    runs-on: ubuntu-latest',
+        '    steps:',
+        '      - name: Print context',
+        `        run: echo "${expression}"`,
+      ].join('\n')
+      const result = scanCode('.github/workflows/ci.yml', workflow, 'yaml')
+      const hits = issuesForRule(result.issues, 'gha-script-injection')
+      expect(hits).toHaveLength(expectedCount)
+      if (expectedCount > 0) expect(hits[0].severity).toBe('critical')
+    })
+
+    it('ignores a comment mentioning pull_request_target', () => {
+      const workflow = [
+        'name: CI',
+        'on: push # pull_request_target is intentionally not enabled',
+        'jobs:',
+        '  build:',
+        '    runs-on: ubuntu-latest',
+        '    steps:',
+        '      - uses: actions/checkout@v4',
+        '        with:',
+        '          ref: ${{ github.event.pull_request.head.sha }}',
+      ].join('\n')
+      const result = scanCode('.github/workflows/ci.yml', workflow, 'yaml')
+      const hits = issuesForRule(result.issues, 'gha-dangerous-trigger')
+      expect(hits).toHaveLength(0)
+    })
+
+    it('does not treat a nested workflow input as a pull_request_target trigger', () => {
+      const workflow = [
+        'name: Reusable workflow',
+        'on:',
+        '  workflow_call:',
+        '    inputs:',
+        '      pull_request_target:',
+        '        type: string',
+        'jobs:',
+        '  build:',
+        '    runs-on: ubuntu-latest',
+        '    steps:',
+        '      - uses: actions/checkout@v4',
+        '        with:',
+        '          ref: ${{ github.event.pull_request.head.sha }}',
+      ].join('\n')
+      const result = scanCode('.github/workflows/reusable.yml', workflow, 'yaml')
+      const hits = issuesForRule(result.issues, 'gha-dangerous-trigger')
+      expect(hits).toHaveLength(0)
+    })
+
+    it('does not treat an indented on key as the workflow trigger', () => {
+      const workflow = [
+        'name: CI',
+        'on: push',
+        'env:',
+        '  on: pull_request_target',
+        'jobs:',
+        '  build:',
+        '    runs-on: ubuntu-latest',
+        '    steps:',
+        '      - uses: actions/checkout@v4',
+        '        with:',
+        '          ref: ${{ github.event.pull_request.head.sha }}',
+      ].join('\n')
+      const result = scanCode('.github/workflows/ci.yml', workflow, 'yaml')
+      const hits = issuesForRule(result.issues, 'gha-dangerous-trigger')
+      expect(hits).toHaveLength(0)
+    })
+
+    it('detects an unsafe checkout under list-form pull_request_target', () => {
+      const workflow = [
+        'name: PR Handler',
+        'on:',
+        '  - pull_request_target',
+        'jobs:',
+        '  build:',
+        '    runs-on: ubuntu-latest',
+        '    steps:',
+        '      - uses: actions/checkout@v4',
+        '        with:',
+        '          ref: ${{ github.event.pull_request.head.sha }}',
+      ].join('\n')
+      const result = scanCode('.github/workflows/pr.yml', workflow, 'yaml')
+      const hits = issuesForRule(result.issues, 'gha-dangerous-trigger')
+      expect(hits).toHaveLength(1)
+    })
+
+    it.each([
+      ['commented list item', '  - pull_request_target # privileged PR handler'],
+      ['indentationless list item', '- pull_request_target'],
+    ])('detects an unsafe checkout under a %s', (_name, trigger) => {
+      const workflow = [
+        'name: PR Handler',
+        'on:',
+        trigger,
+        'jobs:',
+        '  build:',
+        '    runs-on: ubuntu-latest',
+        '    steps:',
+        '      - uses: actions/checkout@v4',
+        '        with:',
+        '          ref: ${{ github.event.pull_request.head.sha }}',
+      ].join('\n')
+      const result = scanCode('.github/workflows/pr.yml', workflow, 'yaml')
+      const hits = issuesForRule(result.issues, 'gha-dangerous-trigger')
+      expect(hits).toHaveLength(1)
+    })
+
+    it('detects an unsafe checkout under multiline pull_request_target', () => {
+      const workflow = [
+        'name: PR Handler',
+        'on:',
+        '  pull_request_target:',
+        '    types: [opened]',
+        'jobs:',
+        '  build:',
+        '    runs-on: ubuntu-latest',
+        '    steps:',
+        '      - uses: actions/checkout@v4',
+        '        with:',
+        '          ref: ${{ github.event.pull_request.head.sha }}',
+      ].join('\n')
+      const result = scanCode('.github/workflows/pr.yml', workflow, 'yaml')
+      const hits = issuesForRule(result.issues, 'gha-dangerous-trigger')
+      expect(hits).toHaveLength(1)
     })
   })
 

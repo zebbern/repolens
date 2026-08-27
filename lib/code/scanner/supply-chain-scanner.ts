@@ -273,15 +273,157 @@ function isUnpinnedRef(ref: string): boolean {
   return true
 }
 
+const GITHUB_EVENT_EXPRESSION_RE = /\$\{\{\s*github\.event((?:\.|\s*\[)[^}]+)\}\}/gi
+const UNTRUSTED_GITHUB_EVENT_FIELDS = new Set([
+  'body',
+  'default_branch',
+  'email',
+  'head_ref',
+  'label',
+  'message',
+  'name',
+  'page_name',
+  'ref',
+  'title',
+])
+
+/** Return the indentation of a YAML mapping key, including a list-item marker. */
+function yamlEntryIndent(line: string, key?: string): number | null {
+  const keyPattern = key ? key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') : '[A-Za-z_][\\w-]*'
+  const match = line.match(new RegExp(`^(\\s*)(?:(-\\s+))?${keyPattern}\\s*:`, 'i'))
+  if (!match) return null
+  return match[1].length + (match[2]?.length ?? 0)
+}
+
+/** Detect only documented untrusted fields, such as issue titles and PR bodies. */
+function containsUntrustedGitHubEventExpression(line: string): boolean {
+  for (const match of line.matchAll(GITHUB_EVENT_EXPRESSION_RE)) {
+    const normalizedPath = match[1]
+      .trim()
+      .replace(/\[\s*["']([A-Za-z_][\w-]*)["']\s*\]/g, '.$1')
+      .replace(/^\./, '')
+    const path = normalizedPath.match(/^[A-Za-z_][\w-]*(?:(?:\.[A-Za-z_][\w-]*)|(?:\[\d+\]))*/)?.[0]
+    if (!path) continue
+    const segments = path.split('.')
+    const field = segments[segments.length - 1]?.replace(/\[\d+\]$/, '')
+    if (path.toLowerCase() === 'repository.name') continue
+    if (field && UNTRUSTED_GITHUB_EVENT_FIELDS.has(field.toLowerCase())) return true
+  }
+  return false
+}
+
+const CHECKOUT_ACTION_RE = /^\s*(?:-\s+)?uses:\s*["']?actions\/checkout(?:@[^"'#\s]+)?["']?(?:\s*(?:#.*)?)$/i
+
+/** Check whether a checkout step explicitly selects untrusted pull request code. */
+function checkoutUsesPullRequestHead(lines: string[], startLine: number): boolean {
+  const stepIndent = yamlEntryIndent(lines[startLine], 'uses')
+  if (stepIndent === null) return false
+
+  let withIndent: number | null = null
+  for (let i = startLine + 1; i < lines.length; i++) {
+    const line = lines[i]
+    const entryIndent = yamlEntryIndent(line)
+    const listItem = line.match(/^(\s*)-\s+/)
+    if ((listItem && (entryIndent ?? listItem[1].length) <= stepIndent) ||
+      (!listItem && entryIndent !== null && entryIndent < stepIndent)) {
+      break
+    }
+
+    const lineWithIndent = yamlEntryIndent(line, 'with')
+    if (lineWithIndent !== null) {
+      withIndent = lineWithIndent
+      continue
+    }
+    if (withIndent === null) continue
+    if (entryIndent !== null && entryIndent <= withIndent) {
+      withIndent = null
+      continue
+    }
+
+    const option = line.match(/^\s*(ref|repository)\s*:\s*(.*)$/i)
+    if (!option) continue
+    const value = option[2]
+    if (/\$\{\{\s*github\.event\.pull_request\.(?:head\.(?:sha|ref)|merge_commit_sha)\b/i.test(value) ||
+      /\$\{\{\s*github\.head_ref\b/i.test(value) ||
+      /\brefs\/pull\/(?:\d+|\$\{\{[^}]+\}\})\/(?:head|merge)\b/i.test(value) ||
+      (option[1].toLowerCase() === 'repository' &&
+        /\$\{\{\s*github\.event\.pull_request\.head\.repo\./i.test(value))) {
+      return true
+    }
+  }
+  return false
+}
+
+/** Find the trigger line for a real pull_request_target declaration. */
+function findPullRequestTargetTriggerLine(lines: string[]): number | null {
+  for (let i = 0; i < lines.length; i++) {
+    const match = lines[i].match(/^(\s*)["']?on["']?\s*:\s*(.*)$/i)
+    if (!match || match[1].length !== 0 || /^\s*#/.test(lines[i])) continue
+    const inlineValue = match[2].replace(/\s+#.*$/, '').trim()
+    if (/\bpull_request_target\b/i.test(inlineValue)) return i + 1
+    if (inlineValue !== '') continue
+
+    const onIndent = match[1].length
+    let directChildIndent: number | null = null
+    for (let j = i + 1; j < lines.length; j++) {
+      const child = lines[j]
+      if (/^\s*$/.test(child) || /^\s*#/.test(child)) continue
+      const childIndent = child.match(/^\s*/)?.[0].length ?? 0
+      const indentationlessListItem = childIndent === onIndent && /^\s*-\s+/.test(child)
+      if (childIndent < onIndent || (childIndent === onIndent && !indentationlessListItem)) break
+      directChildIndent ??= childIndent
+      if (childIndent !== directChildIndent) continue
+      const uncommentedChild = child.replace(/\s+#.*$/, '')
+      if (/^\s*(?:-\s*)?["']?pull_request_target["']?\s*(?::(?:\s|$)|$)/i.test(uncommentedChild)) {
+        return j + 1
+      }
+    }
+  }
+  return null
+}
+
+/** Return true only for a direct `run` property of a workflow step. */
+function isWorkflowStepRunKey(lines: string[], index: number): boolean {
+  const runMatch = lines[index].match(/^(\s*)(?:(-\s+))?run\s*:/i)
+  if (!runMatch) return false
+
+  const listIndent = runMatch[2] ? runMatch[1].length : runMatch[1].length - 2
+  if (listIndent < 0) return false
+
+  let stepStart = index
+  if (!runMatch[2]) {
+    stepStart = -1
+    for (let i = index - 1; i >= 0; i--) {
+      const line = lines[i]
+      if (/^\s*(?:#.*)?$/.test(line)) continue
+      const listItem = line.match(/^(\s*)-\s+\S/)
+      if (listItem?.[1].length === listIndent) {
+        stepStart = i
+        break
+      }
+      const indent = line.match(/^\s*/)?.[0].length ?? 0
+      if (indent < listIndent) return false
+    }
+    if (stepStart < 0) return false
+  }
+
+  for (let i = stepStart - 1; i >= 0; i--) {
+    const line = lines[i]
+    if (/^\s*(?:#.*)?$/.test(line)) continue
+    const indent = line.match(/^\s*/)?.[0].length ?? 0
+    if (indent === listIndent && /^\s*steps\s*:/i.test(line)) return true
+    if (indent >= listIndent) continue
+    return /^\s*steps\s*:/i.test(line)
+  }
+  return false
+}
+
 function scanGitHubActions(
   path: string,
-  content: string,
   lines: string[],
   issues: CodeIssue[],
 ): void {
-  const hasPullRequestTarget = /on:\s*pull_request_target/i.test(content) ||
-    /pull_request_target/i.test(content)
-  const hasCheckout = /actions\/checkout/i.test(content)
+  const pullRequestTargetLine = findPullRequestTargetTriggerLine(lines)
 
   // 7. Unpinned actions
   for (let i = 0; i < lines.length; i++) {
@@ -314,19 +456,20 @@ function scanGitHubActions(
   }
 
   // 8. Dangerous trigger: pull_request_target + checkout
-  if (hasPullRequestTarget && hasCheckout) {
-    const triggerLine = findLine(lines, 'pull_request_target')
+  const hasUntrustedCheckout = lines.some((line, index) =>
+    CHECKOUT_ACTION_RE.test(line) && checkoutUsesPullRequestHead(lines, index))
+  if (pullRequestTargetLine !== null && hasUntrustedCheckout) {
     issues.push({
       id: `gha-dangerous-trigger-${path}`,
       ruleId: 'gha-dangerous-trigger',
       category: 'security',
       severity: 'critical',
       title: 'Dangerous pull_request_target + Checkout',
-      description: 'This workflow uses `pull_request_target` and checks out code. This is a known attack vector ("pwn request"): a malicious PR can execute arbitrary code with write permissions to the repository.',
+      description: 'This workflow uses `pull_request_target` and explicitly checks out untrusted pull request code. A malicious PR can then run in a privileged context with access to secrets and a potentially write-capable GITHUB_TOKEN.',
       file: path,
-      line: triggerLine,
+      line: pullRequestTargetLine,
       column: 0,
-      snippet: 'on: pull_request_target with actions/checkout',
+      snippet: 'pull_request_target with PR-head checkout',
       suggestion: 'Avoid checking out PR code in pull_request_target workflows. If needed, use a separate unprivileged workflow for building/testing PR code.',
       cwe: 'CWE-94',
       confidence: 'high',
@@ -335,31 +478,35 @@ function scanGitHubActions(
 
   // 9. Script injection via expression interpolation
   let inRunBlock = false
+  let runIndent: number | null = null
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i]
-    if (/^\s*run:\s/i.test(line) || /^\s*run:\s*\|/i.test(line)) {
+    const lineRunIndent = isWorkflowStepRunKey(lines, i) ? yamlEntryIndent(line, 'run') : null
+    if (lineRunIndent !== null) {
       inRunBlock = true
-    } else if (/^\s*\w+:/i.test(line) && !/^\s*#/.test(line) && !/^\s*-/.test(line)) {
-      // New YAML key at same or higher indent — exit run block.
-      // Keep inRunBlock true for continuation lines (indented or starting with -)
-      if (inRunBlock && !/^\s+/.test(line)) {
+      runIndent = lineRunIndent
+    } else if (inRunBlock && runIndent !== null) {
+      // A sibling mapping key or step at the run key's indentation ends its range.
+      const entryIndent = yamlEntryIndent(line)
+      if (entryIndent !== null && entryIndent <= runIndent) {
         inRunBlock = false
+        runIndent = null
       }
     }
 
-    if (inRunBlock && /\$\{\{\s*github\.event\./i.test(line)) {
+    if (inRunBlock && containsUntrustedGitHubEventExpression(line)) {
       issues.push({
         id: `gha-script-injection-${path}-${i + 1}`,
         ruleId: 'gha-script-injection',
         category: 'security',
         severity: 'critical',
         title: 'GitHub Actions Script Injection',
-        description: 'Interpolating `${{ github.event.* }}` directly in a `run:` step allows an attacker to inject arbitrary shell commands via crafted issue titles, PR bodies, or commit messages.',
+        description: 'Interpolating untrusted `github.event` fields directly in a `run:` step allows an attacker to inject arbitrary shell commands via crafted issue titles, PR bodies, or commit messages.',
         file: path,
         line: i + 1,
         column: 0,
         snippet: line.trim(),
-        suggestion: 'Pass the value through an environment variable instead: env: TITLE: ${{ github.event.issue.title }} then use $TITLE in the script.',
+        suggestion: 'Pass the value through an environment variable instead, then quote that variable when the script uses it.',
         cwe: 'CWE-94',
         confidence: 'high',
       })
@@ -397,6 +544,17 @@ function scanGitHubActions(
 // .npmrc auth token check
 // ---------------------------------------------------------------------------
 
+const NPMRC_CREDENTIAL_REFERENCE = /^(?:\$\{[A-Za-z_][A-Za-z0-9_]*\??\}|\$[A-Za-z_][A-Za-z0-9_]*)$/
+
+function isNpmrcCredentialReference(value: string): boolean {
+  let normalized = value.trim()
+  const first = normalized[0]
+  if ((first === '"' || first === "'") && normalized.endsWith(first)) {
+    normalized = normalized.slice(1, -1).trim()
+  }
+  return NPMRC_CREDENTIAL_REFERENCE.test(normalized)
+}
+
 function scanNpmrc(
   path: string,
   content: string,
@@ -418,7 +576,7 @@ function scanNpmrc(
         // Check that there's an actual value (not just the key)
         const eqIdx = line.indexOf('=')
         const value = eqIdx !== -1 ? line.substring(eqIdx + 1).trim() : ''
-        if (value && !value.startsWith('${') && value !== '""' && value !== "''") {
+        if (value && !isNpmrcCredentialReference(value) && value !== '""' && value !== "''") {
           issues.push({
             id: `supply-chain-npmrc-auth-${path}-${i + 1}`,
             ruleId: 'supply-chain-npmrc-auth',
@@ -598,7 +756,7 @@ export function scanSupplyChain(codeIndex: CodeIndex): CodeIssue[] {
     }
 
     if (isWorkflowFile(path)) {
-      scanGitHubActions(path, content, lines, issues)
+      scanGitHubActions(path, lines, issues)
     }
 
     if (filename === 'requirements.txt') {

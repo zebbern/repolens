@@ -1,9 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { act } from 'react'
+import { act, useState } from 'react'
 import {
   batchIndexMetadataOnly,
+  createAsyncSearchResult,
   createEmptyIndexWithStore,
   searchIndexAsync,
   type CodeIndex,
@@ -229,11 +230,90 @@ describe('GlobalSearchOverlay', () => {
         screen.getByPlaceholderText('Search files by name or path...'),
       ).toHaveFocus()
     })
+
+    it('behaves as a modal dialog and restores focus to its opener', async () => {
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+
+      function Harness() {
+        const [open, setOpen] = useState(false)
+        return (
+          <>
+            <button onClick={() => setOpen(true)}>Open repository search</button>
+            {open && (
+              <GlobalSearchOverlay
+                codeIndex={createCodeIndex()}
+                allFiles={defaultFiles}
+                onSelect={vi.fn()}
+                onClose={() => setOpen(false)}
+              />
+            )}
+          </>
+        )
+      }
+
+      render(<Harness />)
+      const opener = screen.getByRole('button', { name: 'Open repository search' })
+      await user.click(opener)
+
+      expect(screen.getByRole('dialog', { name: 'Repository search' })).toHaveAttribute('aria-modal', 'true')
+      expect(screen.getByRole('combobox', { name: 'Search' })).toHaveFocus()
+
+      await user.keyboard('{Escape}')
+      expect(screen.queryByRole('dialog', { name: 'Repository search' })).not.toBeInTheDocument()
+      expect(opener).toHaveFocus()
+    })
+
+    it('falls back to the persistent search trigger when the opener unmounts', async () => {
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+
+      function Harness() {
+        const [open, setOpen] = useState(false)
+        const [showOpener, setShowOpener] = useState(true)
+        return (
+          <>
+            {showOpener && (
+              <button onClick={() => { setOpen(true); setShowOpener(false) }}>
+                Open repository search
+              </button>
+            )}
+            <button aria-label="Search repository files" onClick={() => setOpen(true)}>
+              Persistent search
+            </button>
+            {open && (
+              <GlobalSearchOverlay
+                codeIndex={createCodeIndex()}
+                allFiles={defaultFiles}
+                onSelect={vi.fn()}
+                onClose={() => setOpen(false)}
+              />
+            )}
+          </>
+        )
+      }
+
+      render(<Harness />)
+      await user.click(screen.getByRole('button', { name: 'Open repository search' }))
+      await user.keyboard('{Escape}')
+
+      expect(screen.getByRole('button', { name: 'Search repository files' })).toHaveFocus()
+    })
   })
 
   /* ── Tab switching ────────────────────────────────────────────── */
 
   describe('tab switching', () => {
+    it('exposes search modes as toggle buttons with pressed state', async () => {
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+      renderOverlay()
+
+      const filesTab = screen.getByRole('button', { name: 'Find Files', pressed: true })
+      const codeTab = screen.getByRole('button', { name: 'Code Search', pressed: false })
+
+      await user.click(codeTab)
+      expect(filesTab).toHaveAttribute('aria-pressed', 'false')
+      expect(codeTab).toHaveAttribute('aria-pressed', 'true')
+    })
+
     it('switches to Code Search tab', async () => {
       const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
       renderOverlay()
@@ -279,7 +359,7 @@ describe('GlobalSearchOverlay', () => {
   })
 
   describe('source availability', () => {
-    it('shows an unavailable-source error for lazy code search without eager file fetches', async () => {
+    it('shows unavailable source as partial coverage without eager file fetches', async () => {
       const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
       const { codeIndex, fetchFile } = createLazyIndex()
       mockSearchInWorker.mockImplementation((index, query, options) => (
@@ -291,9 +371,10 @@ describe('GlobalSearchOverlay', () => {
       await user.type(screen.getByPlaceholderText('Search in file contents...'), 'fetched')
       await act(async () => { await vi.advanceTimersByTimeAsync(350) })
 
-      await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(
-        'Source unavailable for this repository search',
+      await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent(
+        '2 files were not searched because source content is unavailable',
       ))
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument()
       expect(fetchFile).not.toHaveBeenCalled()
     })
 
@@ -320,7 +401,7 @@ describe('GlobalSearchOverlay', () => {
       expect(screen.queryByRole('alert')).not.toBeInTheDocument()
     })
 
-    it('clears successful results when a repository switch fails on lazy source', async () => {
+    it('clears successful results when a repository switch has unavailable lazy source', async () => {
       const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
       mockSearchInWorker.mockResolvedValueOnce([{
         file: 'src/old.ts',
@@ -341,8 +422,8 @@ describe('GlobalSearchOverlay', () => {
       ))
       rerender(<GlobalSearchOverlay {...props} codeIndex={lazyIndex} />)
 
-      await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(
-        'Source unavailable for this repository search',
+      await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent(
+        '2 files were not searched because source content is unavailable',
       ))
       expect(screen.queryByText('src/old.ts')).not.toBeInTheDocument()
       expect(screen.queryByText(/matches in/)).not.toBeInTheDocument()
@@ -500,9 +581,11 @@ describe('GlobalSearchOverlay', () => {
 
     it('calls onClose on backdrop click', async () => {
       const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
-      const { props, container } = renderOverlay()
+      const { props } = renderOverlay()
 
-      await user.click(container.firstChild as HTMLElement)
+      const backdrop = document.querySelector('.fixed.inset-0') as HTMLElement
+      expect(backdrop).toBeInTheDocument()
+      await user.click(backdrop)
       expect(props.onClose).toHaveBeenCalled()
     })
 
@@ -548,6 +631,38 @@ describe('GlobalSearchOverlay', () => {
   /* ── Code tab ─────────────────────────────────────────────────── */
 
   describe('code tab', () => {
+    it('keeps long code search rows shrinkable on narrow screens', async () => {
+      mockSearchIndex.mockReturnValue([{
+        file: 'src/app.ts', language: 'typescript',
+        matches: [{
+          line: 10,
+          content: 'const veryLongValue = "this is a deliberately long line that must not force the search dialog wider than the viewport"',
+          column: 0,
+          length: 4,
+        }],
+      }])
+
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+      renderOverlay()
+      await user.click(screen.getByText('Code Search'))
+      await user.type(screen.getByPlaceholderText('Search in file contents...'), 'const')
+      await act(async () => { vi.advanceTimersByTime(300) })
+
+      const result = screen.getByRole('option')
+      expect(result).toHaveClass('min-w-0')
+      expect(result.querySelector('span.text-xs')).toHaveClass('min-w-0', 'flex-1')
+    })
+
+    it('allows the code search controls to wrap within a narrow dialog', async () => {
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+      renderOverlay()
+      await user.click(screen.getByText('Code Search'))
+
+      const input = screen.getByPlaceholderText('Search in file contents...')
+      expect(input).toHaveClass('min-w-0')
+      expect(input.parentElement).toHaveClass('flex-wrap', 'min-w-0')
+    })
+
     it('debounces search (300ms)', async () => {
       const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
       renderOverlay()
@@ -722,6 +837,27 @@ describe('GlobalSearchOverlay', () => {
       expect(screen.getByText('src/app.ts')).toBeInTheDocument()
       expect(screen.queryByText('pnpm-lock.yaml')).not.toBeInTheDocument()
       expect(screen.queryByText('dist/bundle.js')).not.toBeInTheDocument()
+    })
+
+    it('passes a compact generated-file filter to the worker', async () => {
+      const codeIndex = createCodeIndex([
+        { path: 'src/app.ts', content: 'const x = 1', language: 'typescript' },
+        { path: 'pnpm-lock.yaml', content: 'needle', language: 'yaml' },
+        { path: 'dist/bundle.js', content: 'needle', language: 'javascript' },
+      ])
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+      renderOverlay({ codeIndex })
+      await user.click(screen.getByText('Code Search'))
+      await user.type(
+        screen.getByPlaceholderText('Search in file contents...'), 'needle',
+      )
+      await act(async () => { vi.advanceTimersByTime(300) })
+
+      const workerOptions = mockSearchInWorker.mock.calls[0][2]
+      expect(workerOptions).toEqual(expect.objectContaining({
+        pathFilter: { excludeGenerated: true },
+      }))
+      expect(workerOptions).not.toHaveProperty('allowedPaths')
     })
 
     it('includes generated files when toggle is off', async () => {
@@ -927,6 +1063,22 @@ describe('GlobalSearchOverlay', () => {
       expect(props.onSelect).toHaveBeenCalledWith('src/utils.ts')
     })
 
+    it('activates the focused Code Search tab button with Enter', async () => {
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+      const { props } = renderOverlay()
+
+      await user.type(
+        screen.getByPlaceholderText('Search files by name or path...'), 'utils',
+      )
+      const codeSearchTab = screen.getByRole('button', { name: 'Code Search' })
+      codeSearchTab.focus()
+
+      await user.keyboard('{Enter}')
+
+      expect(screen.getByPlaceholderText('Search in file contents...')).toBeInTheDocument()
+      expect(props.onSelect).not.toHaveBeenCalled()
+    })
+
     it('Enter selects highlighted code result', async () => {
       mockSearchIndex.mockReturnValue([{
         file: 'src/main.ts', language: 'typescript',
@@ -1115,6 +1267,32 @@ describe('GlobalSearchOverlay', () => {
       await act(async () => { vi.advanceTimersByTime(300) })
 
       expect(screen.getByText(/120 matches in 2 files/)).toBeInTheDocument()
+    })
+
+    it('shows distinct global-limit and per-file truncation status', async () => {
+      mockSearchInWorker.mockResolvedValue(createAsyncSearchResult(
+        [{
+          file: 'src/a.ts',
+          language: 'typescript',
+          matches: [{ line: 1, content: 'match', column: 0, length: 5 }],
+        }],
+        ['src/skipped.ts', 'src/unavailable.ts'],
+        true,
+        ['src/unavailable.ts'],
+      ))
+
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+      renderOverlay()
+      await user.click(screen.getByText('Code Search'))
+      await user.type(
+        screen.getByPlaceholderText('Search in file contents...'), 'match',
+      )
+      await act(async () => { vi.advanceTimersByTime(300) })
+
+      const status = screen.getByRole('status')
+      expect(status).toHaveTextContent('Search results were truncated by search limits')
+      expect(status).toHaveTextContent('1 file was not searched after the global match limit was reached')
+      expect(status).toHaveTextContent('1 file was not searched because source content is unavailable')
     })
   })
 })

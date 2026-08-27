@@ -7,7 +7,7 @@ import type { SidebarMode } from './types'
 
 interface CodeActivityBarProps {
   sidebarMode: SidebarMode
-  onModeChange: (mode: SidebarMode) => void
+  onModeChange: (mode: SidebarMode, trigger: HTMLButtonElement) => void
 }
 
 export function CodeActivityBar({ sidebarMode, onModeChange }: CodeActivityBarProps) {
@@ -31,7 +31,7 @@ export function CodeActivityBar({ sidebarMode, onModeChange }: CodeActivityBarPr
               ? 'text-text-primary bg-foreground/10'
               : 'text-text-muted hover:text-text-primary'
           )}
-          onClick={() => onModeChange(mode)}
+          onClick={event => onModeChange(mode, event.currentTarget)}
           title={label}
           aria-label={`Open ${label.toLowerCase()} sidebar`}
           aria-pressed={sidebarMode === mode}

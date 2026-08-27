@@ -18,7 +18,7 @@ import { useSymbolExtraction } from "./hooks/use-symbol-extraction"
 import { useSymbolRanges } from "./hooks/use-symbol-ranges"
 import { useInlineActions } from "./hooks/use-inline-actions"
 import { useSearchStateDispatchers } from "./hooks/use-search-state-dispatchers"
-import { CodeActivityBar } from "./code-activity-bar"
+import { CodeBrowserFrame } from "./code-browser-frame"
 import { CodeEditorContent } from "./code-editor-content"
 import { CodeTabBar, CodeBreadcrumb } from "./code-tab-bar"
 import { CodeExplorerSidebar } from "./code-explorer-sidebar"
@@ -26,6 +26,7 @@ import { InlineActionPanel } from "./inline-action-panel"
 import { TourSidebar } from "./tour-sidebar"
 import { TourPlayerBar } from "./tour-player-bar"
 import { TourStopOverlay } from "./tour-stop-overlay"
+import { useIsMobile } from "@/hooks/use-mobile"
 
 export function CodeBrowser({ navigateToFile, navigateToLine, onNavigateComplete }: CodeBrowserProps) {
   const { repo, files, codeIndex, codebaseAnalysis, repositorySession } = useRepositoryData()
@@ -50,12 +51,25 @@ export function CodeBrowser({ navigateToFile, navigateToLine, onNavigateComplete
 
   // Sidebar state
   const [sidebarMode, setSidebarMode] = useState<SidebarMode>('explorer')
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false)
+  const isMobile = useIsMobile()
+
+  const openSidebar = useCallback((mode: SidebarMode) => {
+    setSidebarMode(mode)
+    if (isMobile) setMobileSidebarOpen(true)
+  }, [isMobile])
 
   // Sidebar resize
   const [sidebarWidth, setSidebarWidth] = useState(240)
   const isResizingRef = useRef(false)
   const sidebarRef = useRef<HTMLDivElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
+
+  const focusExplorerActivity = useCallback(() => {
+    containerRef.current
+      ?.querySelector<HTMLButtonElement>('[aria-label="Open explorer sidebar"]')
+      ?.focus()
+  }, [])
 
   const handleSidebarMouseDown = useCallback((e: React.MouseEvent) => {
     e.preventDefault()
@@ -135,6 +149,11 @@ export function CodeBrowser({ navigateToFile, navigateToLine, onNavigateComplete
     isRepositorySessionCurrent,
   })
 
+  const handleExplorerFileSelect = useCallback((file: Parameters<typeof openFile>[0]) => {
+    if (isMobile) setMobileSidebarOpen(false)
+    void openFile(file)
+  }, [isMobile, openFile])
+
   // Sync activeTabPath to app-level selectedFilePath for Git History tab
   useEffect(() => {
     setSelectedFilePath(activeTabPath)
@@ -143,6 +162,10 @@ export function CodeBrowser({ navigateToFile, navigateToLine, onNavigateComplete
   const {
     searchResults,
     unsearchedCount,
+    unavailableCount,
+    isSearchTruncated,
+    searchError,
+    searchWarning,
     goToSearchResult,
     highlightedLine,
     setHighlightedLine,
@@ -378,7 +401,7 @@ export function CodeBrowser({ navigateToFile, navigateToLine, onNavigateComplete
       // Cmd/Ctrl + Shift + F to open search
       if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === 'f') {
         e.preventDefault()
-        setSidebarMode('search')
+        openSidebar('search')
         setTimeout(() => searchInputRef.current?.focus(), 100)
       }
       // Escape to close search or clear
@@ -386,6 +409,8 @@ export function CodeBrowser({ navigateToFile, navigateToLine, onNavigateComplete
         if (searchQuery) {
           setSearchQuery('')
           setDebouncedSearchQuery('')
+        } else if (isMobile) {
+          setMobileSidebarOpen(false)
         } else {
           setSidebarMode('explorer')
         }
@@ -394,7 +419,7 @@ export function CodeBrowser({ navigateToFile, navigateToLine, onNavigateComplete
       if ((e.metaKey || e.ctrlKey) && e.key === 'h') {
         e.preventDefault()
         if (sidebarMode !== 'search') {
-          setSidebarMode('search')
+          openSidebar('search')
         }
         setShowReplace((prev: boolean) => !prev)
         setTimeout(() => searchInputRef.current?.focus(), 100)
@@ -403,7 +428,7 @@ export function CodeBrowser({ navigateToFile, navigateToLine, onNavigateComplete
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [sidebarMode, searchQuery, setSearchQuery, setDebouncedSearchQuery, setShowReplace, searchInputRef])
+  }, [sidebarMode, searchQuery, setSearchQuery, setDebouncedSearchQuery, setShowReplace, searchInputRef, isMobile, openSidebar])
 
   if (!repo) {
     return (
@@ -422,22 +447,25 @@ export function CodeBrowser({ navigateToFile, navigateToLine, onNavigateComplete
   }
   
   return (
-    <div ref={containerRef} className="flex h-full bg-background">
-      {/* Activity Bar */}
-      <CodeActivityBar sidebarMode={sidebarMode} onModeChange={setSidebarMode} />
-      
-      {/* Sidebar */}
-      <div ref={sidebarRef} className="relative shrink-0 bg-background border-r border-foreground/6 flex flex-col" style={{ width: sidebarWidth }}>
-        <div
-          className="absolute right-0 top-0 h-full w-1 cursor-col-resize z-10 hover:bg-primary/20 active:bg-primary/30 transition-colors"
-          onMouseDown={handleSidebarMouseDown}
-        />
+    <CodeBrowserFrame
+      ref={containerRef}
+      isMobile={isMobile}
+      sidebarMode={sidebarMode}
+      onModeChange={setSidebarMode}
+      mobileSidebarOpen={mobileSidebarOpen}
+      onMobileSidebarOpenChange={setMobileSidebarOpen}
+      sidebarWidth={sidebarWidth}
+      onSidebarWidthChange={setSidebarWidth}
+      sidebarRef={sidebarRef}
+      onSidebarMouseDown={handleSidebarMouseDown}
+      sidebar={
+        <>
         {sidebarMode === 'explorer' ? (
           <CodeExplorerSidebar
             files={files}
             expandedFolders={expandedFolders}
             onToggleFolder={toggleFolder}
-            onFileSelect={openFile}
+            onFileSelect={handleExplorerFileSelect}
             onDownloadFile={downloadExplorerFile}
             onDownloadFolder={downloadExplorerFolder}
             onDownloadFullProject={downloadFullProject}
@@ -481,6 +509,10 @@ export function CodeBrowser({ navigateToFile, navigateToLine, onNavigateComplete
             expandAllMatches={expandAllMatches}
             setExpandAllMatches={setExpandAllMatches}
             unsearchedCount={unsearchedCount}
+            unavailableCount={unavailableCount}
+            isSearchTruncated={isSearchTruncated}
+            searchError={searchError}
+            searchWarning={searchWarning}
           />
         ) : sidebarMode === 'outline' ? (
           <SymbolOutline
@@ -502,16 +534,16 @@ export function CodeBrowser({ navigateToFile, navigateToLine, onNavigateComplete
             onCreateTour={handleCreateTour}
           />
         ) : null}
-      </div>
-      
-      {/* Editor Area */}
-      <div className="flex-1 min-w-0 flex flex-col bg-background">
+        </>
+      }
+    >
         <CodeTabBar
           openTabs={openTabs}
           activeTabPath={activeTabPath}
           onTabSelect={setActiveTabPath}
           onTabClose={closeTab}
           onRevertFile={revertFile}
+          onEmptyFocus={focusExplorerActivity}
         />
         {isPlaying && activeTour && (
           <TourPlayerBar
@@ -528,7 +560,7 @@ export function CodeBrowser({ navigateToFile, navigateToLine, onNavigateComplete
             path={activeTab.path}
             expandedFolders={expandedFolders}
             onToggleFolder={toggleFolder}
-            onSwitchToExplorer={() => setSidebarMode('explorer')}
+            onSwitchToExplorer={() => openSidebar('explorer')}
           />
         )}
         <div className="flex-1 flex min-h-0">
@@ -576,7 +608,6 @@ export function CodeBrowser({ navigateToFile, navigateToLine, onNavigateComplete
             isOpen={isPanelOpen}
           />
         </div>
-      </div>
-    </div>
+    </CodeBrowserFrame>
   )
 }

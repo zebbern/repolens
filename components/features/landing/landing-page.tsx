@@ -38,7 +38,11 @@ export function LandingPage({
   const { isCacheHit } = useRepositoryData()
 
   useEffect(() => {
-    const timer = setTimeout(() => inputRef.current?.focus(), 100)
+    const timer = setTimeout(() => {
+      if (document.activeElement === document.body) {
+        inputRef.current?.focus()
+      }
+    }, 100)
     return () => clearTimeout(timer)
   }, [])
 

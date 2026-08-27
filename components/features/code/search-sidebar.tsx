@@ -52,8 +52,16 @@ export interface SearchSidebarProps {
   replaceAllInAllFiles: () => void
   expandAllMatches: boolean
   setExpandAllMatches: (v: boolean | ((p: boolean) => boolean)) => void
-  /** Number of files not searched due to unloaded content (lazy repos). */
+  /** Total number of files not searched for any reason. */
   unsearchedCount?: number
+  /** Number of unsearched files whose source content is unavailable. */
+  unavailableCount?: number
+  /** True when one or more matching results were omitted by search limits. */
+  isSearchTruncated?: boolean
+  /** Worker failure, separate from successful partial-search coverage. */
+  searchError?: string | null
+  /** Non-fatal notice when an invalid or unsafe regex is searched literally. */
+  searchWarning?: string | null
 }
 
 export function SearchSidebar({
@@ -85,7 +93,15 @@ export function SearchSidebar({
   expandAllMatches,
   setExpandAllMatches,
   unsearchedCount,
+  unavailableCount,
+  isSearchTruncated,
+  searchError,
+  searchWarning,
 }: SearchSidebarProps) {
+  const unavailableFileCount = unavailableCount ?? 0
+  const limitSkippedCount = Math.max(0, (unsearchedCount ?? 0) - unavailableFileCount)
+  const hasPartialCoverage = Boolean(isSearchTruncated || limitSkippedCount > 0 || unavailableFileCount > 0)
+
   return (
     <>
       {/* Search Header */}
@@ -223,6 +239,35 @@ export function SearchSidebar({
         </div>
       </div>
 
+      {searchError && (
+        <div role="alert" className="mx-2 mb-2 flex items-start gap-2 rounded-md bg-status-error/10 px-3 py-2 text-[11px] text-status-error">
+          <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+          <span>Search failed: {searchError}</span>
+        </div>
+      )}
+
+      {searchWarning && (
+        <div role="status" className="mx-2 mb-2 flex items-start gap-2 rounded-md bg-amber-500/10 px-3 py-2 text-[11px] text-amber-300/90">
+          <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+          <span>{searchWarning}</span>
+        </div>
+      )}
+
+      {hasPartialCoverage && (
+        <div role="status" className="mx-2 mb-2 flex items-start gap-2 rounded-md bg-amber-500/10 px-3 py-2 text-[11px] text-amber-300/90">
+          <FileWarning className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+          <span className="leading-snug">
+            {isSearchTruncated && <>Search results were truncated by search limits. </>}
+            {limitSkippedCount > 0 && (
+              <>{limitSkippedCount} {limitSkippedCount === 1 ? 'file was' : 'files were'} not searched after the global match limit was reached. </>
+            )}
+            {unavailableFileCount > 0 && (
+              <>{unavailableFileCount} {unavailableFileCount === 1 ? 'file was' : 'files were'} not searched because source content is unavailable.</>
+            )}
+          </span>
+        </div>
+      )}
+
       {/* Search Results */}
       <div className="flex-1 overflow-auto" ref={resultsContainerRef}>
         {!isIndexingComplete ? (
@@ -325,15 +370,6 @@ export function SearchSidebar({
                 >
                   Showing {visibleResultCount} of {searchResults.length} files - click to load more
                 </button>
-              </div>
-            )}
-            {/* Unsearched files notice for lazy repos */}
-            {unsearchedCount != null && unsearchedCount > 0 && (
-              <div className="mx-2 mt-2 mb-1 flex items-start gap-2 rounded-md bg-amber-500/10 px-3 py-2" role="status">
-                <FileWarning className="h-3.5 w-3.5 text-amber-400 shrink-0 mt-0.5" />
-                <span className="text-[11px] text-amber-300/90 leading-snug">
-                  {unsearchedCount} {unsearchedCount === 1 ? 'file' : 'files'} not yet searched &mdash; content still loading
-                </span>
               </div>
             )}
           </div>

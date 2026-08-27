@@ -1,4 +1,4 @@
-import { useMemo } from "react"
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type RefObject } from "react"
 import {
   ChevronRight, ChevronDown, File, Folder, FolderOpen, Download, Pin, Circle, GitFork,
 } from "lucide-react"
@@ -131,6 +131,54 @@ function IssueCountBadge({ counts }: { counts: FileIssueCounts }) {
 
 /** Recursive file tree node for the explorer sidebar. */
 export function FileTreeNode({
+  ...props
+}: FileTreeNodeProps) {
+  const treeRef = useRef<HTMLDivElement>(null)
+  const [focusedPath, setFocusedPath] = useState<string | null>(
+    props.activeFilePath ?? props.nodes[0]?.path ?? null,
+  )
+
+  useEffect(() => {
+    const items = getVisibleTreeItems(treeRef)
+    const requested = props.activeFilePath
+    const nextPath = requested && items.some((item) => item.dataset.treePath === requested)
+      ? requested
+      : focusedPath && items.some((item) => item.dataset.treePath === focusedPath)
+        ? focusedPath
+        : items[0]?.dataset.treePath ?? null
+    if (nextPath !== focusedPath) setFocusedPath(nextPath)
+  }, [props.activeFilePath, props.expandedFolders, props.nodes, focusedPath])
+
+  const focusItem = (path: string) => {
+    setFocusedPath(path)
+    getVisibleTreeItems(treeRef).find((item) => item.dataset.treePath === path)?.focus()
+  }
+
+  return (
+    <div ref={treeRef} role="tree" aria-label="Repository files">
+      <FileTreeBranch
+        {...props}
+        focusedPath={focusedPath}
+        setFocusedPath={setFocusedPath}
+        focusItem={focusItem}
+        treeRef={treeRef}
+      />
+    </div>
+  )
+}
+
+interface FileTreeBranchProps extends FileTreeNodeProps {
+  focusedPath: string | null
+  setFocusedPath: (path: string) => void
+  focusItem: (path: string) => void
+  treeRef: RefObject<HTMLDivElement | null>
+}
+
+function getVisibleTreeItems(treeRef: RefObject<HTMLDivElement | null>): HTMLDivElement[] {
+  return Array.from(treeRef.current?.querySelectorAll<HTMLDivElement>('[role="treeitem"]') ?? [])
+}
+
+function FileTreeBranch({
   nodes,
   expandedFolders,
   onToggleFolder,
@@ -144,12 +192,17 @@ export function FileTreeNode({
   isPinned,
   onPinToggle,
   contentAvailability,
-}: FileTreeNodeProps) {
+  focusedPath,
+  setFocusedPath,
+  focusItem,
+  treeRef,
+}: FileTreeBranchProps) {
   return (
     <>
       {nodes.map((node) => {
         const isExpanded = expandedFolders.has(node.path)
         const isActive = node.path === activeFilePath
+        const isFocused = node.path === focusedPath
 
         // Compute badges data
         const isFile = node.type === 'file'
@@ -164,7 +217,9 @@ export function FileTreeNode({
           <div key={node.path}>
             <div
               role="treeitem"
-              tabIndex={0}
+              data-tree-path={node.path}
+              tabIndex={isFocused ? 0 : -1}
+              aria-level={depth + 1}
               aria-expanded={node.type === 'directory' ? isExpanded : undefined}
               aria-selected={isActive}
               className={cn(
@@ -173,11 +228,65 @@ export function FileTreeNode({
               )}
               style={{ paddingLeft: `${depth * 12 + 4}px` }}
               onClick={() => node.type === 'directory' ? onToggleFolder(node.path) : node.type === 'file' ? onFileSelect(node) : undefined}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' || e.key === ' ') {
-                  e.preventDefault()
+              onFocus={(event) => {
+                if (event.target === event.currentTarget) setFocusedPath(node.path)
+              }}
+              onKeyDown={(event: KeyboardEvent<HTMLDivElement>) => {
+                if (event.target !== event.currentTarget) return
+                if (event.altKey || event.ctrlKey || event.metaKey) return
+                const items = getVisibleTreeItems(treeRef)
+                const currentIndex = items.indexOf(event.currentTarget)
+                let destination: HTMLDivElement | undefined
+
+                if (event.key === 'ArrowDown') destination = items[currentIndex + 1]
+                if (event.key === 'ArrowUp') destination = items[currentIndex - 1]
+                if (event.key === 'Home') destination = items[0]
+                if (event.key === 'End') destination = items.at(-1)
+
+                if (event.key === 'ArrowRight' && node.type === 'directory') {
+                  event.preventDefault()
+                  if (!isExpanded) {
+                    onToggleFolder(node.path)
+                    return
+                  }
+                  const next = items[currentIndex + 1]
+                  if (next && Number(next.getAttribute('aria-level')) > depth + 1) destination = next
+                }
+
+                if (event.key === 'ArrowLeft') {
+                  event.preventDefault()
+                  if (node.type === 'directory' && isExpanded) {
+                    onToggleFolder(node.path)
+                    return
+                  }
+                  const parentPath = node.path.split('/').slice(0, -1).join('/')
+                  destination = items.find((item) => item.dataset.treePath === parentPath)
+                }
+
+                if (event.key === 'Enter' || event.key === ' ') {
+                  event.preventDefault()
                   if (node.type === 'directory') onToggleFolder(node.path)
                   else if (node.type === 'file') onFileSelect(node)
+                  return
+                }
+
+                if (event.key.toLowerCase() === 'p' && onPinToggle && node.type !== 'submodule') {
+                  event.preventDefault()
+                  onPinToggle(node.path, node.type === 'directory' ? 'directory' : 'file')
+                  return
+                }
+
+                if (event.key.toLowerCase() === 'd' && node.type !== 'submodule') {
+                  event.preventDefault()
+                  if (node.type === 'directory') onDownloadFolder(node)
+                  else onDownloadFile(node)
+                  return
+                }
+
+                const destinationPath = destination?.dataset.treePath
+                if (destinationPath) {
+                  event.preventDefault()
+                  focusItem(destinationPath)
                 }
               }}
             >
@@ -215,7 +324,7 @@ export function FileTreeNode({
               )}
 
               {/* Metadata badges — compact, right-aligned */}
-              <span className="flex items-center gap-1.5 shrink-0 opacity-60 group-hover/tree-item:opacity-100 transition-opacity">
+              <span className="flex items-center gap-1.5 shrink-0 opacity-60 group-hover/tree-item:opacity-100 group-focus-within/tree-item:opacity-100 transition-opacity">
                 {isFile ? (
                   <>
                     <LanguageDot filename={node.name} />
@@ -235,14 +344,16 @@ export function FileTreeNode({
 
               {onPinToggle && node.type !== 'submodule' && (
                 <button
+                  tabIndex={-1}
                   className={cn(
-                    "p-0.5 rounded hover:bg-foreground/10 transition-opacity shrink-0",
+                    "p-0.5 rounded hover:bg-foreground/10 focus-visible:bg-foreground/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 transition-opacity shrink-0",
                     isPinned?.(node.path)
                       ? "opacity-100 text-accent-primary"
-                      : "opacity-0 group-hover/tree-item:opacity-100 text-text-muted hover:text-text-primary",
+                      : "opacity-0 group-hover/tree-item:opacity-100 group-focus-within/tree-item:opacity-100 focus-visible:opacity-100 text-text-muted hover:text-text-primary",
                   )}
                   aria-label={isPinned?.(node.path) ? `Unpin ${node.name}` : `Pin ${node.name}`}
                   aria-pressed={isPinned?.(node.path) ?? false}
+                  aria-keyshortcuts="P"
                   title={isPinned?.(node.path) ? `Unpin ${node.name}` : `Pin ${node.name}`}
                   onClick={(e) => {
                     e.stopPropagation()
@@ -259,9 +370,11 @@ export function FileTreeNode({
               )}
 
               {node.type !== 'submodule' && <button
-                className="p-0.5 rounded opacity-0 group-hover/tree-item:opacity-100 text-text-muted hover:text-text-primary hover:bg-foreground/10 transition-opacity shrink-0"
+                tabIndex={-1}
+                className="p-0.5 rounded opacity-0 group-hover/tree-item:opacity-100 group-focus-within/tree-item:opacity-100 focus-visible:opacity-100 text-text-muted hover:text-text-primary hover:bg-foreground/10 focus-visible:bg-foreground/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 transition-opacity shrink-0"
                 title={node.type === 'directory' ? `Download ${node.name} as ZIP` : `Download ${node.name}`}
                 aria-label={node.type === 'directory' ? `Download ${node.name} as ZIP` : `Download ${node.name}`}
+                aria-keyshortcuts="D"
                 onClick={(e) => {
                   e.stopPropagation()
                   if (node.type === 'directory') onDownloadFolder(node)
@@ -273,7 +386,7 @@ export function FileTreeNode({
             </div>
 
             {node.type === 'directory' && isExpanded && node.children && (
-              <FileTreeNode
+              <FileTreeBranch
                 nodes={node.children}
                 expandedFolders={expandedFolders}
                 onToggleFolder={onToggleFolder}
@@ -287,6 +400,10 @@ export function FileTreeNode({
                 isPinned={isPinned}
                 onPinToggle={onPinToggle}
                 contentAvailability={contentAvailability}
+                focusedPath={focusedPath}
+                setFocusedPath={setFocusedPath}
+                focusItem={focusItem}
+                treeRef={treeRef}
               />
             )}
           </div>

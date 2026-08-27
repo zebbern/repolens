@@ -43,7 +43,98 @@ async function expectExactRenderedSource(page: Page, source: string): Promise<vo
   }).toBe(source)
 }
 
+async function readCachedContentKind(page: Page, repositoryKey: string): Promise<string | null> {
+  return page.evaluate(async (key) => new Promise<string | null>((resolve, reject) => {
+    const request = indexedDB.open('repolens-cache')
+    request.onerror = () => reject(request.error)
+    request.onsuccess = () => {
+      const db = request.result
+      const transaction = db.transaction('repos', 'readonly')
+      const entryRequest = transaction.objectStore('repos').get(key)
+      entryRequest.onerror = () => reject(entryRequest.error)
+      entryRequest.onsuccess = () => resolve(entryRequest.result?.content?.kind ?? null)
+    }
+  }), repositoryKey)
+}
+
+async function readDurableSource(page: Page, contentKey: string): Promise<string | null> {
+  return page.evaluate(async (key) => new Promise<string | null>((resolve, reject) => {
+    const request = indexedDB.open('repolens-content')
+    request.onerror = () => reject(request.error)
+    request.onsuccess = () => {
+      const db = request.result
+      const transaction = db.transaction('files', 'readonly')
+      const sourceRequest = transaction.objectStore('files').get(key)
+      sourceRequest.onerror = () => reject(sourceRequest.error)
+      sourceRequest.onsuccess = () => resolve(sourceRequest.result ?? null)
+    }
+  }), contentKey)
+}
+
 test.describe('deterministic trustworthy-analysis flows', () => {
+  test('keeps the editor usable while the sidebar opens as a mobile drawer @mobile', async ({ page }, testInfo) => {
+    const fixture = await connectFixture(page, testInfo, 'complete')
+    await openTab(page, 'Code')
+
+    await expect(page.getByRole('complementary', { name: 'Code sidebar' })).toHaveCount(0)
+    await page.getByRole('button', { name: 'Open explorer sidebar' }).click()
+
+    const drawer = page.getByRole('dialog', { name: 'Explorer sidebar' })
+    await expect(drawer).toBeVisible()
+    await drawer.getByRole('treeitem', { name: /src/i }).click()
+    await drawer.getByRole('treeitem', { name: /index\.ts/i }).click()
+
+    await expect(drawer).not.toBeVisible()
+    await expectExactRenderedSource(page, fixture.expectedSource)
+  })
+
+  test('gives the mobile chat sheet an accessible description @mobile', async ({ page }, testInfo) => {
+    await installGitHubRepositoryFixture(page, 'complete', testInfo)
+    await openLanding(page)
+
+    await page.getByRole('button', { name: 'Open chat' }).click()
+
+    const chatDialog = page.getByRole('dialog', { name: 'Chat' })
+    await expect(chatDialog).toBeVisible()
+    await expect(chatDialog).toHaveAccessibleDescription(
+      'Chat with RepoLens about repository code and analysis.',
+    )
+  })
+
+  test('returns focus to the mobile chat opener after Escape @mobile', async ({ page }, testInfo) => {
+    await installGitHubRepositoryFixture(page, 'complete', testInfo)
+    await openLanding(page)
+
+    const openChat = page.getByRole('button', { name: 'Open chat' })
+    await openChat.click()
+    const chatDialog = page.getByRole('dialog', { name: 'Chat' })
+    await expect(chatDialog).toBeVisible()
+
+    await page.keyboard.press('Escape')
+
+    await expect(chatDialog).not.toBeVisible()
+    await expect(openChat).toBeFocused()
+  })
+
+  test('keeps focus on Repo when keyboard navigation returns to the landing tab', async ({ page }, testInfo) => {
+    await installGitHubRepositoryFixture(page, 'complete', testInfo)
+    await openLanding(page)
+
+    const tablist = page.getByRole('tablist', { name: 'Preview tabs' })
+    const issues = tablist.getByRole('tab', { name: 'Issues', exact: true })
+    await issues.click()
+    await issues.press('ArrowRight')
+
+    const diagram = tablist.getByRole('tab', { name: 'Diagram', exact: true })
+    await expect(diagram).toBeFocused()
+    await diagram.press('Home')
+
+    const repo = tablist.getByRole('tab', { name: 'Repo', exact: true })
+    await expect(repo).toHaveAttribute('aria-selected', 'true')
+    await page.waitForTimeout(150)
+    await expect(repo).toBeFocused()
+  })
+
   test('connects through the real form and opens exact indexed source', async ({ page }, testInfo) => {
     const fixture = await connectFixture(page, testInfo, 'complete')
     await expect(page.getByRole('status').filter({ hasText: '3 supported files indexed.' })).toBeVisible()
@@ -53,6 +144,64 @@ test.describe('deterministic trustworthy-analysis flows', () => {
     await page.getByRole('treeitem', { name: /index\.ts/i }).click()
     await expect(page.getByText('fixtureGreeting', { exact: false }).first()).toBeVisible()
     await expectExactRenderedSource(page, fixture.expectedSource)
+  })
+
+  test('renders dependency metadata and a known health grade from production-shaped fixtures', async ({ page }, testInfo) => {
+    await connectFixture(page, testInfo, 'dependencies')
+    await openTab(page, 'Deps')
+
+    const dependency = page.getByRole('row').filter({ hasText: 'fixture-dependency' })
+    await expect(dependency).toBeVisible()
+    await expect(dependency).toContainText('1.0.0')
+    await expect(dependency).toContainText('1.1.0')
+    await expect(dependency.getByLabel('Health grade: A')).toBeVisible()
+  })
+
+  test('searches and scans an edited medium repository through IndexedDB workers', async ({ page }, testInfo) => {
+    test.setTimeout(120_000)
+    const fixture = await connectFixture(page, testInfo, 'mediumIdb')
+    const repositoryKey = `${fixture.owner}/${fixture.repo}`
+
+    await expect.poll(() => readCachedContentKind(page, repositoryKey)).toBe('idb')
+
+    // Reconnect through the URL-backed cache so edits use a session overlay over
+    // the immutable shared IndexedDB snapshot.
+    await page.reload()
+    await expect(page.getByText(repositoryKey).first()).toBeVisible()
+    await expect(page.getByRole('status').filter({ hasText: '3 supported files indexed.' })).toBeVisible()
+
+    await openTab(page, 'Code')
+    await page.getByRole('button', { name: 'Open search sidebar' }).click()
+    const search = page.getByPlaceholder('Search (Ctrl+Shift+F)')
+    await search.fill('idbWorkerNeedle')
+    await expect(page.getByText('1 results in 1 files', { exact: true })).toBeVisible()
+
+    await page.getByRole('button', { name: 'Toggle replace' }).click()
+    await page.getByPlaceholder('Replace').fill('idbEditedWorkerNeedle')
+    await page.getByRole('button', { name: 'Replace all matches in index.ts' }).click()
+
+    await search.fill('idbEditedWorkerNeedle')
+    await expect(page.getByText('1 results in 1 files', { exact: true })).toBeVisible()
+    await expect.poll(() => readDurableSource(
+      page,
+      `${fixture.contentStoreKey}:src/index.ts`,
+    )).toContain('idbWorkerNeedle')
+
+    await openTab(page, 'Issues')
+    await expect(page.getByRole('button', { name: /Missing Lockfile/ })).toBeVisible()
+    await expect(page.getByText('Automated findings are heuristic. Review them before acting.')).toBeVisible()
+  })
+
+  test('returns focus to Explorer after closing the only code tab', async ({ page }, testInfo) => {
+    await connectFixture(page, testInfo, 'complete')
+    await openTab(page, 'Code')
+    await page.getByRole('treeitem', { name: /src/i }).click()
+    await page.getByRole('treeitem', { name: /index\.ts/i }).click()
+
+    await page.getByRole('button', { name: 'Close index.ts' }).click()
+
+    await expect(page.getByRole('button', { name: 'Open explorer sidebar' })).toBeFocused()
+    await expect(page.getByRole('tablist', { name: 'Open files' })).toHaveCount(0)
   })
 
   test('keeps complete coverage visible while tabs reach terminal outcomes', async ({ page }, testInfo) => {

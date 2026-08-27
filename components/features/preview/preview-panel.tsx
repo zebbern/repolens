@@ -9,7 +9,6 @@ import { flattenFiles } from "@/lib/code/code-index"
 import { parseShareableUrl, updateUrlState, clearUrlState } from "@/lib/export"
 import { LandingPage } from "@/components/features/landing/landing-page"
 import { DefaultContent } from "./default-content"
-import { LoadingWithStatus } from "./loading-with-status"
 import { PREVIEW_TABS } from "./tab-config"
 import { GlobalSearchOverlay } from "./global-search-overlay"
 import { PreviewRepoHeader } from "./preview-repo-header"
@@ -27,7 +26,7 @@ import {
   PRReviewTabSkeleton,
   ToursTabSkeleton,
 } from "@/components/features/loading/tab-skeleton"
-import { PRReviewProvider } from "@/providers/pr-review-provider"
+import { RepositoryScopedPRReviewProvider } from "@/providers/pr-review-provider"
 import { FeatureErrorBoundary } from "@/components/ui/feature-error-boundary"
 import { AlertCircle, FileQuestion } from "lucide-react"
 
@@ -63,7 +62,7 @@ const PRReviewPanel = lazy(() =>
 const SOURCE_REQUIRED_TABS = new Set(["issues", "docs", "diagram", "code", "deps", "tours"])
 
 export function PreviewPanel({ className }: { className?: string }) {
-  const { previewUrl, isGenerating: isLoading } = useApp()
+  const { previewUrl } = useApp()
   const { repo, files, codeIndex, isCacheHit, coverage } = useRepositoryData()
   const { connectRepository, disconnectRepository, renameFiles } = useRepositoryActions()
   const { isLoading: isConnecting, error: repoError, loadingStage, indexingProgress } = useRepositoryProgress()
@@ -144,11 +143,12 @@ export function PreviewPanel({ className }: { className?: string }) {
   const [showGlobalSearch, setShowGlobalSearch] = useState(false)
   const allFlatFiles = useMemo(() => files.length > 0 ? flattenFiles(files) : [], [files])
   const allFilesForOverlay = useMemo(() => {
-    return allFlatFiles.map(f => {
-      const indexed = codeIndex.files.get(f.path)
-      return { path: f.path, name: f.name, lineCount: indexed?.lineCount ?? 0 }
-    })
-  }, [allFlatFiles, codeIndex])
+    return Array.from(codeIndex.files.values()).map(file => ({
+      path: file.path,
+      name: file.name,
+      lineCount: file.lineCount,
+    }))
+  }, [codeIndex])
 
   // Keyboard shortcut: Ctrl/Cmd+Shift+F for file search (Ctrl+K is now command palette)
   useEffect(() => {
@@ -169,10 +169,15 @@ export function PreviewPanel({ className }: { className?: string }) {
   const [pendingNavigateFile, setPendingNavigateFile] = useState<string | null>(null)
   const [pendingNavigateLine, setPendingNavigateLine] = useState<number | null>(null)
   const handleNavigateToFile = useCallback((path: string, line?: number) => {
+    if (!codeIndex.files.has(path)) {
+      setPendingNavigateFile(null)
+      setPendingNavigateLine(null)
+      return
+    }
     setPendingNavigateFile(path)
     setPendingNavigateLine(line ?? null)
     setActiveTab("code")
-  }, [])
+  }, [codeIndex])
   const handleGlobalSearchSelect = useCallback((path: string, line?: number) => {
     setShowGlobalSearch(false)
     handleNavigateToFile(path, line)
@@ -346,11 +351,11 @@ export function PreviewPanel({ className }: { className?: string }) {
           </FeatureErrorBoundary>
         ) : activeTab === "pr-review" ? (
           <FeatureErrorBoundary featureName="Pull Requests">
-            <PRReviewProvider>
+            <RepositoryScopedPRReviewProvider repositoryKey={repo?.fullName ?? "no-repository"}>
               <Suspense fallback={<PRReviewTabSkeleton />}>
                 <PRReviewPanel />
               </Suspense>
-            </PRReviewProvider>
+            </RepositoryScopedPRReviewProvider>
           </FeatureErrorBoundary>
         ) : activeTab === "tours" ? (
           <FeatureErrorBoundary featureName="Tours">

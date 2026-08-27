@@ -8,9 +8,11 @@ import {
   Filter, FilterX, Replace, ArrowRight, Loader2,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog"
 import type { CodeIndex, SearchMatch } from "@/lib/code/code-index"
 import { buildSearchRegex, resolveFileContents } from "@/lib/code/code-index"
-import { searchInWorker, cancelPendingSearches } from "@/lib/code/search-worker-client"
+import { matchesSearchPathFilter, type SearchPathFilter } from "@/lib/code/search-path-filter"
+import { searchInWorker } from "@/lib/code/search-worker-client"
 import { fuzzyMatch } from "@/lib/code/fuzzy-match"
 import { computeFileRenames, type FileRename } from "@/lib/code/rename-files"
 import { extractSymbols, type ExtractedSymbol } from "@/components/features/code/hooks/use-symbol-extraction"
@@ -44,18 +46,7 @@ interface GlobalSearchOverlayProps {
 
 /* ── Constants ─────────────────────────────────────────────────────── */
 
-const GENERATED_FILE_PATTERNS = [
-  /pnpm-lock\.yaml$/,
-  /package-lock\.json$/,
-  /yarn\.lock$/,
-  /\.lock$/,
-  /\.min\.(js|css)$/,
-  /\.bundle\.(js|css)$/,
-  /dist\//,
-  /\.next\//,
-  /node_modules\//,
-  /\.map$/,
-]
+const EXCLUDE_GENERATED_PATHS: SearchPathFilter = { excludeGenerated: true }
 
 const SYMBOL_ICON_MAP: Record<SymbolKind, React.ElementType> = {
   function: Braces,
@@ -123,6 +114,7 @@ function TabButton({
   return (
     <button
       onClick={onClick}
+      aria-pressed={active}
       className={cn(
         "flex items-center gap-1.5 px-3 h-8 text-xs font-medium rounded-md transition-colors",
         active
@@ -233,6 +225,11 @@ export function GlobalSearchOverlay({
 }: GlobalSearchOverlayProps) {
   const inputRef = useRef<HTMLInputElement>(null)
   const resultsRef = useRef<HTMLDivElement>(null)
+  const returnFocusRef = useRef<HTMLElement | null>(
+    typeof document !== 'undefined' && document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null,
+  )
 
   const [activeTab, setActiveTab] = useState<SearchTab>('files')
   const [query, setQuery] = useState("")
@@ -334,19 +331,26 @@ export function GlobalSearchOverlay({
   const [totalCodeMatches, setTotalCodeMatches] = useState(0)
   const [isSearching, setIsSearching] = useState(false)
   const [codeSearchError, setCodeSearchError] = useState<string | null>(null)
+  const [codeSearchUnsearchedCount, setCodeSearchUnsearchedCount] = useState(0)
+  const [codeSearchUnavailableCount, setCodeSearchUnavailableCount] = useState(0)
+  const [isCodeSearchTruncated, setIsCodeSearchTruncated] = useState(false)
   const codeSearchGenerationRef = useRef(0)
 
   useEffect(() => {
     const searchGeneration = ++codeSearchGenerationRef.current
+    const controller = new AbortController()
     if (activeTab !== 'code' || !debouncedQuery.trim()) {
       queueMicrotask(() => {
         if (codeSearchGenerationRef.current !== searchGeneration) return
         setCodeResults([])
         setTotalCodeMatches(0)
         setCodeSearchError(null)
+        setCodeSearchUnsearchedCount(0)
+        setCodeSearchUnavailableCount(0)
+        setIsCodeSearchTruncated(false)
         setIsSearching(false)
       })
-      return
+      return () => controller.abort()
     }
 
     queueMicrotask(() => {
@@ -354,16 +358,27 @@ export function GlobalSearchOverlay({
       setCodeResults([])
       setTotalCodeMatches(0)
       setCodeSearchError(null)
+      setCodeSearchUnsearchedCount(0)
+      setCodeSearchUnavailableCount(0)
+      setIsCodeSearchTruncated(false)
       setIsSearching(true)
     })
-    cancelPendingSearches()
 
-    searchInWorker(codeIndex, debouncedQuery, codeSearchOptions)
+    const pathFilter = excludeGenerated ? EXCLUDE_GENERATED_PATHS : undefined
+    const includesPath = (path: string) => matchesSearchPathFilter(path, pathFilter)
+
+    searchInWorker(codeIndex, debouncedQuery, {
+      ...codeSearchOptions,
+      ...(pathFilter ? { pathFilter } : {}),
+      signal: controller.signal,
+    })
       .then(results => {
         if (codeSearchGenerationRef.current !== searchGeneration) return
         const filtered = excludeGenerated
-          ? results.filter(r => !GENERATED_FILE_PATTERNS.some(p => p.test(r.file)))
+          ? results.filter(result => includesPath(result.file))
           : results
+        const unsearchedPaths = (results.unsearchedPaths ?? []).filter(includesPath)
+        const unavailablePaths = (results.unavailablePaths ?? []).filter(includesPath)
         const items: CodeResultItem[] = []
         let total = 0
         for (const result of filtered) {
@@ -374,12 +389,21 @@ export function GlobalSearchOverlay({
         }
         setCodeResults(items)
         setTotalCodeMatches(total)
+        setCodeSearchUnsearchedCount(unsearchedPaths.length)
+        setCodeSearchUnavailableCount(unavailablePaths.length)
+        setIsCodeSearchTruncated(results.truncated ?? false)
       })
       .catch(err => {
-        if (codeSearchGenerationRef.current !== searchGeneration || err?.message === 'Search cancelled') return
+        if (
+          codeSearchGenerationRef.current !== searchGeneration
+          || (err instanceof Error && err.name === 'AbortError')
+        ) return
         console.warn('[search-worker] Search failed:', err)
         setCodeResults([])
         setTotalCodeMatches(0)
+        setCodeSearchUnsearchedCount(0)
+        setCodeSearchUnavailableCount(0)
+        setIsCodeSearchTruncated(false)
         setCodeSearchError(`Source unavailable for this repository search. ${err instanceof Error ? err.message : 'Search failed.'}`)
       })
       .finally(() => {
@@ -387,16 +411,17 @@ export function GlobalSearchOverlay({
       })
 
     return () => {
+      controller.abort()
       if (codeSearchGenerationRef.current === searchGeneration) {
         codeSearchGenerationRef.current += 1
       }
     }
   }, [debouncedQuery, codeIndex, codeSearchOptions, activeTab, excludeGenerated])
 
-  // Cancel pending worker searches on unmount
-  useEffect(() => {
-    return () => cancelPendingSearches()
-  }, [])
+  const codeSearchLimitSkippedCount = Math.max(
+    0,
+    codeSearchUnsearchedCount - codeSearchUnavailableCount,
+  )
 
   // Selectable code items: matches excluding collapsed files (for keyboard nav)
   const codeSelectableItems = useMemo(() => {
@@ -533,11 +558,32 @@ export function GlobalSearchOverlay({
     }
   }, [activeTab, fileResults, codeSelectableItems, symbolResults, onSelect])
 
+  const restoreFocus = useCallback(() => {
+    const previousFocus = returnFocusRef.current
+    if (previousFocus?.isConnected) {
+      previousFocus.focus()
+      return
+    }
+
+    const persistentSearchTrigger = document.querySelector<HTMLElement>(
+      '[aria-label="Search repository files"]',
+    )
+    if (persistentSearchTrigger?.isConnected) {
+      persistentSearchTrigger.focus()
+      return
+    }
+
+    document.querySelector<HTMLElement>(
+      '[id^="preview-tab-"][role="tab"][aria-selected="true"]',
+    )?.focus()
+  }, [])
+
   /* ── Keyboard ─────────────────────────────────────────────────── */
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
-    if (e.key === 'Escape') {
-      onClose()
+    const isSearchSurface = e.target === inputRef.current
+      || (e.target instanceof Node && resultsRef.current?.contains(e.target))
+    if ((e.key === 'ArrowDown' || e.key === 'ArrowUp' || e.key === 'Enter') && !isSearchSurface) {
       return
     }
     if (e.key === 'ArrowDown') {
@@ -563,7 +609,7 @@ export function GlobalSearchOverlay({
       if (e.key === '3') { e.preventDefault(); setActiveTab('symbols') }
     }
 
-  }, [onClose, itemCount, selectedIndex, selectItem, activeTab])
+  }, [itemCount, selectedIndex, selectItem])
 
   /* ── Placeholder text ─────────────────────────────────────────── */
 
@@ -576,18 +622,24 @@ export function GlobalSearchOverlay({
   /* ── Render ───────────────────────────────────────────────────── */
 
   return (
-    <div
-      className="absolute inset-0 z-50 flex items-start justify-center pt-[12%]"
-      onClick={onClose}
-    >
-      <div className="absolute inset-0 bg-black/60 backdrop-blur-xs" />
-      <div
-        className="relative w-full max-w-lg bg-popover border border-foreground/10 rounded-lg shadow-2xl overflow-hidden"
-        onClick={e => e.stopPropagation()}
+    <Dialog open onOpenChange={open => { if (!open) onClose() }}>
+      <DialogContent
+        aria-modal="true"
+        aria-describedby={undefined}
+        className="top-[12%] w-[calc(100%-2rem)] max-w-lg translate-y-0 gap-0 overflow-hidden border-foreground/10 bg-popover p-0 shadow-2xl"
         onKeyDown={handleKeyDown}
+        onOpenAutoFocus={event => {
+          event.preventDefault()
+          inputRef.current?.focus()
+        }}
+        onCloseAutoFocus={event => {
+          event.preventDefault()
+          restoreFocus()
+        }}
       >
+        <DialogTitle className="sr-only">Repository search</DialogTitle>
         {/* Tab bar */}
-        <div className="flex items-center gap-1 px-2 pt-2 pb-1">
+        <div role="group" aria-label="Search modes" className="flex min-w-0 items-center gap-1 px-2 pt-2 pb-1">
           <TabButton active={activeTab === 'files'} onClick={() => setActiveTab('files')} icon={FileText} label="Find Files" shortcut="1" />
           <TabButton active={activeTab === 'code'} onClick={() => setActiveTab('code')} icon={Search} label="Code Search" shortcut="2" />
           <TabButton active={activeTab === 'symbols'} onClick={() => setActiveTab('symbols')} icon={Braces} label="Symbols" shortcut="3" />
@@ -596,14 +648,14 @@ export function GlobalSearchOverlay({
         </div>
 
         {/* Search input row */}
-        <div className="flex items-center gap-2 px-3 border-b border-foreground/6">
+        <div className="flex min-w-0 flex-wrap items-center gap-2 px-3 border-b border-foreground/6">
           <Search className="h-4 w-4 text-text-muted shrink-0" />
           <input
             ref={inputRef}
             value={query}
             onChange={e => setQuery(e.target.value)}
             placeholder={placeholder}
-            className="flex-1 h-10 bg-transparent text-sm text-text-primary placeholder:text-text-muted outline-hidden"
+            className="min-w-0 flex-1 h-10 bg-transparent text-sm text-text-primary placeholder:text-text-muted outline-hidden"
             role="combobox"
             aria-label="Search"
             aria-expanded={itemCount > 0}
@@ -621,7 +673,7 @@ export function GlobalSearchOverlay({
           )}
           {/* Code search option toggles */}
           {activeTab === 'code' && (
-            <div className="flex items-center gap-0.5 ml-1">
+            <div className="flex min-w-0 basis-full items-center justify-end gap-0.5 ml-0 lg:basis-auto lg:ml-1">
               <SearchToggle active={caseSensitive} onClick={() => setCaseSensitive(v => !v)} icon={CaseSensitive} label="Match Case" />
               <SearchToggle active={wholeWord} onClick={() => setWholeWord(v => !v)} icon={WholeWord} label="Whole Word" />
               <SearchToggle active={useRegex} onClick={() => setUseRegex(v => !v)} icon={Regex} label="Use Regex" />
@@ -693,13 +745,27 @@ export function GlobalSearchOverlay({
           </div>
         )}
 
-        {/* Results */}
-        <div ref={resultsRef} id="search-results" role="listbox" className="max-h-80 overflow-y-auto">
-          {activeTab === 'code' && codeSearchError && (
-            <div role="alert" className="px-3 py-2 text-xs text-status-error bg-status-error/10">
-              {codeSearchError}
+        {activeTab === 'code' && codeSearchError && (
+          <div role="alert" className="px-3 py-2 text-xs text-status-error bg-status-error/10">
+            {codeSearchError}
+          </div>
+        )}
+        {activeTab === 'code'
+          && (isCodeSearchTruncated || codeSearchLimitSkippedCount > 0 || codeSearchUnavailableCount > 0)
+          && (
+            <div role="status" className="px-3 py-2 text-xs text-amber-300/90 bg-amber-500/10">
+              {isCodeSearchTruncated && <>Search results were truncated by search limits. </>}
+              {codeSearchLimitSkippedCount > 0 && (
+                <>{codeSearchLimitSkippedCount} {codeSearchLimitSkippedCount === 1 ? 'file was' : 'files were'} not searched after the global match limit was reached. </>
+              )}
+              {codeSearchUnavailableCount > 0 && (
+                <>{codeSearchUnavailableCount} {codeSearchUnavailableCount === 1 ? 'file was' : 'files were'} not searched because source content is unavailable.</>
+              )}
             </div>
           )}
+
+        {/* Results */}
+        <div ref={resultsRef} id="search-results" role="listbox" className="max-h-80 overflow-y-auto">
           {activeTab === 'symbols' && symbolSourceError && (
             <div role="alert" className="px-3 py-2 text-xs text-status-error bg-status-error/10">
               {symbolSourceError}
@@ -744,8 +810,8 @@ export function GlobalSearchOverlay({
             />
           )}
         </div>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   )
 }
 
@@ -810,7 +876,7 @@ function FileResultsList({
                 width: '100%',
               }}
               className={cn(
-                "flex items-center gap-2 px-3 text-left transition-colors duration-150",
+                "flex min-w-0 items-center gap-2 px-3 text-left transition-colors duration-150",
                 "focus-visible:outline-hidden group",
                 i === selectedIndex ? "bg-foreground/10" : "hover:bg-foreground/5",
               )}
@@ -991,7 +1057,7 @@ function CodeResultsList({
                 width: '100%',
               }}
               className={cn(
-                "flex items-center gap-2 px-3 text-left transition-colors duration-150",
+                "flex min-w-0 items-center gap-2 px-3 text-left transition-colors duration-150",
                 "focus-visible:outline-hidden",
                 idx === selectedIndex ? "bg-foreground/10" : "hover:bg-foreground/5",
               )}
@@ -999,7 +1065,7 @@ function CodeResultsList({
               <span className="text-[10px] text-text-muted tabular-nums w-8 text-right shrink-0">
                 {r.match.line}
               </span>
-              <span className="text-xs text-text-secondary truncate font-mono">
+              <span className="min-w-0 flex-1 text-xs text-text-secondary truncate font-mono">
                 <HighlightedText
                   text={r.match.content.trim()}
                   query={query}

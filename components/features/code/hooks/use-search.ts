@@ -1,7 +1,9 @@
 import { useState, useMemo, useCallback, useRef, useEffect } from "react"
 import type { FileNode } from "@/types/repository"
 import type { CodeIndex, SearchResult } from "@/lib/code/code-index"
-import { searchIndexAsync, flattenFiles } from "@/lib/code/code-index"
+import { flattenFiles, validateSearchRegex } from "@/lib/code/code-index"
+import { buildSearchPathFilter, matchesSearchPathFilter } from "@/lib/code/search-path-filter"
+import { searchInWorker } from "@/lib/code/search-worker-client"
 import type { SidebarMode, SearchOptions } from "../types"
 
 interface UseSearchOptions {
@@ -33,52 +35,85 @@ export function useSearch({
   const [visibleResultCount, setVisibleResultCount] = useState(50)
   const [searchResults, setSearchResults] = useState<SearchResult[]>([])
   const [unsearchedCount, setUnsearchedCount] = useState(0)
+  const [unavailableCount, setUnavailableCount] = useState(0)
+  const [isSearchTruncated, setIsSearchTruncated] = useState(false)
+  const [searchError, setSearchError] = useState<string | null>(null)
+  const [searchWarning, setSearchWarning] = useState<string | null>(null)
   const searchInputRef = useRef<HTMLInputElement>(null)
   const resultsContainerRef = useRef<HTMLDivElement>(null)
 
   // Compute search results after resolving metadata-only source from ContentStore.
   useEffect(() => {
     let stale = false
+    const controller = new AbortController()
     if (!debouncedSearchQuery.trim() || !isIndexingComplete) {
       queueMicrotask(() => {
         if (!stale) {
           setSearchResults([])
           setUnsearchedCount(0)
+          setUnavailableCount(0)
+          setIsSearchTruncated(false)
+          setSearchError(null)
+          setSearchWarning(null)
         }
       })
-      return () => { stale = true }
+      return () => {
+        stale = true
+        controller.abort()
+      }
     }
 
-    void searchIndexAsync(codeIndex, debouncedSearchQuery, searchOptions)
+    const regexValidation = searchOptions.regex
+      ? validateSearchRegex(debouncedSearchQuery)
+      : 'valid'
+    const literalFallback = regexValidation !== 'valid'
+    const effectiveSearchOptions = literalFallback
+      ? { ...searchOptions, regex: false }
+      : searchOptions
+    const fallbackWarning = regexValidation === 'unsafe'
+      ? 'Unsafe regular expression was searched as literal text.'
+      : regexValidation === 'invalid'
+        ? 'Invalid regular expression was searched as literal text.'
+        : null
+    queueMicrotask(() => {
+      if (!stale) {
+        setSearchError(null)
+        setSearchWarning(fallbackWarning)
+      }
+    })
+    const pathFilter = buildSearchPathFilter(fileFilter)
+    const includesPath = (path: string) => matchesSearchPathFilter(path, pathFilter)
+
+    void searchInWorker(codeIndex, debouncedSearchQuery, {
+      ...effectiveSearchOptions,
+      ...(pathFilter ? { pathFilter } : {}),
+      signal: controller.signal,
+    })
       .then(results => {
         if (stale) return
-        let filtered = results
-        if (fileFilter.trim()) {
-          const filters = fileFilter.split(',').map(f => f.trim().toLowerCase()).filter(Boolean)
-          filtered = results.filter(result => {
-            const filePath = result.file.toLowerCase()
-            return filters.some(filter => {
-              if (filter.startsWith('*.')) return filePath.endsWith(filter.slice(1))
-              if (filter.endsWith('/*')) return filePath.startsWith(filter.slice(0, -1))
-              return filePath.includes(filter)
-            })
-          })
-        }
+        const filtered: SearchResult[] = pathFilter === undefined
+          ? results
+          : results.filter(result => includesPath(result.file))
         setSearchResults(filtered)
-        setUnsearchedCount(0)
+        setUnsearchedCount((results.unsearchedPaths ?? []).filter(includesPath).length)
+        setUnavailableCount((results.unavailablePaths ?? []).filter(includesPath).length)
+        setIsSearchTruncated(results.truncated ?? false)
       })
       .catch(error => {
         if (stale) return
-        console.warn('[code-search] Full-content search failed:', error)
+        if (error instanceof Error && error.name === 'AbortError') return
+        console.warn('[code-search] Worker search failed:', error)
         setSearchResults([])
-        let missing = 0
-        for (const file of codeIndex.files.values()) {
-          if (typeof file.content !== 'string') missing++
-        }
-        setUnsearchedCount(missing)
+        setUnsearchedCount(0)
+        setUnavailableCount(0)
+        setIsSearchTruncated(false)
+        setSearchError(error instanceof Error ? error.message : String(error))
       })
 
-    return () => { stale = true }
+    return () => {
+      stale = true
+      controller.abort()
+    }
   }, [debouncedSearchQuery, codeIndex, searchOptions, isIndexingComplete, fileFilter])
 
   // Go to search result
@@ -117,6 +152,10 @@ export function useSearch({
   return {
     searchResults,
     unsearchedCount,
+    unavailableCount,
+    isSearchTruncated,
+    searchError,
+    searchWarning,
     goToSearchResult,
     highlightedLine,
     setHighlightedLine,

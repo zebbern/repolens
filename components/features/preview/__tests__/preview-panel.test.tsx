@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { act, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import type { ChangeEvent } from 'react'
 
@@ -12,6 +12,11 @@ interface LandingPageProps {
 interface PreviewTabBarProps {
   activeTab: string
   onTabChange: (tab: string) => void
+}
+
+interface GlobalSearchOverlayProps {
+  allFiles: Array<{ path: string }>
+  onSelect: (path: string) => void
 }
 
 // ---------------------------------------------------------------------------
@@ -36,6 +41,10 @@ const mockUseRepository = vi.fn(() => ({
 }))
 
 const mockGetValidProviders = vi.fn(() => ['openai'])
+const mockFlattenFiles = vi.fn((files?: unknown) => {
+  void files
+  return [] as Array<{ path: string; name: string }>
+})
 const mockCoverage = vi.fn(() => null as null | {
   treeStatus: 'complete' | 'partial'
   supportedFiles: { discovered: number; loaded: number }
@@ -68,7 +77,7 @@ vi.mock('@/providers', () => ({
 }))
 
 vi.mock('@/lib/code/code-index', () => ({
-  flattenFiles: vi.fn(() => []),
+  flattenFiles: (files: unknown) => mockFlattenFiles(files),
 }))
 
 vi.mock('@/lib/export', () => ({
@@ -134,7 +143,12 @@ vi.mock('../tab-config', () => ({
 }))
 
 vi.mock('../global-search-overlay', () => ({
-  GlobalSearchOverlay: () => null,
+  GlobalSearchOverlay: ({ allFiles, onSelect }: GlobalSearchOverlayProps) => (
+    <div data-testid="global-search-files">
+      {allFiles.map((file) => <span key={file.path}>{file.path}</span>)}
+      <button onClick={() => onSelect('README')}>select-unsupported-file</button>
+    </div>
+  ),
 }))
 
 vi.mock('../preview-repo-header', () => ({
@@ -173,7 +187,9 @@ vi.mock('@/components/features/changelog/changelog-viewer', () => ({
   ChangelogViewer: () => <div data-testid="changelog-viewer">ChangelogViewer</div>,
 }))
 vi.mock('@/components/features/git-history/git-history-panel', () => ({
-  GitHistoryPanel: () => <div data-testid="git-history-panel">GitHistoryPanel</div>,
+  GitHistoryPanel: ({ navigateToFile }: { navigateToFile?: string | null }) => (
+    <div data-testid="git-history-panel">{navigateToFile ?? 'none'}</div>
+  ),
 }))
 
 vi.mock('../ai-feature-empty-state', () => ({
@@ -231,6 +247,7 @@ describe('PreviewPanel', () => {
       getValidProviders: mockGetValidProviders,
       isHydrated: true,
     })
+    mockFlattenFiles.mockReturnValue([])
   })
 
   it('shows landing page when no repo is connected', () => {
@@ -273,6 +290,53 @@ describe('PreviewPanel', () => {
 
     expect(screen.getByText('No supported files found')).toBeInTheDocument()
     expect(screen.queryByText('CodeBrowser')).not.toBeInTheDocument()
+  })
+
+  it('excludes unsupported tree files from global search navigation', () => {
+    useConnectedRepository()
+    mockUseRepository.mockReturnValue({
+      ...mockUseRepository(),
+      files: [{ path: 'README', name: 'README', type: 'file' }],
+      codeIndex: { totalFiles: 0, files: new Map() },
+    } as never)
+    mockCoverage.mockReturnValue({
+      treeStatus: 'complete',
+      supportedFiles: { discovered: 0, loaded: 0 },
+      failures: { count: 0, samples: [] },
+      failedSubtrees: { count: 0, samples: [] },
+      mode: 'full',
+    })
+    mockFlattenFiles.mockReturnValue([{ path: 'README', name: 'README' }])
+    render(<PreviewPanel />)
+
+    act(() => window.dispatchEvent(new Event('open-file-search')))
+
+    expect(screen.getByTestId('global-search-files').querySelector('span')).toBeNull()
+  })
+
+  it('does not carry an unsupported search selection into Git History', async () => {
+    const user = userEvent.setup()
+    useConnectedRepository()
+    mockUseRepository.mockReturnValue({
+      ...mockUseRepository(),
+      files: [{ path: 'README', name: 'README', type: 'file' }],
+      codeIndex: { totalFiles: 0, files: new Map() },
+    } as never)
+    mockCoverage.mockReturnValue({
+      treeStatus: 'complete',
+      supportedFiles: { discovered: 0, loaded: 0 },
+      failures: { count: 0, samples: [] },
+      failedSubtrees: { count: 0, samples: [] },
+      mode: 'full',
+    })
+    mockFlattenFiles.mockReturnValue([{ path: 'README', name: 'README' }])
+    render(<PreviewPanel />)
+    act(() => window.dispatchEvent(new Event('open-file-search')))
+
+    await user.click(screen.getByText('select-unsupported-file'))
+    await user.click(screen.getByText('git-history-tab'))
+
+    expect(await screen.findByTestId('git-history-panel')).toHaveTextContent('none')
   })
 
   describe('AI tab conditional rendering — no API key', () => {

@@ -3,15 +3,18 @@ import { strToU8, zipSync } from 'fflate'
 
 export type GitHubFixtureScenario =
   | 'complete'
+  | 'dependencies'
   | 'truncatedTree'
   | 'fileFailure'
+  | 'mediumIdb'
   | 'onDemand'
   | 'noPullRequests'
   | 'pullRequest'
 
 const OWNER = 'repolens-fixtures'
 const TREE_SHA = '1111111111111111111111111111111111111111'
-const FILES = {
+const DEPENDENCY_NAME = 'fixture-dependency'
+const BASE_FILES = {
   'README.md': '# Deterministic RepoLens fixture\n\nExact browser-test source.\n',
   'package.json': '{"name":"repolens-e2e-fixture","version":"1.0.0"}\n',
   'src/index.ts': [
@@ -23,7 +26,37 @@ const FILES = {
   'src/failing.ts': 'export const shouldFailToLoad = true\n',
 } as const
 
-const EXPECTED_SOURCE = FILES['src/index.ts']
+const DEPENDENCY_FILES = {
+  'README.md': BASE_FILES['README.md'],
+  'package.json': JSON.stringify({
+    name: 'repolens-e2e-fixture',
+    version: '1.0.0',
+    dependencies: { [DEPENDENCY_NAME]: '^1.0.0' },
+  }),
+  'package-lock.json': JSON.stringify({
+    name: 'repolens-e2e-fixture',
+    version: '1.0.0',
+    lockfileVersion: 3,
+    packages: {
+      '': {
+        name: 'repolens-e2e-fixture',
+        version: '1.0.0',
+        dependencies: { [DEPENDENCY_NAME]: '^1.0.0' },
+      },
+      [`node_modules/${DEPENDENCY_NAME}`]: { version: '1.0.0' },
+    },
+  }),
+  'src/index.ts': BASE_FILES['src/index.ts'],
+} as const
+
+const MEDIUM_IDB_SOURCE = [
+  'export const idbWorkerNeedle = "stored in IndexedDB"',
+  'export function fixtureGreeting(name: string): string {',
+  '  return `hello ${name} from deterministic source`',
+  '}',
+  '',
+].join('\n')
+
 const AI_ROUTE = /^\/api\/(?:chat|docs|changelog|inline-actions|issues\/validate)(?:\/|$)/
 const controls = new WeakMap<Page, GitHubFixtureControl>()
 
@@ -31,6 +64,7 @@ interface GitHubFixtureControl {
   owner: string
   repo: string
   repositoryUrl: string
+  contentStoreKey: string
   expectedSource: string
   aiRequests: string[]
   assertNoUnexpectedRoutes(): Promise<void>
@@ -53,24 +87,43 @@ function fixtureRepoName(scenario: GitHubFixtureScenario, testInfo: TestInfo): s
   return `${scenario.toLowerCase()}-${testInfo.parallelIndex}-${suffix}`.slice(0, 90)
 }
 
-function fileEntries(scenario: GitHubFixtureScenario) {
-  const paths = scenario === 'fileFailure'
-    ? ['README.md', 'src/index.ts', 'src/failing.ts'] as const
-    : ['README.md', 'package.json', 'src/index.ts'] as const
+function filesForScenario(scenario: GitHubFixtureScenario): Record<string, string> {
+  if (scenario === 'dependencies') return DEPENDENCY_FILES
+  if (scenario === 'fileFailure') {
+    return {
+      'README.md': BASE_FILES['README.md'],
+      'src/index.ts': BASE_FILES['src/index.ts'],
+      'src/failing.ts': BASE_FILES['src/failing.ts'],
+    }
+  }
+  if (scenario === 'mediumIdb') {
+    return {
+      'README.md': BASE_FILES['README.md'],
+      'package.json': BASE_FILES['package.json'],
+      'src/index.ts': MEDIUM_IDB_SOURCE,
+    }
+  }
+  return {
+    'README.md': BASE_FILES['README.md'],
+    'package.json': BASE_FILES['package.json'],
+    'src/index.ts': BASE_FILES['src/index.ts'],
+  }
+}
 
-  return paths.map((path, index) => ({
+function fileEntries(files: Record<string, string>) {
+  return Object.entries(files).map(([path, content], index) => ({
     path,
     mode: '100644',
     type: 'blob' as const,
     sha: String(index + 2).repeat(40),
-    size: FILES[path].length,
+    size: content.length,
   }))
 }
 
-function treeResponse(scenario: GitHubFixtureScenario) {
+function treeResponse(scenario: GitHubFixtureScenario, files: Record<string, string>) {
   const tree = [
     { path: 'src', mode: '040000', type: 'tree' as const, sha: '9'.repeat(40) },
-    ...fileEntries(scenario),
+    ...fileEntries(files),
   ]
   if (scenario !== 'truncatedTree') {
     return { status: 'complete', sha: TREE_SHA, truncated: false, requestCount: 1, tree }
@@ -115,10 +168,10 @@ function pullRequest() {
   }
 }
 
-function zipball(repo: string, scenario: GitHubFixtureScenario): Buffer {
+function zipball(repo: string, files: Record<string, string>): Buffer {
   const root = `${repo}-${TREE_SHA}/`
   const entries = Object.fromEntries(
-    fileEntries(scenario).map(({ path }) => [`${root}${path}`, strToU8(FILES[path])]),
+    Object.entries(files).map(([path, content]) => [`${root}${path}`, strToU8(content)]),
   )
   return Buffer.from(zipSync(entries, { level: 1 }))
 }
@@ -133,20 +186,58 @@ export async function installGitHubRepositoryFixture(
   const repositoryUrl = `https://github.com/${owner}/${repo}`
   const unexpectedRoutes: string[] = []
   const aiRequests: string[] = []
+  const browserErrors: string[] = []
+  const files = filesForScenario(scenario)
 
   page.on('request', (request) => {
     const path = new URL(request.url()).pathname
     if (AI_ROUTE.test(path)) aiRequests.push(`${request.method()} ${path}`)
   })
 
+  if (scenario === 'mediumIdb') {
+    page.on('console', (message) => {
+      if (message.type() === 'error') browserErrors.push(`console: ${message.text()}`)
+    })
+    page.on('pageerror', (error) => browserErrors.push(`pageerror: ${error.message}`))
+  }
+
   await page.route('**/api/deps{,/**}', async (route) => {
-    const path = new URL(route.request().url()).pathname
-    if (path === '/api/deps') {
-      await route.fulfill(json({ packages: [] }))
+    const request = route.request()
+    const path = new URL(request.url()).pathname
+    if (path === '/api/deps' && request.method() === 'POST') {
+      const body = request.postDataJSON() as { packages?: unknown }
+      const requestedPackages = Array.isArray(body.packages) ? body.packages : []
+      const results = scenario === 'dependencies' && requestedPackages.includes(DEPENDENCY_NAME)
+        ? {
+            [DEPENDENCY_NAME]: {
+              name: DEPENDENCY_NAME,
+              version: '1.1.0',
+              description: 'Deterministic dependency metadata fixture',
+              license: 'MIT',
+              maintainers: 2,
+              repository: 'https://github.com/repolens-fixtures/fixture-dependency',
+              lastPublish: '2026-08-01T00:00:00.000Z',
+              weeklyDownloads: 1_000_000,
+              downloadTrend: [
+                { day: '2026-07-31', downloads: 140_000 },
+                { day: '2026-08-01', downloads: 150_000 },
+              ],
+              deprecated: false,
+              homepage: 'https://example.test/fixture-dependency',
+            },
+          }
+        : {}
+      await route.fulfill(json({ results, errors: [] }))
       return
     }
-    if (path === '/api/deps/cve') {
-      await route.fulfill(json({ vulnerabilities: [] }))
+    if (path === '/api/deps/cve' && request.method() === 'POST') {
+      const body = request.postDataJSON() as { packages?: unknown }
+      const requestedPackages = Array.isArray(body.packages) ? body.packages : []
+      await route.fulfill(json({
+        results: [],
+        errors: [],
+        scannedPackages: requestedPackages.length,
+      }))
       return
     }
     unexpectedRoutes.push(`${route.request().method()} ${path}`)
@@ -171,7 +262,7 @@ export async function installGitHubRepositoryFixture(
         topics: ['testing'],
         isPrivate: false,
         url: repositoryUrl,
-        size: scenario === 'onDemand' ? 300_000 : 12,
+        size: scenario === 'onDemand' ? 300_000 : scenario === 'mediumIdb' ? 75_000 : 12,
         openIssuesCount: 0,
         pushedAt: '2026-08-01T00:00:00.000Z',
         license: 'MIT',
@@ -180,7 +271,7 @@ export async function installGitHubRepositoryFixture(
     }
 
     if (path === '/api/github/tree' && request.method() === 'GET') {
-      await route.fulfill(json(treeResponse(scenario)))
+      await route.fulfill(json(treeResponse(scenario, files)))
       return
     }
 
@@ -191,7 +282,7 @@ export async function installGitHubRepositoryFixture(
         await route.fulfill({
           status: 200,
           contentType: 'application/zip',
-          body: zipball(repo, scenario),
+          body: zipball(repo, files),
         })
       }
       return
@@ -203,7 +294,7 @@ export async function installGitHubRepositoryFixture(
         await route.fulfill(json({ error: { message: 'Fixture file fetch failed' } }, 500))
         return
       }
-      const content = FILES[filePath as keyof typeof FILES]
+      const content = files[filePath]
       await route.fulfill(content === undefined
         ? json({ error: { message: `No fixture content for ${filePath}` } }, 404)
         : json({ content }))
@@ -241,10 +332,12 @@ export async function installGitHubRepositoryFixture(
     owner,
     repo,
     repositoryUrl,
-    expectedSource: EXPECTED_SOURCE,
+    contentStoreKey: `${owner}/${repo}@${TREE_SHA}`,
+    expectedSource: files['src/index.ts'],
     aiRequests,
     async assertNoUnexpectedRoutes() {
       expect(unexpectedRoutes, 'unexpected GitHub/dependency requests must fail the test').toEqual([])
+      expect(browserErrors, 'medium-IDB browser console and page errors must fail the test').toEqual([])
     },
   }
   controls.set(page, control)

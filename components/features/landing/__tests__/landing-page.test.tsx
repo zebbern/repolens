@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { act, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 
 // Mock providers
@@ -20,6 +20,10 @@ vi.mock('@/providers', () => ({
 
 vi.mock('@/components/features/loading/loading-progress', () => ({
   LoadingProgress: () => <div data-testid="loading-progress">loading</div>,
+}))
+
+vi.mock('@/components/features/landing/recent-repos', () => ({
+  RecentRepos: () => null,
 }))
 
 import { LandingPage } from '../landing-page'
@@ -49,6 +53,36 @@ describe('LandingPage', () => {
     expect(
       screen.getByPlaceholderText('https://github.com/username/repo')
     ).toBeInTheDocument()
+  })
+
+  it('does not steal focus from an existing control when mounted', async () => {
+    vi.useFakeTimers()
+    const existingControl = document.createElement('button')
+    document.body.append(existingControl)
+    existingControl.focus()
+
+    try {
+      render(<LandingPage {...defaultProps} />)
+      await act(() => vi.advanceTimersByTimeAsync(100))
+
+      expect(existingControl).toHaveFocus()
+    } finally {
+      existingControl.remove()
+      vi.useRealTimers()
+    }
+  })
+
+  it('focuses the repository URL input on the initial landing presentation', async () => {
+    vi.useFakeTimers()
+
+    try {
+      render(<LandingPage {...defaultProps} />)
+      await act(() => vi.advanceTimersByTimeAsync(100))
+
+      expect(screen.getByPlaceholderText('https://github.com/username/repo')).toHaveFocus()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('renders the Connect Repository button', () => {

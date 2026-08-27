@@ -1,5 +1,6 @@
 "use client"
 
+import type { Ref } from 'react'
 import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,
@@ -13,6 +14,7 @@ import { ICON_MAP } from './diagram-constants'
 import type { DiagramType, DiagramViewMode, AvailableDiagram } from '@/lib/diagrams/diagram-data'
 
 interface DiagramToolbarProps {
+  overviewButtonRef?: Ref<HTMLButtonElement>
   availableDiagrams: AvailableDiagram[]
   viewMode: DiagramViewMode
   onSelectType: (type: DiagramType) => void
@@ -25,6 +27,7 @@ interface DiagramToolbarProps {
 }
 
 export function DiagramToolbar({
+  overviewButtonRef,
   availableDiagrams,
   viewMode,
   onSelectType,
@@ -42,9 +45,11 @@ export function DiagramToolbar({
       <div className="flex items-center gap-0.5 overflow-x-auto">
         {/* Overview tab */}
         <Button
+          ref={overviewButtonRef}
           variant="ghost"
           size="sm"
           onClick={onSelectOverview}
+          aria-pressed={isOverview}
           className={cn(
             'gap-1.5 h-7 text-xs shrink-0',
             isOverview ? 'bg-foreground/10 text-text-primary' : 'text-text-secondary hover:text-text-primary'
@@ -66,6 +71,7 @@ export function DiagramToolbar({
               variant="ghost"
               size="sm"
               onClick={() => onSelectType(d.id)}
+              aria-pressed={isActive}
               className={cn(
                 'gap-1.5 h-7 text-xs shrink-0',
                 isActive ? 'bg-foreground/10 text-text-primary' : 'text-text-secondary hover:text-text-primary'

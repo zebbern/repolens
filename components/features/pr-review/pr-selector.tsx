@@ -118,6 +118,7 @@ export function PRSelector({ pulls, isLoading, onSelect, onLoadPulls }: PRSelect
 // ---------------------------------------------------------------------------
 
 function PRListItem({ pr, onSelect }: { pr: PRMetadata; onSelect: () => void }) {
+  const [showAllLabels, setShowAllLabels] = useState(false)
   const stateColor =
     pr.state === "merged"
       ? "text-purple-600 dark:text-purple-400"
@@ -128,13 +129,15 @@ function PRListItem({ pr, onSelect }: { pr: PRMetadata; onSelect: () => void }) 
   const StateIcon = pr.state === "merged" ? GitMerge : GitPullRequest
 
   return (
-    <button
-      type="button"
-      className="flex w-full items-start gap-3 rounded-md px-3 py-2.5 text-left hover:bg-muted/50 transition-colors"
-      onClick={onSelect}
-    >
-      <StateIcon className={`h-4 w-4 mt-0.5 shrink-0 ${stateColor}`} />
-      <div className="flex-1 min-w-0">
+    <div className="relative flex w-full items-start gap-3 rounded-md px-3 py-2.5 text-left transition-colors hover:bg-muted/50">
+      <button
+        type="button"
+        className="absolute inset-0 rounded-md focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+        aria-label={`Select pull request #${pr.number}: ${pr.title}`}
+        onClick={onSelect}
+      />
+      <StateIcon className={`pointer-events-none relative z-10 h-4 w-4 mt-0.5 shrink-0 ${stateColor}`} />
+      <div className="pointer-events-none relative z-10 flex-1 min-w-0">
         <div className="flex items-baseline gap-2">
           <span className="text-sm font-medium truncate">{pr.title}</span>
           <span className="text-xs text-muted-foreground shrink-0">#{pr.number}</span>
@@ -151,18 +154,28 @@ function PRListItem({ pr, onSelect }: { pr: PRMetadata; onSelect: () => void }) 
         </div>
         {pr.labels.length > 0 && (
           <div className="flex flex-wrap gap-1 mt-1">
-            {pr.labels.slice(0, 3).map((label) => (
+            {pr.labels.slice(0, showAllLabels ? pr.labels.length : 3).map((label) => (
               <Badge key={label} variant="secondary" className="text-[10px] px-1.5 py-0 h-4">
                 {label}
               </Badge>
             ))}
             {pr.labels.length > 3 && (
-              <span className="text-[10px] text-muted-foreground">+{pr.labels.length - 3}</span>
+              <button
+                type="button"
+                className="pointer-events-auto text-[10px] text-muted-foreground hover:text-foreground"
+                aria-expanded={showAllLabels}
+                aria-label={showAllLabels
+                  ? `Show fewer labels for pull request #${pr.number}`
+                  : `View ${pr.labels.length - 3} more labels for pull request #${pr.number}`}
+                onClick={() => setShowAllLabels((shown) => !shown)}
+              >
+                {showAllLabels ? 'Show less' : `+${pr.labels.length - 3}`}
+              </button>
             )}
           </div>
         )}
       </div>
-    </button>
+    </div>
   )
 }
 

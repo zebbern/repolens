@@ -19,15 +19,10 @@ export function generateTreemap(codeIndex: CodeIndex, files: FileNode[]): Treema
   }
 
   const data = files.map(f => buildNode(f)).filter((n): n is TreemapNode => n !== null)
-  let largest: { path: string; count: number } | undefined
-  for (const [path, file] of codeIndex.files) {
-    if (!largest || file.lineCount > largest.count) largest = { path, count: file.lineCount }
-  }
-
   return {
     type: 'treemap',
     title: `File Size Treemap (${codeIndex.totalFiles} files, ${codeIndex.totalLines.toLocaleString()} lines)`,
     data,
-    stats: { totalNodes: codeIndex.totalFiles, totalEdges: 0, mostImported: largest },
+    stats: { totalNodes: codeIndex.totalFiles, totalEdges: 0 },
   }
 }

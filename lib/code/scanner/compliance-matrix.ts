@@ -41,6 +41,8 @@ export interface ComplianceCategory {
   findingCount: number
   ruleIds: string[]
   status: 'pass' | 'warn' | 'fail' | 'no-coverage'
+  /** Findings mapped to this category, retained for drill-down views. */
+  issues?: CodeIssue[]
 }
 
 export interface ComplianceReport {
@@ -424,6 +426,7 @@ export function generateComplianceReport(
       findingCount: coverageItem.issueCount,
       ruleIds: coverageItem.matchingRuleIds,
       status,
+      issues: results.issues.filter(issue => issue.cwe && coverageItem.item.cwes.includes(issue.cwe)),
     }
   }
 
@@ -438,6 +441,7 @@ export function generateComplianceReport(
       findingCount: coverageItem.issueCount,
       ruleIds: coverageItem.matchingRuleIds,
       status,
+      issues: results.issues.filter(issue => issue.cwe && coverageItem.item.cwes.includes(issue.cwe)),
     }
   }
 
@@ -472,5 +476,7 @@ function determineStatus(coverageItem: ComplianceCoverageItem): ComplianceCatego
  * Serializes a ComplianceReport as a formatted JSON string for download.
  */
 export function exportComplianceJSON(report: ComplianceReport): string {
-  return JSON.stringify(report, null, 2)
+  // Category findings support the in-app drill-down. Keep the existing export
+  // shape stable and avoid duplicating full issue records across standards.
+  return JSON.stringify(report, (key, value) => key === 'issues' ? undefined : value, 2)
 }

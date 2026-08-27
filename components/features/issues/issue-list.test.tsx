@@ -34,7 +34,6 @@ const baseProps = {
   expandedIssues: new Set<string>(),
   toggleIssue: vi.fn(),
   onNavigateToFile: vi.fn(),
-  ruleOverflow: new Map<string, number>(),
   scannedFiles: 100,
   languagesDetected: ['TypeScript'],
   totalIssueCount: 0,
@@ -170,25 +169,6 @@ describe('IssueList', () => {
       )
       const btn = screen.getByRole('button', { expanded: true })
       expect(btn).toBeInTheDocument()
-    })
-  })
-
-  describe('rule overflow', () => {
-    it('renders overflow notice when ruleOverflow has entries', () => {
-      const ruleOverflow = new Map([['no-eval', 5], ['sql-injection', 3]])
-      const grouped = new Map([['src/a.ts', [createIssue()]]])
-      render(
-        <IssueList
-          {...baseProps}
-          groupedByFile={grouped}
-          filteredIssueCount={1}
-          totalIssueCount={1}
-          ruleOverflow={ruleOverflow}
-        />,
-      )
-      expect(screen.getByText(/Showing top 15 per rule/)).toBeInTheDocument()
-      expect(screen.getByText('no-eval')).toBeInTheDocument()
-      expect(screen.getByText('(+5)')).toBeInTheDocument()
     })
   })
 

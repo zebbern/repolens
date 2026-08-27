@@ -17,6 +17,8 @@ export type ScanEngine =
 export interface ScanFailure {
   engine: ScanEngine
   message: string
+  /** Complete affected path list when the failure applies to specific files. */
+  paths?: string[]
 }
 
 export interface ScanDiagnostics {

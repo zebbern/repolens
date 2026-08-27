@@ -48,9 +48,9 @@ export function IssueSummary({
             <Tooltip>
               <TooltipTrigger asChild>
                 <div className={cn(
-                  'flex items-center gap-1 px-2 py-1 rounded-md border text-[10px] font-bold tabular-nums',
+                  'flex h-8 items-center gap-1 px-2 py-1 rounded-md border text-[10px] font-bold tabular-nums',
                   projectRiskColor.bg, projectRiskColor.border, projectRiskColor.color,
-                )}>
+                )} aria-label={`Project Risk Score: ${results.projectRiskScore.toFixed(1)} out of 10`}>
                   <Shield className="h-3 w-3" />
                   {results.projectRiskScore.toFixed(1)}
                 </div>
@@ -61,9 +61,9 @@ export function IssueSummary({
             </Tooltip>
           )}
           <div className={cn(
-            'flex items-center gap-1.5 px-2.5 py-1 rounded-md border',
+            'flex h-8 items-center gap-1.5 px-2.5 py-1 rounded-md border',
             gradeCfg.bg, gradeCfg.border,
-          )}>
+          )} aria-label={`Health grade ${results.healthGrade}: ${results.healthScore} out of 100`}>
             <span className={cn('text-base font-bold leading-none', gradeCfg.color)}>
               {results.healthGrade}
             </span>

@@ -33,6 +33,7 @@ function CustomTooltip({
 
 export function InsightsAuthorChart({ estimates }: InsightsAuthorChartProps) {
   const [rc, setRc] = useState<RechartsModule | null>(null)
+  const [showAllAuthors, setShowAllAuthors] = useState(false)
 
   useEffect(() => {
     loadRecharts().then(setRc)
@@ -40,7 +41,7 @@ export function InsightsAuthorChart({ estimates }: InsightsAuthorChartProps) {
 
   const { chartData, overflowCount } = useMemo(() => {
     const sorted = [...estimates].sort((a, b) => b.totalHours - a.totalHours)
-    const limited = sorted.slice(0, MAX_AUTHORS)
+    const limited = sorted.slice(0, showAllAuthors ? sorted.length : MAX_AUTHORS)
     const overflow = sorted.length - MAX_AUTHORS
 
     const data = limited.map((e) => ({
@@ -50,7 +51,7 @@ export function InsightsAuthorChart({ estimates }: InsightsAuthorChartProps) {
     }))
 
     return { chartData: data, overflowCount: overflow > 0 ? overflow : 0 }
-  }, [estimates])
+  }, [estimates, showAllAuthors])
 
   if (chartData.length === 0) {
     return (
@@ -111,9 +112,15 @@ export function InsightsAuthorChart({ estimates }: InsightsAuthorChartProps) {
         </BarChart>
       </ResponsiveContainer>
       {overflowCount > 0 && (
-        <p className="mt-2 text-xs text-muted-foreground text-center">
-          and {overflowCount} more contributor{overflowCount === 1 ? '' : 's'}
-        </p>
+        <button
+          type="button"
+          className="mt-2 block w-full text-xs text-muted-foreground text-center hover:text-foreground"
+          aria-expanded={showAllAuthors}
+          aria-label={showAllAuthors ? 'Show fewer contributors' : `View ${overflowCount} more contributors`}
+          onClick={() => setShowAllAuthors((shown) => !shown)}
+        >
+          {showAllAuthors ? 'Show less' : `and ${overflowCount} more contributor${overflowCount === 1 ? '' : 's'}`}
+        </button>
       )}
     </div>
   )

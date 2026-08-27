@@ -1,29 +1,49 @@
-import { sanitizeId, shortenPath, getTopDir, computeCommonStats, getAvailableDiagrams } from '@/lib/diagrams/helpers'
+import { sanitizeId, escapeMermaidLabel, shortenPath, getTopDir, computeCommonStats, getAvailableDiagrams } from '@/lib/diagrams/helpers'
 import { createRealisticAnalysis, createEmptyAnalysis, createMinimalAnalysis } from '@/lib/diagrams/__fixtures__/mock-analysis'
 
 describe('sanitizeId', () => {
-  it('replaces non-alphanumeric characters with underscores', () => {
-    expect(sanitizeId('src/components/Button.tsx')).toBe('src_components_Button_tsx')
+  it('encodes non-alphanumeric characters with Mermaid-safe ids', () => {
+    expect(sanitizeId('src/components/Button.tsx')).toBe('id_src_2f_components_2f_Button_2e_tsx')
   })
 
-  it('collapses multiple underscores', () => {
-    expect(sanitizeId('a--b..c')).toBe('a_b_c')
+  it('preserves distinctions between repeated punctuation', () => {
+    expect(sanitizeId('a--b..c')).toBe('id_a_2d__2d_b_2e__2e_c')
   })
 
-  it('strips leading and trailing underscores', () => {
-    expect(sanitizeId('/path/to/')).toBe('path_to')
+  it('encodes leading and trailing punctuation', () => {
+    expect(sanitizeId('/path/to/')).toBe('id__2f_path_2f_to_2f_')
   })
 
   it('handles empty string', () => {
-    expect(sanitizeId('')).toBe('')
+    expect(sanitizeId('')).toBe('id_')
   })
 
   it('preserves already-clean identifiers', () => {
-    expect(sanitizeId('myComponent123')).toBe('myComponent123')
+    expect(sanitizeId('myComponent123')).toBe('id_myComponent123')
   })
 
   it('handles paths with special regex characters', () => {
-    expect(sanitizeId('file[0].test(1)+2')).toBe('file_0_test_1_2')
+    expect(sanitizeId('file[0].test(1)+2')).toBe('id_file_5b_0_5d__2e_test_28_1_29__2b_2')
+  })
+
+  it('keeps lossy path sanitization collision-free', () => {
+    expect(sanitizeId('src/a-b.ts')).not.toBe(sanitizeId('src/a_b.ts'))
+    expect(sanitizeId('src/a-b.ts')).toBe(sanitizeId('src/a-b.ts'))
+
+    const first = 'src_part/part/part-part/part_part.part_part/part.part_part/part_file.ts'
+    const second = 'src/part/part-part/part.part.part/part-part/part_part-part-part-file.ts'
+    expect(sanitizeId(first)).not.toBe(sanitizeId(second))
+  })
+
+  it('avoids Mermaid reserved token ids', () => {
+    expect(sanitizeId('end')).not.toBe('end')
+    expect(sanitizeId('end')).toBe('id_end')
+  })
+})
+
+describe('escapeMermaidLabel', () => {
+  it('encodes Mermaid label delimiters and removes newlines', () => {
+    expect(escapeMermaidLabel('a"b & c\n<d>')).toBe('a&quot;b &amp; c &lt;d&gt;')
   })
 })
 
@@ -114,6 +134,12 @@ describe('getAvailableDiagrams', () => {
     // types.ts has types, so 'classes' should be present and available
     const classesDiagram = diagrams.find(d => d.id === 'classes')
     expect(classesDiagram?.available).toBe(true)
+  })
+
+  it('orders Treemap immediately before Architecture', () => {
+    const diagrams = getAvailableDiagrams(createRealisticAnalysis())
+
+    expect(diagrams.slice(0, 2).map(diagram => diagram.id)).toEqual(['treemap', 'topology'])
   })
 
   it('excludes classes from list when no types/classes exist', () => {

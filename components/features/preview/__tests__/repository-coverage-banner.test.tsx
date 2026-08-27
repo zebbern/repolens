@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { act, fireEvent, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { RepositoryCoverageBanner } from '../repository-coverage-banner'
 import type { RepositoryCoverage } from '@/types/repository'
@@ -23,7 +23,75 @@ function partialCoverage(): RepositoryCoverage {
   }
 }
 
+function completeCoverage(): RepositoryCoverage {
+  return {
+    treeStatus: 'complete',
+    supportedFiles: { discovered: 12, loaded: 12 },
+    failures: { count: 0, samples: [] },
+    failedSubtrees: { count: 0, samples: [] },
+    mode: 'full',
+  }
+}
+
 describe('RepositoryCoverageBanner', () => {
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('auto-dismisses completed coverage after 10 seconds', () => {
+    vi.useFakeTimers()
+    render(<RepositoryCoverageBanner coverage={completeCoverage()} loadingStage="ready" repositoryKey="repo-a" />)
+
+    expect(screen.getByRole('status')).toHaveTextContent('12 supported files indexed.')
+    act(() => vi.advanceTimersByTime(9_999))
+    expect(screen.getByRole('status')).toBeInTheDocument()
+    act(() => vi.advanceTimersByTime(1))
+    expect(screen.queryByRole('status')).not.toBeInTheDocument()
+  })
+
+  it('cancels auto-dismiss when the banner is interacted with and keeps Details usable', async () => {
+    vi.useFakeTimers()
+    render(<RepositoryCoverageBanner coverage={completeCoverage()} loadingStage="ready" repositoryKey="repo-a" />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Details' }))
+    act(() => vi.advanceTimersByTime(10_000))
+
+    expect(screen.getByRole('status')).toBeInTheDocument()
+    expect(screen.getByRole('dialog', { name: 'Repository coverage details' })).toBeInTheDocument()
+  })
+
+  it('treats pointer hover as interaction and keeps completed coverage visible', () => {
+    vi.useFakeTimers()
+    render(<RepositoryCoverageBanner coverage={completeCoverage()} loadingStage="ready" repositoryKey="repo-a" />)
+
+    fireEvent.pointerEnter(screen.getByRole('status'))
+    act(() => vi.advanceTimersByTime(10_000))
+
+    expect(screen.getByRole('status')).toBeInTheDocument()
+  })
+
+  it('does not add success dismissal to non-complete states', () => {
+    vi.useFakeTimers()
+    render(<RepositoryCoverageBanner coverage={partialCoverage()} loadingStage="ready" repositoryKey="repo-a" />)
+
+    expect(screen.queryByRole('button', { name: 'Dismiss repository coverage' })).not.toBeInTheDocument()
+    act(() => vi.advanceTimersByTime(10_000))
+    expect(screen.getByRole('status')).toBeInTheDocument()
+  })
+
+  it('resets dismissal for a newly connected repository', async () => {
+    const user = userEvent.setup()
+    const { rerender } = render(
+      <RepositoryCoverageBanner coverage={completeCoverage()} loadingStage="ready" repositoryKey="repo-a" />,
+    )
+
+    await user.click(screen.getByRole('button', { name: 'Dismiss repository coverage' }))
+    expect(screen.queryByRole('status')).not.toBeInTheDocument()
+
+    rerender(<RepositoryCoverageBanner coverage={completeCoverage()} loadingStage="ready" repositoryKey="repo-b" />)
+    expect(screen.getByRole('status')).toBeInTheDocument()
+  })
+
   it('preserves full counts while limiting detail samples and explains partial discovery', async () => {
     const user = userEvent.setup()
     render(<RepositoryCoverageBanner coverage={partialCoverage()} loadingStage="ready" />)

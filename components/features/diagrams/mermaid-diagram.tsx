@@ -1,9 +1,10 @@
 "use client"
 
 import { useEffect, useRef, useState, useCallback, useImperativeHandle, type Ref } from 'react'
+import { createPortal } from 'react-dom'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
-import { AlertTriangle, Code, Loader2 } from 'lucide-react'
+import { AlertTriangle, Code } from 'lucide-react'
 import { MermaidToolbar } from './mermaid-toolbar'
 import { MermaidFullscreenDialog } from './mermaid-fullscreen-dialog'
 
@@ -68,6 +69,7 @@ const LIGHT_THEME_CONFIG = {
 type MermaidAPI = typeof import('mermaid')['default']
 let mermaidInstance: MermaidAPI | null = null
 let mermaidLoadPromise: Promise<MermaidAPI> | null = null
+const MAX_MERMAID_SOURCE_LENGTH = 48_000
 
 function getMermaid(): Promise<MermaidAPI> {
   if (mermaidInstance) return Promise.resolve(mermaidInstance)
@@ -145,6 +147,10 @@ interface MermaidDiagramProps {
   onNodeClick?: (nodeId: string) => void
   /** Called when the user wants to view the raw mermaid source in an error state. */
   onShowRawCode?: () => void
+  /** Moves preview actions into an untransformed diagram viewport when provided. */
+  toolbarPortalTarget?: HTMLElement | null
+  /** Called after both normal and fallback Mermaid parsing or rendering fail. */
+  onRenderFailure?: () => void
 }
 
 /**
@@ -259,7 +265,20 @@ function cleanupMermaidDOM(renderId: string): void {
   document.getElementById(`d${renderId}`)?.remove()
 }
 
-export function MermaidDiagram({ chart, className, onNodeClick, onShowRawCode, ref }: MermaidDiagramProps & { ref?: Ref<MermaidDiagramHandle> }) {
+function getSourceNodeId(domId: string): string {
+  const match = domId.match(/(?:^|-)(?:flowchart|classId)-(.+)-\d+$/)
+  return match?.[1] ?? ''
+}
+
+export function MermaidDiagram({
+  chart,
+  className,
+  onNodeClick,
+  onShowRawCode,
+  toolbarPortalTarget,
+  onRenderFailure,
+  ref,
+}: MermaidDiagramProps & { ref?: Ref<MermaidDiagramHandle> }) {
     const containerRef = useRef<HTMLDivElement>(null)
     const [error, setError] = useState<string | null>(null)
     const [svgContent, setSvgContent] = useState<string>('')
@@ -287,6 +306,8 @@ export function MermaidDiagram({ chart, className, onNodeClick, onShowRawCode, r
     }), [])
 
     useEffect(() => {
+      let cancelled = false
+
       const renderDiagram = async () => {
         if (!containerRef.current || !chart.trim()) {
           setSvgContent('')
@@ -298,28 +319,40 @@ export function MermaidDiagram({ chart, className, onNodeClick, onShowRawCode, r
 
         try {
           setError(null)
+          const sanitized = sanitizeMermaidSource(chart)
+          if (sanitized.length > MAX_MERMAID_SOURCE_LENGTH) {
+            setError('Diagram exceeds the preview size limit')
+            onRenderFailure?.()
+            return
+          }
+
           const m = await getMermaid()
+          if (cancelled || currentRender !== renderIdRef.current) return
           const id = `mermaid_${currentRender}_${Date.now()}`
 
           // Clean up DOM before rendering
           cleanupMermaidDOM(id)
 
-          // Sanitize
-          const sanitized = sanitizeMermaidSource(chart)
-
           // Pre-validate with mermaid.parse before attempting render
           let sourceToRender = sanitized
           const isValid = await m.parse(sanitized, { suppressErrors: true })
+          if (cancelled || currentRender !== renderIdRef.current) return
 
           if (!isValid) {
             // Try aggressive sanitization: force-quote all labels
             const aggressive = forceQuoteAllLabels(sanitized)
+            if (aggressive.length > MAX_MERMAID_SOURCE_LENGTH) {
+              setError('Diagram exceeds the preview size limit')
+              onRenderFailure?.()
+              return
+            }
             const retryValid = await m.parse(aggressive, { suppressErrors: true })
+            if (cancelled || currentRender !== renderIdRef.current) return
 
             if (!retryValid) {
               // All sanitization failed — show error with raw code fallback
-              if (currentRender !== renderIdRef.current) return
               setError('Diagram syntax could not be parsed')
+              onRenderFailure?.()
               return
             }
 
@@ -328,15 +361,16 @@ export function MermaidDiagram({ chart, className, onNodeClick, onShowRawCode, r
 
           const { svg, bindFunctions } = await m.render(id, sourceToRender)
           // Guard against stale renders
-          if (currentRender !== renderIdRef.current) return
+          if (cancelled || currentRender !== renderIdRef.current) return
           setSvgContent(svg)
           if (containerRef.current) {
             bindFunctions?.(containerRef.current)
           }
         } catch (err) {
-          if (currentRender !== renderIdRef.current) return
+          if (cancelled || currentRender !== renderIdRef.current) return
           console.error('Mermaid render error:', err)
           setError(err instanceof Error ? err.message : 'Failed to render diagram')
+          onRenderFailure?.()
 
           // Clean up orphaned mermaid error elements from the DOM
           document.querySelectorAll('[id^="dmermaid_"]').forEach((el) => el.remove())
@@ -347,8 +381,11 @@ export function MermaidDiagram({ chart, className, onNodeClick, onShowRawCode, r
       // This prevents flash of error states during streaming when chart prop
       // updates rapidly with incomplete mermaid syntax.
       const timer = setTimeout(renderDiagram, 300)
-      return () => clearTimeout(timer)
-    }, [chart])
+      return () => {
+        cancelled = true
+        clearTimeout(timer)
+      }
+    }, [chart, onRenderFailure])
 
     // Attach click handlers to Mermaid nodes after render
     const attachClickHandlers = useCallback(() => {
@@ -363,7 +400,7 @@ export function MermaidDiagram({ chart, className, onNodeClick, onShowRawCode, r
         const nodeEl = el.closest('.node') as HTMLElement | null
         if (!nodeEl) return
 
-        const nodeId = nodeEl.id?.replace(/^flowchart-/, '').replace(/-\d+$/, '') || ''
+        const nodeId = getSourceNodeId(nodeEl.id || '')
         if (!nodeId) return
 
         el.addEventListener('click', (e) => {
@@ -563,15 +600,18 @@ export function MermaidDiagram({ chart, className, onNodeClick, onShowRawCode, r
     return (
       <>
         <div className={cn('group relative', className)}>
-          {activeSvgContent && (
-            <MermaidToolbar
+          {activeSvgContent && (() => {
+            const toolbar = (
+              <MermaidToolbar
               onFullscreen={() => setIsFullscreen(true)}
               onToggleTheme={handleToggleTheme}
               onCopyImage={handleCopyImage}
               onCopySource={handleCopySource}
               isDarkPreview={previewTheme === 'dark'}
-            />
-          )}
+              />
+            )
+            return toolbarPortalTarget ? createPortal(toolbar, toolbarPortalTarget) : toolbar
+          })()}
           <div
             ref={containerRef}
             className={cn('flex items-center justify-center mermaid-container',

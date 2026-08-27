@@ -13,6 +13,8 @@ export type DiagramType =
 export interface DiagramStats {
   totalNodes: number
   totalEdges: number
+  omittedNodes?: number
+  omittedEdges?: number
   circularDeps?: [string, string][]
   mostImported?: { path: string; count: number }
   mostDependent?: { path: string; count: number }

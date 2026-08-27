@@ -161,6 +161,30 @@ describe('BlameView', () => {
     expect(screen.getByText('+2 more')).toBeInTheDocument()
   })
 
+  it('expands and collapses additional authors with an accessible button', () => {
+    const manyStats: BlameAuthorStats[] = Array.from({ length: 7 }, (_, i) => ({
+      name: `Author${i}`,
+      email: `a${i}@test.com`,
+      login: `a${i}`,
+      avatarUrl: null,
+      lineCount: 10 - i,
+      percentage: 14.3,
+    }))
+    render(<BlameView data={{ blameData: makeBlameData(1), filePath: 'file.ts', fileContent: 'x', blameStats: manyStats }} onCommitClick={onCommitClick} />)
+
+    const more = screen.getByRole('button', { name: 'View 2 more blame authors' })
+    expect(more).toHaveAttribute('aria-expanded', 'false')
+    fireEvent.click(more)
+    expect(screen.getByText('Author5')).toBeInTheDocument()
+    const authorsRegion = screen.getByRole('region', { name: 'Blame authors' })
+    expect(authorsRegion).toHaveClass('max-h-24', 'overflow-y-auto')
+    expect(authorsRegion.querySelectorAll('[data-author]')).toHaveLength(manyStats.length)
+    const less = screen.getByRole('button', { name: 'Show fewer blame authors' })
+    expect(less).toHaveAttribute('aria-expanded', 'true')
+    fireEvent.click(less)
+    expect(screen.queryByText('Author5')).not.toBeInTheDocument()
+  })
+
   it('calls useVirtualizer with correct count', () => {
     const content = 'line1\nline2\nline3\nline4\nline5'
 

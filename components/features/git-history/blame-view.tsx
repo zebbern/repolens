@@ -1,6 +1,6 @@
 "use client"
 
-import { useRef, useMemo, useCallback, memo } from "react"
+import { useRef, useMemo, useCallback, memo, useState } from "react"
 import { useVirtualizer } from "@tanstack/react-virtual"
 import { expandBlameRanges, type BlameAuthorStats, type BlameLineInfo } from "@/lib/git-history"
 import type { BlameData } from "@/types/git-history"
@@ -56,6 +56,7 @@ export function BlameView({
   }, [blameLines])
 
   const scrollRef = useRef<HTMLDivElement>(null)
+  const [showAllAuthors, setShowAllAuthors] = useState(false)
 
   const estimateSize = useCallback(() => ROW_HEIGHT, [])
 
@@ -84,22 +85,36 @@ export function BlameView({
             {filePath.split('/').pop()}
           </span>
           <span className="text-muted-foreground">—</span>
-          {blameStats.slice(0, 5).map((stat) => (
-            <span key={stat.email} className="flex items-center gap-1">
-              <AuthorAvatar
-                login={stat.login}
-                avatarUrl={stat.avatarUrl}
-                name={stat.name}
-                size={16}
-              />
-              <span>{stat.name}</span>
-              <span className="text-muted-foreground">({stat.percentage}%)</span>
-            </span>
-          ))}
+          <div
+            role="region"
+            aria-label="Blame authors"
+            className={`min-w-0 flex-1 flex flex-wrap items-center gap-2${showAllAuthors ? ' max-h-24 overflow-y-auto' : ''}`}
+          >
+            {blameStats.slice(0, showAllAuthors ? blameStats.length : 5).map((stat) => (
+              <span key={stat.email} data-author={stat.email} className="flex items-center gap-1">
+                <AuthorAvatar
+                  login={stat.login}
+                  avatarUrl={stat.avatarUrl}
+                  name={stat.name}
+                  size={16}
+                />
+                <span>{stat.name}</span>
+                <span className="text-muted-foreground">({stat.percentage}%)</span>
+              </span>
+            ))}
+          </div>
           {blameStats.length > 5 && (
-            <span className="text-muted-foreground">
-              +{blameStats.length - 5} more
-            </span>
+            <button
+              type="button"
+              className="text-muted-foreground hover:text-foreground"
+              aria-expanded={showAllAuthors}
+              aria-label={showAllAuthors
+                ? 'Show fewer blame authors'
+                : `View ${blameStats.length - 5} more blame authors`}
+              onClick={() => setShowAllAuthors((shown) => !shown)}
+            >
+              {showAllAuthors ? 'Show less' : `+${blameStats.length - 5} more`}
+            </button>
           )}
         </div>
       )}

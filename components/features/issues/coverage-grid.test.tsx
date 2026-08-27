@@ -1,7 +1,7 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import type { ComplianceCategory } from '@/lib/code/scanner'
+import type { CodeIssue, ComplianceCategory } from '@/lib/code/scanner'
 import { CoverageGrid } from './coverage-grid'
 
 function createCategory(overrides: Partial<ComplianceCategory> = {}): ComplianceCategory {
@@ -13,6 +13,7 @@ function createCategory(overrides: Partial<ComplianceCategory> = {}): Compliance
     findingCount: 2,
     ruleIds: ['path-traversal', 'idor'],
     status: 'pass',
+    issues: [],
     ...overrides,
   }
 }
@@ -109,6 +110,65 @@ describe('CoverageGrid', () => {
 
     await user.click(btn)
     expect(btn).toHaveAttribute('aria-expanded', 'true')
+  })
+
+  it('shows mapped findings and expands each finding for details', async () => {
+    const user = userEvent.setup()
+    const issue: CodeIssue = {
+      id: 'issue-1',
+      ruleId: 'xss-rule',
+      category: 'security',
+      severity: 'critical',
+      title: 'Reflected XSS',
+      description: 'User input reaches HTML output.',
+      file: 'src/search.ts',
+      line: 42,
+      column: 4,
+      snippet: 'return query;',
+      cwe: 'CWE-79',
+      suggestion: 'Escape the value before rendering it.',
+    }
+    render(<CoverageGrid title="Test" categories={{ A01: createCategory({ issues: [issue], findingCount: 1 }) }} />)
+
+    await user.click(screen.getByRole('button', { name: /Broken Access Control/i }))
+    expect(screen.getByText('Reflected XSS')).toBeInTheDocument()
+    expect(screen.getByText('src/search.ts:42')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: /Reflected XSS/i }))
+    expect(screen.getByText('User input reaches HTML output.')).toBeInTheDocument()
+    expect(screen.getByText('return query;')).toBeInTheDocument()
+    expect(screen.getByText('Escape the value before rendering it.')).toBeInTheDocument()
+  })
+
+  it('opens a mapped finding in the code view when navigation is available', async () => {
+    const user = userEvent.setup()
+    const onNavigateToFile = vi.fn()
+    const issue: CodeIssue = {
+      id: 'issue-1',
+      ruleId: 'path-traversal',
+      category: 'security',
+      severity: 'warning',
+      title: 'Potential Path Traversal',
+      description: 'A request value reaches a file-system path.',
+      file: 'src/routes/download.ts',
+      line: 17,
+      column: 3,
+      snippet: 'readFile(req.query.path)',
+      cwe: 'CWE-22',
+    }
+    render(
+      <CoverageGrid
+        title="Test"
+        categories={{ A01: createCategory({ issues: [issue], findingCount: 1 }) }}
+        onNavigateToFile={onNavigateToFile}
+      />,
+    )
+
+    await user.click(screen.getByRole('button', { name: /Broken Access Control/i }))
+    await user.click(screen.getByRole('button', { name: /Potential Path Traversal/i }))
+    await user.click(screen.getByRole('button', { name: 'Open in Code' }))
+
+    expect(onNavigateToFile).toHaveBeenCalledWith('src/routes/download.ts')
   })
 
   it('renders empty grid gracefully', () => {

@@ -275,6 +275,24 @@ describe('SimilaritySection', () => {
     expect(screen.getByText('src/types.ts')).toBeInTheDocument()
   })
 
+  it('expands identical files beyond the existing limit and collapses them again', async () => {
+    const user = userEvent.setup()
+    mockRepoList = [createRepo({ id: 'owner/repo-a' }), createRepo({ id: 'owner/repo-b' })]
+    mockComputeAllSimilarities.mockReturnValue([createSimilarityResult({ identicalFiles: Array.from({ length: 22 }, (_, i) => `src/file-${i}.ts`) })])
+    render(<SimilaritySection />)
+
+    await user.click(screen.getByText('Identical Files'))
+    expect(screen.getByText('+2 more')).toBeInTheDocument()
+    const more = screen.getByRole('button', { name: 'View 2 more identical files' })
+    expect(more).toHaveAttribute('aria-expanded', 'false')
+    await user.click(more)
+    expect(screen.getByText('src/file-21.ts')).toBeInTheDocument()
+    const less = screen.getByRole('button', { name: 'Show fewer identical files' })
+    expect(less).toHaveAttribute('aria-expanded', 'true')
+    await user.click(less)
+    expect(screen.queryByText('src/file-21.ts')).not.toBeInTheDocument()
+  })
+
   it('does not render identical files section when list is empty', () => {
     mockRepoList = [
       createRepo({ id: 'owner/repo-a' }),

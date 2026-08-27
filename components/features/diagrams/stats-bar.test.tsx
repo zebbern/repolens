@@ -38,6 +38,12 @@ describe('StatsBar', () => {
     expect(screen.getByText('circular')).toBeInTheDocument()
   })
 
+  it('discloses nodes and edges omitted by diagram rendering budgets', () => {
+    render(<StatsBar stats={{ ...baseStats, omittedNodes: 12, omittedEdges: 27 }} />)
+
+    expect(screen.getByText('12 nodes, 27 edges omitted')).toBeInTheDocument()
+  })
+
   it('displays mostImported when provided', () => {
     render(
       <StatsBar

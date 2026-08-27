@@ -1,12 +1,13 @@
 "use client"
 
-import { useState, useMemo, useCallback, useRef, useEffect } from 'react'
+import { useState, useMemo, useCallback, useRef, useEffect, type KeyboardEvent } from 'react'
 import type { CodeIndex } from '@/lib/code/code-index'
 import {
   scanInWorker,
   generateFix,
   validateFinding,
   type ScanResults,
+  type ScanFailure,
   type CodeIssue,
   type FixSuggestion,
   type ValidationResult,
@@ -18,7 +19,7 @@ import { useRepositoryData, useRepositoryActions } from '@/providers'
 import { useAPIKeys } from '@/providers/api-keys-provider'
 import { useBatchOperations } from '@/hooks/use-batch-operations'
 import { cn } from '@/lib/utils'
-import { Shield, Bug, ShieldCheck, AlertTriangle } from 'lucide-react'
+import { Activity, Shield, Bug, ShieldCheck, AlertTriangle } from 'lucide-react'
 import { ComplianceDashboard } from './compliance-dashboard'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import type { FilterMode, ViewMode } from './issue-types'
@@ -33,8 +34,79 @@ interface IssuesPanelProps {
   onNavigateToFile?: (path: string) => void
 }
 
+const COLLAPSED_FAILURE_PATHS = 3
+
+const VIEW_TABS = [
+  ['overview', Activity, 'Overview'],
+  ['issues', Bug, 'Issues'],
+  ['compliance', ShieldCheck, 'Compliance'],
+] as const
+
+function RuleOverflowSummary({ ruleOverflow }: { ruleOverflow: Map<string, number> }) {
+  if (ruleOverflow.size === 0) return null
+
+  return (
+    <section className="mt-4 rounded-lg border border-foreground/6 bg-foreground/2 p-3" aria-labelledby="issue-result-limits-title">
+      <h3 id="issue-result-limits-title" className="text-xs font-medium text-text-secondary">Result limits</h3>
+      <p className="mt-1 text-[11px] text-text-muted">Showing top 15 findings per rule.</p>
+      <p className="mt-0.5 text-[11px] text-text-muted">
+        Additional matches were counted but are not retained in this scan.
+      </p>
+      <ul className="mt-2 space-y-1">
+        {Array.from(ruleOverflow.entries()).map(([ruleId, count]) => (
+          <li key={ruleId} className="flex items-center justify-between gap-3 text-[11px]">
+            <code className="min-w-0 truncate text-text-secondary" title={ruleId}>{ruleId}</code>
+            <span className="shrink-0 text-text-muted">
+              {count} additional {count === 1 ? 'match' : 'matches'}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </section>
+  )
+}
+
+function ScanFailureDetails({ failure }: { failure: ScanFailure }) {
+  const [expanded, setExpanded] = useState(false)
+  const paths = failure.paths ?? []
+  const visiblePaths = expanded ? paths : paths.slice(0, COLLAPSED_FAILURE_PATHS)
+  const hiddenPathCount = Math.max(0, paths.length - COLLAPSED_FAILURE_PATHS)
+
+  return (
+    <div>
+      <p>{failure.engine}: {failure.message}</p>
+      {visiblePaths.length > 0 && (
+        <div
+          role="region"
+          aria-label={`${failure.engine} unavailable paths`}
+          className="max-h-32 overflow-y-auto"
+        >
+          <ul className="ml-3 list-disc space-y-0.5 font-mono">
+            {visiblePaths.map(path => (
+              <li key={path} className="break-all">{path}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {hiddenPathCount > 0 && (
+        <button
+          type="button"
+          className="mt-0.5 text-amber-900 underline-offset-2 hover:underline focus-visible:underline dark:text-amber-200"
+          aria-expanded={expanded}
+          aria-label={expanded
+            ? `Show fewer ${failure.engine} paths`
+            : `View ${hiddenPathCount} more ${failure.engine} paths`}
+          onClick={() => setExpanded(current => !current)}
+        >
+          {expanded ? 'Show less' : `View ${hiddenPathCount} more`}
+        </button>
+      )}
+    </div>
+  )
+}
+
 export function IssuesPanel({ codeIndex, onNavigateToFile }: IssuesPanelProps) {
-  const [viewMode, setViewMode] = useState<ViewMode>('issues')
+  const [viewMode, setViewMode] = useState<ViewMode>('overview')
   const [filter, setFilter] = useState<FilterMode>('all')
   const [hideInfo, setHideInfo] = useState(true)
   const [hideLowConfidence, setHideLowConfidence] = useState(true)
@@ -44,6 +116,28 @@ export function IssuesPanel({ codeIndex, onNavigateToFile }: IssuesPanelProps) {
   const [showFix, setShowFix] = useState<Set<string>>(new Set())
   const [validationResults, setValidationResults] = useState<Map<string, ValidationResult>>(new Map())
   const [validatingIssues, setValidatingIssues] = useState<Set<string>>(new Set())
+  const viewTabRefs = useRef<Record<ViewMode, HTMLButtonElement | null>>({
+    overview: null,
+    issues: null,
+    compliance: null,
+  })
+
+  const handleViewTabKeyDown = useCallback((event: KeyboardEvent<HTMLButtonElement>, currentMode: ViewMode) => {
+    const currentIndex = VIEW_TABS.findIndex(([mode]) => mode === currentMode)
+    if (currentIndex < 0) return
+
+    let nextIndex: number | null = null
+    if (event.key === 'ArrowRight') nextIndex = (currentIndex + 1) % VIEW_TABS.length
+    if (event.key === 'ArrowLeft') nextIndex = (currentIndex - 1 + VIEW_TABS.length) % VIEW_TABS.length
+    if (event.key === 'Home') nextIndex = 0
+    if (event.key === 'End') nextIndex = VIEW_TABS.length - 1
+    if (nextIndex === null) return
+
+    event.preventDefault()
+    const nextMode = VIEW_TABS[nextIndex][0]
+    setViewMode(nextMode)
+    viewTabRefs.current[nextMode]?.focus()
+  }, [])
 
   // Refs to stabilize useCallback identity — guard checks read from ref, UI updates use setState
   const fixCacheRef = useRef(fixCache)
@@ -75,6 +169,7 @@ export function IssuesPanel({ codeIndex, onNavigateToFile }: IssuesPanelProps) {
       setShowFix(new Set())
       setValidationResults(new Map())
       setValidatingIssues(new Set())
+      setViewMode('overview')
     })
     return () => { cancelled = true }
   }, [repositorySession])
@@ -300,12 +395,23 @@ export function IssuesPanel({ codeIndex, onNavigateToFile }: IssuesPanelProps) {
   return (
     <TooltipProvider delayDuration={300}>
     <div className="flex flex-col h-full">
-      {/* View toggle: Issues / Compliance */}
+      {/* View toggle: Overview / Issues / Compliance */}
       <div className="flex items-center gap-0.5 px-4 pt-3 pb-0" role="tablist" aria-label="View mode">
-        {([['issues', Bug, 'Issues'], ['compliance', ShieldCheck, 'Compliance']] as const).map(([mode, Icon, label]) => (
-          <button key={mode} onClick={() => setViewMode(mode)} role="tab" aria-selected={viewMode === mode}
+        {VIEW_TABS.map(([mode, Icon, label]) => (
+          <button
+            key={mode}
+            id={`issues-view-tab-${mode}`}
+            type="button"
+            role="tab"
+            aria-selected={viewMode === mode}
+            aria-controls={`issues-view-panel-${mode}`}
+            tabIndex={viewMode === mode ? 0 : -1}
+            ref={element => { viewTabRefs.current[mode] = element }}
+            onKeyDown={event => handleViewTabKeyDown(event, mode)}
+            onClick={() => setViewMode(mode)}
             className={cn('flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium transition-colors',
-              viewMode === mode ? 'bg-foreground/10 text-text-primary' : 'text-text-muted hover:text-text-secondary hover:bg-foreground/5')}>
+              viewMode === mode ? 'bg-foreground/10 text-text-primary' : 'text-text-muted hover:text-text-secondary hover:bg-foreground/5')}
+          >
             <Icon className="h-3 w-3" />{label}
           </button>
         ))}
@@ -314,23 +420,23 @@ export function IssuesPanel({ codeIndex, onNavigateToFile }: IssuesPanelProps) {
       {scanFailures.length > 0 && (
         <div className="mx-4 mt-2 flex items-start gap-2 rounded-md bg-amber-500/10 px-3 py-2" role="status">
           <AlertTriangle className="h-3.5 w-3.5 text-amber-400 shrink-0 mt-0.5" aria-hidden="true" />
-          <div className="text-[11px] text-amber-300/90 leading-snug">
+          <div className="text-[11px] leading-snug text-amber-800 dark:text-amber-300/90">
             <p className="font-medium">Issue scan coverage incomplete</p>
             <p>Findings and grades exclude checks from unavailable or incomplete analysis engines.</p>
             {scanFailures.map((failure, index) => (
-              <p key={`${failure.engine}-${index}`}>
-                {failure.engine}: {failure.message}
-              </p>
+              <ScanFailureDetails key={`${failure.engine}-${index}`} failure={failure} />
             ))}
           </div>
         </div>
       )}
 
-      {viewMode === 'compliance' ? (
-        <ComplianceDashboard codeIndex={codeIndex} scanResults={results} />
-      ) : (
-      <>
-        <div className="px-4 py-3 border-b border-foreground/6">
+      {viewMode === 'overview' ? (
+        <div
+          id="issues-view-panel-overview"
+          role="tabpanel"
+          aria-labelledby="issues-view-tab-overview"
+          className="min-h-0 flex-1 overflow-y-auto px-4 py-3"
+        >
           <IssueSummary
             results={results}
             hasValidApiKey={hasValidApiKey}
@@ -342,50 +448,71 @@ export function IssuesPanel({ codeIndex, onNavigateToFile }: IssuesPanelProps) {
             onBatchGenerateFixes={handleBatchGenerateFixes}
             onCancelBatch={cancelBatch}
           />
-          <IssueFilters
-            filter={filter}
-            setFilter={setFilter}
-            filteredSummary={filteredSummary}
-            hideInfo={hideInfo}
-            setHideInfo={setHideInfo}
-            hideLowConfidence={hideLowConfidence}
-            setHideLowConfidence={setHideLowConfidence}
-            totalIssueCount={results.summary.total}
-          />
+          <RuleOverflowSummary ruleOverflow={results.ruleOverflow} />
+          {results.unscannedFileCount != null && results.unscannedFileCount > 0 && (
+            <div className="mt-3 flex items-start gap-2 rounded-md bg-amber-500/10 px-3 py-2" role="status">
+              <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-amber-500" aria-hidden="true" />
+              <span className="text-[11px] leading-snug text-amber-800 dark:text-amber-300/90">
+                Quick scan complete. {results.unscannedFileCount} {results.unscannedFileCount === 1 ? 'file' : 'files'} pending content-based analysis.
+              </span>
+            </div>
+          )}
         </div>
-        {/* Unscanned files notice for lazy repos */}
-        {results.unscannedFileCount != null && results.unscannedFileCount > 0 && (
-          <div className="mx-4 mt-2 flex items-start gap-2 rounded-md bg-amber-500/10 px-3 py-2" role="status">
-            <AlertTriangle className="h-3.5 w-3.5 text-amber-400 shrink-0 mt-0.5" />
-            <span className="text-[11px] text-amber-300/90 leading-snug">
-              Quick scan complete. {results.unscannedFileCount} {results.unscannedFileCount === 1 ? 'file' : 'files'} pending content-based analysis.
-            </span>
-          </div>
-        )}
-        <div className="flex-1 overflow-y-auto">
-          <IssueList
-            groupedByFile={groupedByFile}
-            isGroupExpanded={isGroupExpanded}
-            toggleGroup={toggleGroup}
-            expandedIssues={expandedIssues}
-            toggleIssue={toggleIssue}
+      ) : viewMode === 'compliance' ? (
+        <div
+          id="issues-view-panel-compliance"
+          role="tabpanel"
+          aria-labelledby="issues-view-tab-compliance"
+          className="min-h-0 flex-1 overflow-y-auto"
+        >
+          <ComplianceDashboard
+            codeIndex={codeIndex}
+            scanResults={results}
             onNavigateToFile={onNavigateToFile}
-            ruleOverflow={results.ruleOverflow}
-            scannedFiles={results.scannedFiles}
-            languagesDetected={results.languagesDetected}
-            totalIssueCount={results.summary.total}
-            filteredIssueCount={filteredIssues.length}
-            showFix={showFix}
-            fixCache={fixCache}
-            validationResults={validationResults}
-            validatingIssues={validatingIssues}
-            hasValidApiKey={hasValidApiKey}
-            onShowFix={handleShowFix}
-            onValidate={handleValidate}
-            onCopyPrompt={handleCopyPrompt}
           />
         </div>
-      </>
+      ) : (
+        <div
+          id="issues-view-panel-issues"
+          role="tabpanel"
+          aria-labelledby="issues-view-tab-issues"
+          className="flex min-h-0 flex-1 flex-col"
+        >
+          <div className="border-b border-foreground/6 px-4 py-3">
+            <IssueFilters
+              filter={filter}
+              setFilter={setFilter}
+              filteredSummary={filteredSummary}
+              hideInfo={hideInfo}
+              setHideInfo={setHideInfo}
+              hideLowConfidence={hideLowConfidence}
+              setHideLowConfidence={setHideLowConfidence}
+              totalIssueCount={results.summary.total}
+            />
+          </div>
+          <div className="flex-1 overflow-y-auto">
+            <IssueList
+              groupedByFile={groupedByFile}
+              isGroupExpanded={isGroupExpanded}
+              toggleGroup={toggleGroup}
+              expandedIssues={expandedIssues}
+              toggleIssue={toggleIssue}
+              onNavigateToFile={onNavigateToFile}
+              scannedFiles={results.scannedFiles}
+              languagesDetected={results.languagesDetected}
+              totalIssueCount={results.summary.total}
+              filteredIssueCount={filteredIssues.length}
+              showFix={showFix}
+              fixCache={fixCache}
+              validationResults={validationResults}
+              validatingIssues={validatingIssues}
+              hasValidApiKey={hasValidApiKey}
+              onShowFix={handleShowFix}
+              onValidate={handleValidate}
+              onCopyPrompt={handleCopyPrompt}
+            />
+          </div>
+        </div>
       )}
       <div className="border-t border-foreground/6 px-4 py-2 text-[11px] text-text-muted" role="note">
         Automated findings are heuristic. Review them before acting.

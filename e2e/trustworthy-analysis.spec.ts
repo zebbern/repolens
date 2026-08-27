@@ -43,6 +43,12 @@ async function expectExactRenderedSource(page: Page, source: string): Promise<vo
   }).toBe(source)
 }
 
+async function openIssuesView(page: Page, name: 'Overview' | 'Issues' | 'Compliance'): Promise<void> {
+  const tab = page.getByRole('tablist', { name: 'View mode' }).getByRole('tab', { name, exact: true })
+  await tab.click()
+  await expect(tab).toHaveAttribute('aria-selected', 'true')
+}
+
 async function readCachedContentKind(page: Page, repositoryKey: string): Promise<string | null> {
   return page.evaluate(async (key) => new Promise<string | null>((resolve, reject) => {
     const request = indexedDB.open('repolens-cache')
@@ -135,6 +141,39 @@ test.describe('deterministic trustworthy-analysis flows', () => {
     await expect(repo).toBeFocused()
   })
 
+  test('orders diagram views and keeps preview actions pinned while zooming', async ({ page }, testInfo) => {
+    await connectFixture(page, testInfo, 'complete')
+    await openTab(page, 'Diagram')
+
+    const overview = page.getByRole('button', { name: 'Overview', exact: true })
+    const diagramViews = overview.locator('..').getByRole('button')
+    await expect(diagramViews).toHaveText(['Overview', 'Treemap', 'Architecture', 'Entry Points'])
+
+    await page.getByRole('button', { name: 'Architecture', exact: true }).click()
+    const fullscreen = page.getByRole('button', { name: 'Fullscreen' })
+    await expect(fullscreen).toBeVisible()
+
+    const actionBar = fullscreen.locator('..')
+    const viewport = actionBar.locator('..')
+    await expect(viewport).toHaveClass(/\bgroup\b.*\brelative\b/)
+    await viewport.hover({ position: { x: 20, y: 20 } })
+
+    const beforeViewport = await viewport.boundingBox()
+    const beforeActions = await actionBar.boundingBox()
+    expect(beforeViewport).not.toBeNull()
+    expect(beforeActions).not.toBeNull()
+    expect(Math.abs(beforeActions!.y - beforeViewport!.y - 12)).toBeLessThanOrEqual(1)
+    expect(Math.abs(beforeViewport!.x + beforeViewport!.width - beforeActions!.x - beforeActions!.width - 12)).toBeLessThanOrEqual(1)
+
+    await page.getByRole('button', { name: 'Zoom in' }).click()
+    await expect(viewport.locator(':scope > div[style*="transform"]')).toHaveAttribute('style', /scale\(1\.15\)/)
+
+    const afterActions = await actionBar.boundingBox()
+    expect(afterActions).not.toBeNull()
+    expect(afterActions!.x).toBeCloseTo(beforeActions!.x, 1)
+    expect(afterActions!.y).toBeCloseTo(beforeActions!.y, 1)
+  })
+
   test('connects through the real form and opens exact indexed source', async ({ page }, testInfo) => {
     const fixture = await connectFixture(page, testInfo, 'complete')
     await expect(page.getByRole('status').filter({ hasText: '3 supported files indexed.' })).toBeVisible()
@@ -144,6 +183,59 @@ test.describe('deterministic trustworthy-analysis flows', () => {
     await page.getByRole('treeitem', { name: /index\.ts/i }).click()
     await expect(page.getByText('fixtureGreeting', { exact: false }).first()).toBeVisible()
     await expectExactRenderedSource(page, fixture.expectedSource)
+  })
+
+  test('auto-dismisses complete coverage and exposes a manual close control', async ({ page }, testInfo) => {
+    await connectFixture(page, testInfo, 'complete')
+    const coverage = page.getByRole('status').filter({ hasText: '3 supported files indexed.' })
+
+    await expect(coverage.getByRole('button', { name: 'Dismiss repository coverage' })).toBeVisible()
+    await expect(coverage).not.toBeVisible({ timeout: 12_000 })
+
+    await page.reload()
+    const restoredCoverage = page.getByRole('status').filter({ hasText: '3 supported files indexed.' })
+    await expect(restoredCoverage).toBeVisible()
+    await restoredCoverage.getByRole('button', { name: 'Dismiss repository coverage' }).click()
+    await expect(restoredCoverage).not.toBeVisible()
+  })
+
+  test('reveals every path excluded from incomplete issue analysis', async ({ page }, testInfo) => {
+    await connectFixture(page, testInfo, 'analysisFailures')
+    await openTab(page, 'Issues')
+
+    const warning = page.getByRole('status').filter({ hasText: 'Issue scan coverage incomplete' })
+    const taintFailure = warning.getByText(/^taint:/).locator('..')
+    await expect(warning).toBeVisible()
+    await expect(taintFailure.getByText('src/unavailable-0.ts', { exact: true })).toBeVisible()
+    await expect(taintFailure.getByText('src/unavailable-2.ts', { exact: true })).toBeVisible()
+    await expect(taintFailure.getByText('src/unavailable-3.ts', { exact: true })).toHaveCount(0)
+
+    await taintFailure.getByRole('button', { name: 'View 3 more taint paths' }).click()
+    await expect(taintFailure.getByText('src/unavailable-5.ts', { exact: true })).toBeVisible()
+    await taintFailure.getByRole('button', { name: 'Show fewer taint paths' }).click()
+    await expect(taintFailure.getByText('src/unavailable-3.ts', { exact: true })).toHaveCount(0)
+
+    const viewTabs = page.getByRole('tablist', { name: 'View mode' })
+    await expect(viewTabs.getByRole('tab')).toHaveText(['Overview', 'Issues', 'Compliance'])
+    await expect(viewTabs.getByRole('tab', { name: 'Overview' })).toHaveAttribute('aria-selected', 'true')
+
+    const riskScore = page.locator('[aria-label^="Project Risk Score:"]')
+    const healthScore = page.locator('[aria-label^="Health grade "]')
+    await expect(riskScore).toBeVisible()
+    await expect(healthScore).toBeVisible()
+    expect(await riskScore.evaluate(element => element.getBoundingClientRect().height))
+      .toBe(await healthScore.evaluate(element => element.getBoundingClientRect().height))
+
+    await openIssuesView(page, 'Issues')
+    await expect(page.getByRole('button', { name: /Missing Lockfile/ })).toBeVisible()
+
+    await openIssuesView(page, 'Compliance')
+    const accessControl = page.getByRole('button', { name: /Broken Access Control/ })
+    await accessControl.click()
+    await expect(page.getByText('Mapped findings', { exact: true }).first()).toBeVisible()
+    const pathTraversal = page.getByRole('button', { name: /Potential Path Traversal/ }).first()
+    await pathTraversal.click()
+    await expect(page.getByText('src/download.ts:3', { exact: true }).first()).toBeVisible()
   })
 
   test('renders dependency metadata and a known health grade from production-shaped fixtures', async ({ page }, testInfo) => {
@@ -188,6 +280,7 @@ test.describe('deterministic trustworthy-analysis flows', () => {
     )).toContain('idbWorkerNeedle')
 
     await openTab(page, 'Issues')
+    await openIssuesView(page, 'Issues')
     await expect(page.getByRole('button', { name: /Missing Lockfile/ })).toBeVisible()
     await expect(page.getByText('Automated findings are heuristic. Review them before acting.')).toBeVisible()
   })
@@ -206,8 +299,9 @@ test.describe('deterministic trustworthy-analysis flows', () => {
 
   test('keeps complete coverage visible while tabs reach terminal outcomes', async ({ page }, testInfo) => {
     await connectFixture(page, testInfo, 'complete')
-    const coverage = page.getByText('3 supported files indexed.', { exact: true })
+    const coverage = page.getByRole('status').filter({ hasText: '3 supported files indexed.' })
     await expect(coverage).toBeVisible()
+    await coverage.hover()
 
     await openTab(page, 'Issues')
     await expect(page.getByText('Automated findings are heuristic. Review them before acting.')).toBeVisible()

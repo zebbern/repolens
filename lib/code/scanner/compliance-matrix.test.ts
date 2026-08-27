@@ -276,6 +276,31 @@ describe('generateComplianceReport', () => {
     expect(report.owaspCoverage['A03'].status).toBe('fail')
   })
 
+  it('retains the mapped findings for each compliance category', () => {
+    const issue = makeIssue({ id: 'i1', ruleId: 'r1', cwe: 'CWE-79', title: 'Reflected XSS' })
+    const results = makeScanResults([issue])
+    const report = generateComplianceReport(results, [makeRule({ id: 'r1', cwe: 'CWE-79' })])
+
+    expect(report.owaspCoverage.A03.issues).toEqual([issue])
+    expect(report.cweCoverage['CWE-79'].issues).toEqual([issue])
+    expect(report.owaspCoverage.A01.issues).toEqual([])
+  })
+
+  it('retains every access-control finding for category drill-down', () => {
+    const issues = Array.from({ length: 18 }, (_, index) => makeIssue({
+      id: `access-control-${index}`,
+      ruleId: index < 10 ? 'path-traversal' : 'open-redirect',
+      cwe: index < 10 ? 'CWE-22' : 'CWE-601',
+    }))
+    const report = generateComplianceReport(makeScanResults(issues), [
+      makeRule({ id: 'path-traversal', cwe: 'CWE-22' }),
+      makeRule({ id: 'open-redirect', cwe: 'CWE-601' }),
+    ])
+
+    expect(report.owaspCoverage.A01.findingCount).toBe(18)
+    expect(report.owaspCoverage.A01.issues).toHaveLength(18)
+  })
+
   it('marks uncovered items as "no-coverage"', () => {
     const results = makeScanResults([])
     const report = generateComplianceReport(results, [])
@@ -311,5 +336,14 @@ describe('exportComplianceJSON', () => {
 
     expect(json).toContain('\n')
     expect(json).toMatch(/^{\n {2}"/)
+  })
+
+  it('keeps UI-only finding details out of exported reports', () => {
+    const issue = makeIssue({ id: 'i1', ruleId: 'r1', cwe: 'CWE-79' })
+    const report = generateComplianceReport(makeScanResults([issue]), [makeRule({ id: 'r1', cwe: 'CWE-79' })])
+    const parsed = JSON.parse(exportComplianceJSON(report))
+
+    expect(parsed.owaspCoverage.A03).not.toHaveProperty('issues')
+    expect(parsed.cweCoverage['CWE-79']).not.toHaveProperty('issues')
   })
 })

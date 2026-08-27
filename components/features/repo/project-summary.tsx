@@ -124,7 +124,7 @@ function SummaryDashboard({ data, onNavigate }: { data: ProjectSummary; onNaviga
           ))}
         </div>
         <div className="flex flex-wrap gap-x-4 gap-y-1">
-          {data.languages.slice(0, 8).map(l => (
+          {(expandedSections.languages ? data.languages : data.languages.slice(0, 8)).map(l => (
             <div key={l.lang} className="flex items-center gap-1.5 text-xs text-text-muted">
               <div className="h-2 w-2 rounded-full" style={{ backgroundColor: getLangColor(l.lang) }} />
               <span className="text-text-secondary">{LANGUAGE_LABELS[l.lang] || l.lang}</span>
@@ -132,6 +132,19 @@ function SummaryDashboard({ data, onNavigate }: { data: ProjectSummary; onNaviga
               <span className="text-text-muted/60">{l.pct}%</span>
             </div>
           ))}
+          {data.languages.length > 8 && (
+            <button
+              type="button"
+              className="text-xs text-text-muted hover:text-text-secondary px-2 py-0.5 transition-colors"
+              aria-expanded={Boolean(expandedSections.languages)}
+              aria-label={expandedSections.languages
+                ? 'Show fewer languages'
+                : `View ${data.languages.length - 8} more language${data.languages.length - 8 === 1 ? '' : 's'}`}
+              onClick={() => toggleSection('languages')}
+            >
+              {expandedSections.languages ? 'Show less' : `+${data.languages.length - 8} more`}
+            </button>
+          )}
         </div>
       </div>
 
@@ -141,7 +154,7 @@ function SummaryDashboard({ data, onNavigate }: { data: ProjectSummary; onNaviga
           <h3 className="text-xs font-medium text-text-secondary mb-1">Where the Code Lives</h3>
           <p className="text-[10px] text-text-muted mb-3">Lines of code by top-level folder. Largest folders contain the core logic.</p>
           <div className="flex flex-col gap-2">
-            {data.folderBreakdown.slice(0, 8).map(f => (
+            {(expandedSections.folderBreakdown ? data.folderBreakdown : data.folderBreakdown.slice(0, 8)).map(f => (
               <div key={f.folder} className="flex items-center gap-3">
                 <span className="text-xs text-text-secondary w-28 truncate shrink-0 font-mono" title={f.folder}>{f.folder}/</span>
                 <div className="flex-1 h-2 rounded-full bg-foreground/5 overflow-hidden">
@@ -158,6 +171,19 @@ function SummaryDashboard({ data, onNavigate }: { data: ProjectSummary; onNaviga
                 </span>
               </div>
             ))}
+            {data.folderBreakdown.length > 8 && (
+              <button
+                type="button"
+                className="text-xs text-text-muted hover:text-text-secondary px-2 py-0.5 transition-colors"
+                aria-expanded={Boolean(expandedSections.folderBreakdown)}
+                aria-label={expandedSections.folderBreakdown
+                  ? 'Show fewer folders'
+                  : `View ${data.folderBreakdown.length - 8} more folder${data.folderBreakdown.length - 8 === 1 ? '' : 's'}`}
+                onClick={() => toggleSection('folderBreakdown')}
+              >
+                {expandedSections.folderBreakdown ? 'Show less' : `+${data.folderBreakdown.length - 8} more`}
+              </button>
+            )}
           </div>
         </div>
       )}
@@ -175,7 +201,7 @@ function SummaryDashboard({ data, onNavigate }: { data: ProjectSummary; onNaviga
             <p className="text-xs text-text-muted">No shared files detected</p>
           ) : (
             <div className="flex flex-col gap-1.5">
-              {data.topHubs.slice(0, 8).map(hub => (
+              {(expandedSections.topHubs ? data.topHubs : data.topHubs.slice(0, 8)).map(hub => (
                 <button
                   key={hub.path}
                   onClick={() => onNavigate?.(hub.path)}
@@ -196,6 +222,19 @@ function SummaryDashboard({ data, onNavigate }: { data: ProjectSummary; onNaviga
                   </div>
                 </button>
               ))}
+              {data.topHubs.length > 8 && (
+                <button
+                  type="button"
+                  className="text-xs text-text-muted hover:text-text-secondary px-2 py-0.5 transition-colors"
+                  aria-expanded={Boolean(expandedSections.topHubs)}
+                  aria-label={expandedSections.topHubs
+                    ? 'Show fewer imported files'
+                    : `View ${data.topHubs.length - 8} more imported file${data.topHubs.length - 8 === 1 ? '' : 's'}`}
+                  onClick={() => toggleSection('topHubs')}
+                >
+                  {expandedSections.topHubs ? 'Show less' : `+${data.topHubs.length - 8} more`}
+                </button>
+              )}
             </div>
           )}
         </div>
@@ -211,7 +250,7 @@ function SummaryDashboard({ data, onNavigate }: { data: ProjectSummary; onNaviga
             <p className="text-xs text-text-muted">No complex files detected</p>
           ) : (
             <div className="flex flex-col gap-1.5">
-              {data.topConsumers.slice(0, 8).map(consumer => (
+              {(expandedSections.topConsumers ? data.topConsumers : data.topConsumers.slice(0, 8)).map(consumer => (
                 <button
                   key={consumer.path}
                   onClick={() => onNavigate?.(consumer.path)}
@@ -232,6 +271,19 @@ function SummaryDashboard({ data, onNavigate }: { data: ProjectSummary; onNaviga
                   </div>
                 </button>
               ))}
+              {data.topConsumers.length > 8 && (
+                <button
+                  type="button"
+                  className="text-xs text-text-muted hover:text-text-secondary px-2 py-0.5 transition-colors"
+                  aria-expanded={Boolean(expandedSections.topConsumers)}
+                  aria-label={expandedSections.topConsumers
+                    ? 'Show fewer files in Heaviest Files'
+                    : `View ${data.topConsumers.length - 8} more file${data.topConsumers.length - 8 === 1 ? '' : 's'} in Heaviest Files`}
+                  onClick={() => toggleSection('topConsumers')}
+                >
+                  {expandedSections.topConsumers ? 'Show less' : `+${data.topConsumers.length - 8} more`}
+                </button>
+              )}
             </div>
           )}
         </div>
@@ -358,13 +410,26 @@ function SummaryDashboard({ data, onNavigate }: { data: ProjectSummary; onNaviga
           </h3>
           <p className="text-[10px] text-red-300/50 mb-2">These file pairs import each other, which can cause bugs and makes refactoring harder.</p>
           <div className="flex flex-col gap-1.5">
-            {data.circularDeps.slice(0, 8).map(([a, b], i) => (
+            {(expandedSections.circularDeps ? data.circularDeps : data.circularDeps.slice(0, 8)).map(([a, b], i) => (
               <div key={i} className="flex items-center gap-2 text-xs px-2 py-1 rounded bg-red-500/5">
                 <button onClick={() => onNavigate?.(a)} className="text-red-300/70 hover:text-red-300 transition-colors truncate" title={a}>{shortPath(a)}</button>
                 <span className="text-red-500/40 shrink-0">{'<->'}</span>
                 <button onClick={() => onNavigate?.(b)} className="text-red-300/70 hover:text-red-300 transition-colors truncate" title={b}>{shortPath(b)}</button>
               </div>
             ))}
+            {data.circularDeps.length > 8 && (
+              <button
+                type="button"
+                className="px-2 py-0.5 text-xs text-red-700 transition-colors hover:text-red-800 dark:text-red-300/70 dark:hover:text-red-300"
+                aria-expanded={Boolean(expandedSections.circularDeps)}
+                aria-label={expandedSections.circularDeps
+                  ? 'Show fewer circular dependencies'
+                  : `View ${data.circularDeps.length - 8} more circular dependenc${data.circularDeps.length - 8 === 1 ? 'y' : 'ies'}`}
+                onClick={() => toggleSection('circularDeps')}
+              >
+                {expandedSections.circularDeps ? 'Show less' : `+${data.circularDeps.length - 8} more`}
+              </button>
+            )}
           </div>
         </div>
       )}

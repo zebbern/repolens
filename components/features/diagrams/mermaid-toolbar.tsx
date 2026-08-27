@@ -78,7 +78,7 @@ export function MermaidToolbar({
 }: MermaidToolbarProps) {
   return (
     <TooltipProvider delayDuration={300}>
-      <div className="absolute top-2 right-2 z-10 flex gap-0.5 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:opacity-100 transition-opacity bg-background/80 backdrop-blur-xs rounded-md p-0.5 border border-border shadow-xs">
+      <div className="absolute top-3 right-3 z-20 flex items-center gap-0.5 rounded-lg border border-foreground/10 bg-card/90 backdrop-blur-xs shadow-lg opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:opacity-100">
         <ActionButton
           icon={<Maximize2 className="h-3.5 w-3.5" />}
           label="Fullscreen"

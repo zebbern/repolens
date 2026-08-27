@@ -817,14 +817,16 @@ function recordPartialEngine(
 
   const label = engine === 'ast' ? 'AST' : 'Taint'
   const sortedPaths = [...omitted].sort()
-  const shownPaths = sortedPaths.slice(0, 3).join(', ')
-  const remaining = sortedPaths.length - Math.min(sortedPaths.length, 3)
-  const message = `${label} parsing unavailable for ${sortedPaths.length} file${sortedPaths.length === 1 ? '' : 's'}: ${shownPaths}${remaining > 0 ? ` (+${remaining} more)` : ''}`
+  const message = `${label} parsing unavailable for ${sortedPaths.length} file${sortedPaths.length === 1 ? '' : 's'}.`
   const existing = accumulator.diagnostics.failures.find(
     failure => failure.engine === engine && failure.message.startsWith(`${label} parsing unavailable for `),
   )
-  if (existing) existing.message = message
-  else accumulator.diagnostics.failures.push({ engine, message })
+  if (existing) {
+    existing.message = message
+    existing.paths = sortedPaths
+  } else {
+    accumulator.diagnostics.failures.push({ engine, message, paths: sortedPaths })
+  }
 }
 
 async function runAsyncEngine(

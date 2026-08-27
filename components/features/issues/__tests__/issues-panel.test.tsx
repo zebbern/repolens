@@ -64,7 +64,12 @@ vi.mock('../issue-list', () => ({
   },
 }))
 vi.mock('../compliance-dashboard', () => ({
-  ComplianceDashboard: () => <div data-testid="compliance-dashboard">compliance</div>,
+  ComplianceDashboard: ({ onNavigateToFile }: { onNavigateToFile?: (path: string) => void }) => (
+    <div data-testid="compliance-dashboard">
+      compliance
+      <button onClick={() => onNavigateToFile?.('src/compliance.ts')}>open-compliance-file</button>
+    </div>
+  ),
 }))
 vi.mock('@/components/ui/tooltip', () => ({
   TooltipProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
@@ -113,13 +118,13 @@ const mockScanResults = {
     },
   ],
   summary: { total: 3, critical: 1, warning: 1, info: 1 },
-  ruleOverflow: false,
+  ruleOverflow: new Map<string, number>(),
   scannedFiles: 2,
   languagesDetected: ['typescript'],
   healthGrade: { grade: 'B', score: 75, label: 'Good' },
   diagnostics: {
     engines: {} as Record<string, string>,
-    failures: [] as Array<{ engine: string; message: string }>,
+    failures: [] as Array<{ engine: string; message: string; paths?: string[] }>,
   },
 }
 
@@ -197,12 +202,18 @@ describe('IssuesPanel', () => {
     issuesHarness.validateFinding.mockResolvedValue({ issueId: 'issue-1', verdict: 'true-positive', confidence: 'high', reasoning: 'Confirmed' })
     mockScanResults.diagnostics.engines = {}
     mockScanResults.diagnostics.failures = []
+    mockScanResults.ruleOverflow = new Map()
   })
+
+  async function openIssuesView() {
+    await userEvent.click(await screen.findByRole('tab', { name: 'Issues' }))
+  }
 
   it('does not publish a single validation that completes after a session switch', async () => {
     let resolve!: (value: unknown) => void
     issuesHarness.validateFinding.mockReturnValue(new Promise(done => { resolve = done }))
     const { rerender } = render(<IssuesPanel codeIndex={mockCodeIndex as unknown as CodeIndex} />)
+    await openIssuesView()
     await waitFor(() => expect(screen.getByText('validate-first')).toBeInTheDocument())
     await userEvent.click(screen.getByText('validate-first'))
 
@@ -225,6 +236,7 @@ describe('IssuesPanel', () => {
       contentStore: new InMemoryContentStore(),
     }
     render(<IssuesPanel codeIndex={index} />)
+    await openIssuesView()
     await userEvent.click(await screen.findByText('validate-first'))
 
     await waitFor(() => expect(issuesHarness.latestProps?.validationResults.size).toBe(1))
@@ -247,6 +259,7 @@ describe('IssuesPanel', () => {
       contentStore: new InMemoryContentStore(new Map([['src/utils.ts', '']])),
     }
     render(<IssuesPanel codeIndex={index} />)
+    await openIssuesView()
     await userEvent.click(await screen.findByText('validate-first'))
 
     await waitFor(() => expect(issuesHarness.validateFinding).toHaveBeenCalled())
@@ -265,6 +278,7 @@ describe('IssuesPanel', () => {
       contentStore: { get: () => new Promise<string>(done => { resolve = done }) },
     }
     const { rerender } = render(<IssuesPanel codeIndex={index as unknown as CodeIndex} />)
+    await openIssuesView()
     await waitFor(() => expect(screen.getByText('fix-first')).toBeInTheDocument())
     await userEvent.click(screen.getByText('fix-first'))
 
@@ -272,6 +286,8 @@ describe('IssuesPanel', () => {
     rerender(<IssuesPanel codeIndex={index as unknown as CodeIndex} />)
     resolve('eval(x)')
 
+    await waitFor(() => expect(screen.getByRole('tab', { name: 'Overview' })).toHaveAttribute('aria-selected', 'true'))
+    await openIssuesView()
     await waitFor(() => {
       expect(issuesHarness.latestProps?.fixCache.size).toBe(0)
       expect(issuesHarness.latestProps?.showFix.size).toBe(0)
@@ -283,6 +299,77 @@ describe('IssuesPanel', () => {
     await waitFor(() => {
       expect(screen.getByTestId('issue-summary')).toBeInTheDocument()
     })
+  })
+
+  it('separates overview, findings, and compliance into three accessible views', async () => {
+    const user = userEvent.setup()
+    mockScanResults.ruleOverflow = new Map([['no-eval', 5], ['sql-injection', 3]])
+    render(<IssuesPanel codeIndex={mockCodeIndex as unknown as CodeIndex} />)
+
+    const tabs = await screen.findAllByRole('tab')
+    expect(tabs.map(tab => tab.textContent)).toEqual(['Overview', 'Issues', 'Compliance'])
+    expect(screen.getByRole('tab', { name: 'Overview' })).toHaveAttribute('aria-selected', 'true')
+    expect(screen.getByTestId('issue-summary')).toBeInTheDocument()
+    expect(screen.getByText('Showing top 15 findings per rule.')).toBeInTheDocument()
+    expect(screen.getByText('5 additional matches')).toBeInTheDocument()
+    expect(screen.queryByTestId('issue-list')).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('tab', { name: 'Issues' }))
+    expect(screen.getByTestId('issue-filters')).toBeInTheDocument()
+    expect(screen.getByTestId('issue-list')).toBeInTheDocument()
+    expect(screen.queryByText('Showing top 15 findings per rule.')).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('tab', { name: 'Compliance' }))
+    expect(screen.getByTestId('compliance-dashboard')).toBeInTheDocument()
+    expect(screen.queryByTestId('issue-list')).not.toBeInTheDocument()
+  })
+
+  it('keeps tab navigation keyboard accessible with roving focus', async () => {
+    const user = userEvent.setup()
+    render(<IssuesPanel codeIndex={mockCodeIndex as unknown as CodeIndex} />)
+
+    const overview = await screen.findByRole('tab', { name: 'Overview' })
+    const issues = screen.getByRole('tab', { name: 'Issues' })
+    const compliance = screen.getByRole('tab', { name: 'Compliance' })
+
+    expect(overview).toHaveAttribute('tabindex', '0')
+    expect(issues).toHaveAttribute('tabindex', '-1')
+    overview.focus()
+    await user.keyboard('{ArrowRight}')
+    expect(issues).toHaveFocus()
+    expect(issues).toHaveAttribute('aria-selected', 'true')
+    expect(issues).toHaveAttribute('tabindex', '0')
+
+    await user.keyboard('{End}')
+    expect(compliance).toHaveFocus()
+    expect(compliance).toHaveAttribute('aria-selected', 'true')
+    await user.keyboard('{ArrowRight}')
+    expect(overview).toHaveFocus()
+    await user.keyboard('{ArrowLeft}')
+    expect(compliance).toHaveFocus()
+    await user.keyboard('{Home}')
+    expect(overview).toHaveFocus()
+  })
+
+  it('opens a compliance finding in the code view', async () => {
+    const onNavigateToFile = vi.fn()
+    render(<IssuesPanel codeIndex={mockCodeIndex as unknown as CodeIndex} onNavigateToFile={onNavigateToFile} />)
+
+    await userEvent.click(await screen.findByRole('tab', { name: 'Compliance' }))
+    await userEvent.click(screen.getByRole('button', { name: 'open-compliance-file' }))
+
+    expect(onNavigateToFile).toHaveBeenCalledWith('src/compliance.ts')
+  })
+
+  it('returns to Overview when the repository session changes', async () => {
+    const { rerender } = render(<IssuesPanel codeIndex={mockCodeIndex as unknown as CodeIndex} />)
+    await userEvent.click(await screen.findByRole('tab', { name: 'Compliance' }))
+    expect(screen.getByRole('tab', { name: 'Compliance' })).toHaveAttribute('aria-selected', 'true')
+
+    issuesHarness.session = { id: 2, signal: new AbortController().signal }
+    rerender(<IssuesPanel codeIndex={mockCodeIndex as unknown as CodeIndex} />)
+
+    await waitFor(() => expect(screen.getByRole('tab', { name: 'Overview' })).toHaveAttribute('aria-selected', 'true'))
   })
 
   it('reports incomplete coverage when a best-effort scan engine fails', async () => {
@@ -300,8 +387,37 @@ describe('IssuesPanel', () => {
     expect(screen.getByText('Issue scan coverage incomplete')).toBeInTheDocument()
   })
 
+  it('reveals every path omitted from an incomplete engine summary', async () => {
+    const user = userEvent.setup()
+    const paths = Array.from({ length: 6 }, (_, index) => `src/unavailable-${index}.tsx`)
+    mockScanResults.diagnostics.engines = { taint: 'partial' }
+    mockScanResults.diagnostics.failures = [{
+      engine: 'taint',
+      message: 'Taint parsing unavailable for 6 files.',
+      paths,
+    }]
+
+    render(<IssuesPanel codeIndex={mockCodeIndex as unknown as CodeIndex} />)
+
+    expect(await screen.findByText('src/unavailable-0.tsx')).toBeInTheDocument()
+    expect(screen.getByText('src/unavailable-2.tsx')).toBeInTheDocument()
+    expect(screen.queryByText('src/unavailable-3.tsx')).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'View 3 more taint paths' }))
+
+    expect(screen.getByText('src/unavailable-3.tsx')).toBeInTheDocument()
+    expect(screen.getByText('src/unavailable-5.tsx')).toBeInTheDocument()
+    const pathsRegion = screen.getByRole('region', { name: 'taint unavailable paths' })
+    expect(pathsRegion).toHaveClass('max-h-32', 'overflow-y-auto')
+    expect(pathsRegion.querySelectorAll('li')).toHaveLength(paths.length)
+
+    await user.click(screen.getByRole('button', { name: 'Show fewer taint paths' }))
+    expect(screen.queryByText('src/unavailable-3.tsx')).not.toBeInTheDocument()
+  })
+
   it('renders issue filters', async () => {
     render(<IssuesPanel codeIndex={mockCodeIndex as unknown as CodeIndex} />)
+    await openIssuesView()
     await waitFor(() => {
       expect(screen.getByTestId('issue-filters')).toBeInTheDocument()
     })
@@ -309,6 +425,7 @@ describe('IssuesPanel', () => {
 
   it('renders issue list with filtered issues', async () => {
     render(<IssuesPanel codeIndex={mockCodeIndex as unknown as CodeIndex} />)
+    await openIssuesView()
     await waitFor(() => {
       expect(screen.getByTestId('issue-list')).toBeInTheDocument()
     })

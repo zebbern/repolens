@@ -224,7 +224,7 @@ export function PreviewPanel({ className }: { className?: string }) {
         hasApiKey={hasApiKey}
       />
 
-      {repo && <RepositoryCoverageBanner coverage={coverage} loadingStage={loadingStage} error={repoError} />}
+      {repo && <RepositoryCoverageBanner key={repo.url} coverage={coverage} loadingStage={loadingStage} error={repoError} repositoryKey={repo.url} />}
 
       <div
         id="preview-tabpanel"

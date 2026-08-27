@@ -80,6 +80,16 @@ describe('IssueSummary', () => {
     expect(screen.getByText('5.4')).toBeInTheDocument()
   })
 
+  it('keeps the project risk and health score badges at the same height', () => {
+    render(<IssueSummary results={createResults()} {...baseProps} />)
+
+    const projectRiskBadge = screen.getByLabelText('Project Risk Score: 5.4 out of 10')
+    const healthScoreBadge = screen.getByLabelText('Health grade B: 72 out of 100')
+
+    expect(projectRiskBadge).toHaveClass('h-8')
+    expect(healthScoreBadge).toHaveClass('h-8')
+  })
+
   it('does not render project risk badge when projectRiskScore is undefined', () => {
     render(
       <IssueSummary results={createResults({ projectRiskScore: undefined })} {...baseProps} />,

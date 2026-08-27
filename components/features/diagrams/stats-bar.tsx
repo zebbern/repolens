@@ -14,6 +14,11 @@ interface StatsBarProps {
 }
 
 export function StatsBar({ stats, topology }: StatsBarProps) {
+  const omissions = [
+    stats.omittedNodes ? `${stats.omittedNodes} nodes` : null,
+    stats.omittedEdges ? `${stats.omittedEdges} edges` : null,
+  ].filter((value): value is string => value !== null)
+
   return (
     <div className="flex items-center gap-4 px-4 py-2 border-t border-foreground/6 text-xs text-text-muted bg-card">
       <span><span className="text-text-secondary font-medium">{stats.totalNodes}</span> nodes</span>
@@ -23,6 +28,12 @@ export function StatsBar({ stats, topology }: StatsBarProps) {
         <span className="flex items-center gap-1 text-amber-400">
           <AlertTriangle className="h-3 w-3" />
           <span className="font-medium">{stats.circularDeps.length}</span> circular
+        </span>
+      )}
+      {omissions.length > 0 && (
+        <span className="flex items-center gap-1 text-amber-400" aria-label={`Diagram truncated: ${omissions.join(', ')} omitted`}>
+          <AlertTriangle className="h-3 w-3" />
+          {omissions.join(', ')} omitted
         </span>
       )}
       {topology && (

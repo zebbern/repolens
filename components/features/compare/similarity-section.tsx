@@ -190,7 +190,8 @@ function SignalBreakdown({
 
 function IdenticalFilesList({ files }: { files: string[] }) {
   const [isOpen, setIsOpen] = useState(false)
-  const displayFiles = files.slice(0, MAX_IDENTICAL_FILES)
+  const [showAllFiles, setShowAllFiles] = useState(false)
+  const displayFiles = files.slice(0, showAllFiles ? files.length : MAX_IDENTICAL_FILES)
   const remaining = files.length - MAX_IDENTICAL_FILES
 
   return (
@@ -216,8 +217,16 @@ function IdenticalFilesList({ files }: { files: string[] }) {
             </li>
           ))}
           {remaining > 0 && (
-            <li className="text-xs text-text-secondary italic">
-              +{remaining} more
+            <li>
+              <button
+                type="button"
+                className="text-xs text-text-secondary italic hover:text-text-primary"
+                aria-expanded={showAllFiles}
+                aria-label={showAllFiles ? 'Show fewer identical files' : `View ${remaining} more identical files`}
+                onClick={() => setShowAllFiles((shown) => !shown)}
+              >
+                {showAllFiles ? 'Show less' : `+${remaining} more`}
+              </button>
             </li>
           )}
         </ul>

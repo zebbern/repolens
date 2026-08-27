@@ -15,7 +15,7 @@ import {
   type AvailableDiagram,
 } from '@/lib/diagrams/diagram-data'
 import type { CodeIndex } from '@/lib/code/code-index'
-import { useRepositoryData } from '@/providers'
+import { useRepositoryActions, useRepositoryData } from '@/providers'
 import { Network, Loader2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { FileNode } from '@/types/repository'
@@ -46,12 +46,40 @@ interface DiagramViewerProps {
 // Main DiagramViewer
 // ---------------------------------------------------------------------------
 
-export function DiagramViewer({ files, codeIndex, className, onNavigateToFile }: DiagramViewerProps) {
+export function DiagramViewer(props: DiagramViewerProps) {
+  const { repositorySession } = useRepositoryData()
+  const repositorySessionId = repositorySession?.id ?? 'none'
+  return (
+    <RepositoryScopedDiagramViewer
+      key={repositorySessionId}
+      failureCacheKey={`diagramFailures:${repositorySessionId}`}
+      {...props}
+    />
+  )
+}
+
+function RepositoryScopedDiagramViewer({
+  files,
+  codeIndex,
+  className,
+  onNavigateToFile,
+  failureCacheKey,
+}: DiagramViewerProps & { failureCacheKey: string }) {
   const [viewMode, setViewMode] = useState<DiagramViewMode>('overview')
   const { codebaseAnalysis: analysis } = useRepositoryData()
+  const { getTabCache, setTabCache } = useRepositoryActions()
   const mermaidRef = useRef<MermaidDiagramHandle>(null)
   const treemapRef = useRef<SVGSVGElement>(null)
+  const overviewButtonRef = useRef<HTMLButtonElement>(null)
   const [isPending, startTransition] = useTransition()
+  const [failedDiagramTypes, setFailedDiagramTypes] = useState<Set<DiagramType>>(
+    () => new Set(getTabCache<DiagramType[]>(failureCacheKey) ?? []),
+  )
+  const [diagramAnnouncement, setDiagramAnnouncement] = useState('')
+
+  useEffect(() => {
+    setTabCache(failureCacheKey, [...failedDiagramTypes])
+  }, [failedDiagramTypes, failureCacheKey, setTabCache])
 
   // Focus mode
   const [focusOpen, setFocusOpen] = useState(false)
@@ -59,29 +87,48 @@ export function DiagramViewer({ files, codeIndex, className, onNavigateToFile }:
   const [focusTarget, setFocusTarget] = useState<string | null>(null)
   const [focusHops, setFocusHops] = useState<1 | 2>(1)
 
+  const handleDiagramFailure = useCallback((type: DiagramType) => {
+    overviewButtonRef.current?.focus()
+    if (type !== 'focus') {
+      setFailedDiagramTypes(current => {
+        if (current.has(type)) return current
+        const next = new Set(current)
+        next.add(type)
+        return next
+      })
+    }
+    setDiagramAnnouncement('This diagram is unavailable. Returned to Overview.')
+    startTransition(() => setViewMode('overview'))
+    setFocusTarget(null)
+    setFocusQuery('')
+    setFocusOpen(false)
+  }, [])
+
   // Pan + zoom
   const [zoom, setZoom] = useState(1)
   const [pan, setPan] = useState({ x: 0, y: 0 })
   const isPanning = useRef(false)
   const panStart = useRef({ x: 0, y: 0, panX: 0, panY: 0 })
-  const containerRef = useRef<HTMLDivElement>(null)
+  const [containerElement, setContainerElement] = useState<HTMLDivElement | null>(null)
   const [containerSize, setContainerSize] = useState({ width: 800, height: 500 })
 
   useEffect(() => {
-    if (!containerRef.current) return
+    if (!containerElement) return
     const observer = new ResizeObserver((entries) => {
       const entry = entries[0]
       if (entry) setContainerSize({ width: Math.floor(entry.contentRect.width), height: Math.floor(entry.contentRect.height) })
     })
-    observer.observe(containerRef.current)
+    observer.observe(containerElement)
     return () => observer.disconnect()
-  }, [])
+  }, [containerElement])
 
   // Dynamic available tabs
   const availableDiagrams = useMemo<AvailableDiagram[]>(() => {
-    if (!analysis) return [{ id: 'topology' as DiagramType, label: 'Architecture', available: true }]
-    return getAvailableDiagrams(analysis)
-  }, [analysis])
+    const candidates = analysis
+      ? getAvailableDiagrams(analysis)
+      : [{ id: 'topology' as DiagramType, label: 'Architecture', available: true }]
+    return candidates.filter(diagram => !failedDiagramTypes.has(diagram.id))
+  }, [analysis, failedDiagramTypes])
 
   // Summary data for Overview
   const summaryData = useMemo(() => {
@@ -106,6 +153,9 @@ export function DiagramViewer({ files, codeIndex, className, onNavigateToFile }:
   // Generate diagram (async — resolves content from store)
   const selectedType = viewMode === 'overview' ? null : viewMode
   const activeDiagramType = focusTarget ? 'focus' as DiagramType : selectedType
+  const handleActiveRenderFailure = useCallback(() => {
+    if (activeDiagramType) handleDiagramFailure(activeDiagramType)
+  }, [activeDiagramType, handleDiagramFailure])
   const [diagram, setDiagram] = useState<AnyDiagramResult | null>(null)
   useEffect(() => {
     if (!activeDiagramType || !files?.length || codeIndex.totalFiles === 0 || (!analysis && activeDiagramType !== 'treemap')) {
@@ -120,10 +170,13 @@ export function DiagramViewer({ files, codeIndex, className, onNavigateToFile }:
       .then(result => { if (!cancelled) setDiagram(result) })
       .catch(err => {
         console.error(`Diagram generation failed for type "${activeDiagramType}":`, err)
-        if (!cancelled) setDiagram(null)
+        if (!cancelled) {
+          setDiagram(null)
+          handleDiagramFailure(activeDiagramType)
+        }
       })
     return () => { cancelled = true }
-  }, [files, codeIndex, activeDiagramType, analysis, focusTarget, focusHops])
+  }, [files, codeIndex, activeDiagramType, analysis, focusTarget, focusHops, handleDiagramFailure])
 
   // Async enhancement for class diagrams (Tree-sitter for non-JS/TS)
   const [asyncDiagram, setAsyncDiagram] = useState<AnyDiagramResult | null>(null)
@@ -240,6 +293,7 @@ export function DiagramViewer({ files, codeIndex, className, onNavigateToFile }:
     <div className={cn('flex h-full flex-col', className)}>
       {/* Toolbar: diagram tabs + export */}
       <DiagramToolbar
+        overviewButtonRef={overviewButtonRef}
         availableDiagrams={availableDiagrams}
         viewMode={viewMode}
         onSelectType={(type) => { startTransition(() => { setViewMode(type) }); setFocusTarget(null); setFocusQuery('') }}
@@ -250,6 +304,7 @@ export function DiagramViewer({ files, codeIndex, className, onNavigateToFile }:
         onExportSvg={handleExportSvg}
         onExportPng={handleExportPng}
       />
+      <p className="sr-only" role="status">{diagramAnnouncement}</p>
 
       {/* Title bar */}
       {activeDiagram && (
@@ -276,7 +331,7 @@ export function DiagramViewer({ files, codeIndex, className, onNavigateToFile }:
             </div>
           )}
           {isOverview && analysis && summaryData ? (
-            <div ref={containerRef} className={cn('w-full h-full overflow-auto', isPending && 'opacity-60 transition-opacity')}>
+            <div ref={setContainerElement} className={cn('w-full h-full overflow-auto', isPending && 'opacity-60 transition-opacity')}>
               <DiagramOverview
                 analysis={analysis}
                 availableDiagrams={availableDiagrams}
@@ -287,8 +342,8 @@ export function DiagramViewer({ files, codeIndex, className, onNavigateToFile }:
             </div>
           ) : (
             <div
-              ref={containerRef}
-              className={cn('w-full h-full overflow-hidden', isPending && 'opacity-60 transition-opacity')}
+              ref={setContainerElement}
+              className={cn('group relative w-full h-full overflow-hidden', isPending && 'opacity-60 transition-opacity')}
               onWheel={handleWheel}
               onMouseDown={handleMouseDown}
               onMouseMove={handleMouseMove}
@@ -302,7 +357,14 @@ export function DiagramViewer({ files, codeIndex, className, onNavigateToFile }:
                     <TreemapChart ref={treemapRef} data={(activeDiagram as TreemapDiagramResult).data} width={containerSize.width} height={containerSize.height} onNodeClick={handleTreemapClick} />
                   ) : activeDiagram.type !== 'treemap' && activeDiagram.type !== 'summary' ? (
                     <Suspense fallback={<MermaidDiagramSkeleton />}>
-                      <MermaidDiagram ref={mermaidRef} chart={activeDiagram.chart} className="min-h-[400px] p-4" onNodeClick={handleNodeClick} />
+                      <MermaidDiagram
+                        ref={mermaidRef}
+                        chart={activeDiagram.chart}
+                        className="min-h-[400px] p-4"
+                        onNodeClick={handleNodeClick}
+                        onRenderFailure={handleActiveRenderFailure}
+                        toolbarPortalTarget={containerElement}
+                      />
                     </Suspense>
                   ) : null
                 ) : (

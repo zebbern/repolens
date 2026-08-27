@@ -443,8 +443,34 @@ describe('scanIssuesAsync', () => {
     expect(result.diagnostics.engines.ast).toBe('partial')
     expect(result.diagnostics.engines.taint).toBe('partial')
     expect(result.diagnostics.failures).toEqual(expect.arrayContaining([
-      expect.objectContaining({ engine: 'ast', message: expect.stringContaining('src/conflicted.ts') }),
-      expect.objectContaining({ engine: 'taint', message: expect.stringContaining('src/conflicted.ts') }),
+      expect.objectContaining({ engine: 'ast', paths: ['src/conflicted.ts'] }),
+      expect.objectContaining({ engine: 'taint', paths: ['src/conflicted.ts'] }),
+    ]))
+  })
+
+  it('retains every path omitted from partial engine coverage', () => {
+    const unavailablePaths = Array.from(
+      { length: 6 },
+      (_, index) => `src/unavailable-${index}.ts`,
+    )
+    let index = createEmptyIndex()
+    for (const path of unavailablePaths) {
+      index = indexFile(index, path, '<<<<<<< CONFLICT', 'typescript')
+    }
+
+    const result = scanIssues(index, null)
+
+    expect(result.diagnostics.failures).toEqual(expect.arrayContaining([
+      {
+        engine: 'ast',
+        message: 'AST parsing unavailable for 6 files.',
+        paths: unavailablePaths,
+      },
+      {
+        engine: 'taint',
+        message: 'Taint parsing unavailable for 6 files.',
+        paths: unavailablePaths,
+      },
     ]))
   })
 
@@ -466,7 +492,7 @@ describe('scanIssuesAsync', () => {
     expect(result.diagnostics.engines.ast).toBe('completed')
     expect(result.diagnostics.engines.taint).toBe('partial')
     expect(result.diagnostics.failures).toEqual(expect.arrayContaining([
-      expect.objectContaining({ engine: 'taint', message: expect.stringContaining('src/large.ts') }),
+      expect.objectContaining({ engine: 'taint', paths: ['src/large.ts'] }),
     ]))
   })
 

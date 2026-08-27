@@ -13,7 +13,6 @@ interface IssueListProps {
   expandedIssues: Set<string>
   toggleIssue: (id: string) => void
   onNavigateToFile?: (path: string) => void
-  ruleOverflow: Map<string, number>
   scannedFiles: number
   languagesDetected: string[]
   totalIssueCount: number
@@ -31,7 +30,7 @@ interface IssueListProps {
 export function IssueList({
   groupedByFile, isGroupExpanded, toggleGroup,
   expandedIssues, toggleIssue, onNavigateToFile,
-  ruleOverflow, scannedFiles,
+  scannedFiles,
   totalIssueCount, filteredIssueCount,
   showFix, fixCache, validationResults, validatingIssues,
   hasValidApiKey, onShowFix, onValidate, onCopyPrompt,
@@ -61,22 +60,6 @@ export function IssueList({
 
   return (
     <div className="flex flex-col">
-      {/* Overflow notice */}
-      {ruleOverflow.size > 0 && (
-        <div className="px-4 py-2.5 bg-foreground/2 border-b border-foreground/6">
-          <p className="text-[11px] text-text-muted">
-            {'Showing top 15 per rule. Additional matches: '}
-            {Array.from(ruleOverflow.entries()).map(([ruleId, count], i) => (
-              <span key={ruleId}>
-                {i > 0 && ', '}
-                <span className="text-text-secondary">{ruleId}</span>
-                <span className="text-text-muted/60"> (+{count})</span>
-              </span>
-            ))}
-          </p>
-        </div>
-      )}
-
       {Array.from(groupedByFile.entries()).map(([file, fileIssues]) => {
         const isExpanded = isGroupExpanded(file)
         const worstSeverity = fileIssues.some(i => i.severity === 'critical')

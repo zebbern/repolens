@@ -1,6 +1,7 @@
 "use client"
 
-import { AlertTriangle, CheckCircle2, Database, Info, Loader2 } from "lucide-react"
+import { useEffect, useState } from "react"
+import { AlertTriangle, CheckCircle2, Database, Info, Loader2, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -18,6 +19,7 @@ interface RepositoryCoverageBannerProps {
   coverage: RepositoryCoverage | null
   loadingStage: LoadingStage
   error?: string | null
+  repositoryKey?: string
 }
 
 const SETTLED_STAGES = new Set<LoadingStage>(["ready", "cached"])
@@ -93,9 +95,23 @@ function DetailRow({ label, value }: { label: string; value: string }) {
   )
 }
 
-export function RepositoryCoverageBanner({ coverage, loadingStage, error }: RepositoryCoverageBannerProps) {
+export function RepositoryCoverageBanner({ coverage, loadingStage, error, repositoryKey }: RepositoryCoverageBannerProps) {
   const status = coverageStatus(coverage, loadingStage, error)
   const Icon = status.Icon
+  const repositoryIdentity = repositoryKey ?? ""
+  const [dismissedKey, setDismissedKey] = useState<string | null>(null)
+  const [autoDismissCancelledKey, setAutoDismissCancelledKey] = useState<string | null>(null)
+  const dismissed = dismissedKey === repositoryIdentity
+  const autoDismissCancelled = autoDismissCancelledKey === repositoryIdentity
+
+  useEffect(() => {
+    if (status.tone !== "complete" || dismissed || autoDismissCancelled) return
+    const timer = setTimeout(() => setDismissedKey(repositoryIdentity), 10_000)
+    return () => clearTimeout(timer)
+  }, [autoDismissCancelled, dismissed, repositoryIdentity, status.tone])
+
+  if (status.tone === "complete" && dismissed) return null
+
   const fileFailureSamples = coverage?.failures.samples.slice(0, 100) ?? []
   const failedSubtreeSamples = coverage?.failedSubtrees.samples.slice(0, 100) ?? []
   const discoveredLabel = coverage?.treeStatus === "partial"
@@ -114,6 +130,10 @@ export function RepositoryCoverageBanner({ coverage, loadingStage, error }: Repo
       )}
       role={status.tone === "error" ? "alert" : "status"}
       aria-live={status.tone === "error" ? "assertive" : "polite"}
+      onFocusCapture={() => setAutoDismissCancelledKey(repositoryIdentity)}
+      onPointerEnter={() => setAutoDismissCancelledKey(repositoryIdentity)}
+      onPointerDown={() => setAutoDismissCancelledKey(repositoryIdentity)}
+      onClick={() => setAutoDismissCancelledKey(repositoryIdentity)}
     >
       <Icon className={cn("h-3.5 w-3.5 shrink-0", status.tone === "loading" && "animate-spin")} aria-hidden="true" />
       <span className="min-w-0 flex-1">{status.label}</span>
@@ -124,6 +144,17 @@ export function RepositoryCoverageBanner({ coverage, loadingStage, error }: Repo
             Details
           </Button>
         </DialogTrigger>
+        {status.tone === "complete" && (
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-6 w-6 shrink-0"
+            aria-label="Dismiss repository coverage"
+            onClick={() => setDismissedKey(repositoryIdentity)}
+          >
+            <X aria-hidden="true" />
+          </Button>
+        )}
         <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-xl">
           <DialogHeader>
             <DialogTitle>Repository coverage details</DialogTitle>

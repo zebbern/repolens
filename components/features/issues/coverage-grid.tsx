@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useCallback } from 'react'
-import type { ComplianceCategory } from '@/lib/code/issue-scanner'
+import type { CodeIssue, ComplianceCategory } from '@/lib/code/issue-scanner'
 import { cn } from '@/lib/utils'
 import {
   Shield,
@@ -10,7 +10,9 @@ import {
   Circle,
   ChevronDown,
   ChevronRight,
+  ExternalLink,
 } from 'lucide-react'
+import { SEVERITY_CONFIG } from './constants'
 
 type ComplianceStatus = 'pass' | 'warn' | 'fail' | 'no-coverage'
 
@@ -54,13 +56,98 @@ const STATUS_CONFIG: Record<ComplianceStatus, {
 interface CoverageGridProps {
   title: string
   categories: Record<string, ComplianceCategory>
+  onNavigateToFile?: (path: string) => void
 }
 
-export function CoverageGrid({ title, categories }: CoverageGridProps) {
+function FindingDetails({ issue, onNavigateToFile }: { issue: CodeIssue; onNavigateToFile?: (path: string) => void }) {
+  return (
+    <div className="px-3 pb-3 ml-5 flex flex-col gap-2">
+      <p className="text-[11px] text-text-muted leading-relaxed">{issue.description}</p>
+      {issue.snippet && (
+        <div className="rounded bg-foreground/5 border border-foreground/4 px-2.5 py-1.5 overflow-x-auto">
+          <code className="text-[10px] font-mono text-text-secondary whitespace-pre">{issue.snippet}</code>
+        </div>
+      )}
+      {issue.suggestion && (
+        <p className="text-[10px] leading-relaxed text-emerald-700 dark:text-emerald-400/90">
+          <span className="font-medium">Fix: </span>{issue.suggestion}
+        </p>
+      )}
+      <div className="flex flex-wrap items-center gap-2 text-[10px] text-text-muted">
+        <span className="font-mono">{issue.file}:{issue.line}</span>
+        {issue.cwe && (
+          <a
+            href={`https://cwe.mitre.org/data/definitions/${issue.cwe.replace('CWE-', '')}.html`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="font-mono text-blue-700 hover:underline dark:text-blue-400"
+          >
+            {issue.cwe}
+          </a>
+        )}
+        {issue.learnMoreUrl && (
+          <a href={issue.learnMoreUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-0.5 text-blue-700 hover:underline dark:text-blue-400">
+            Learn more <ExternalLink className="h-2.5 w-2.5" aria-hidden="true" />
+          </a>
+        )}
+        {onNavigateToFile && (
+          <button
+            type="button"
+            onClick={() => onNavigateToFile(issue.file)}
+            className="text-text-secondary hover:text-text-primary hover:underline"
+          >
+            Open in Code
+          </button>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function FindingRow({ issue, expanded, onToggle, onNavigateToFile }: {
+  issue: CodeIssue
+  expanded: boolean
+  onToggle: () => void
+  onNavigateToFile?: (path: string) => void
+}) {
+  const severity = SEVERITY_CONFIG[issue.severity]
+  const SeverityIcon = severity.icon
+
+  return (
+    <div className={cn('rounded border', severity.borderColor, severity.bgColor)}>
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={expanded}
+        className="w-full flex items-center gap-2 px-2.5 py-2 text-left hover:bg-foreground/5 transition-colors"
+      >
+        {expanded ? <ChevronDown className="h-3 w-3 text-text-muted shrink-0" /> : <ChevronRight className="h-3 w-3 text-text-muted shrink-0" />}
+        <SeverityIcon className={cn('h-3 w-3 shrink-0', severity.color)} aria-hidden="true" />
+        <span className="text-[11px] text-text-primary truncate flex-1">{issue.title}</span>
+        <span className="max-w-[45%] min-w-0 shrink truncate font-mono text-[10px] text-text-muted" title={`${issue.file}:${issue.line}`}>
+          {issue.file}:{issue.line}
+        </span>
+      </button>
+      {expanded && <FindingDetails issue={issue} onNavigateToFile={onNavigateToFile} />}
+    </div>
+  )
+}
+
+export function CoverageGrid({ title, categories, onNavigateToFile }: CoverageGridProps) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
+  const [expandedFindings, setExpandedFindings] = useState<Set<string>>(new Set())
 
   const toggle = useCallback((id: string) => {
     setExpanded((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }, [])
+
+  const toggleFinding = useCallback((id: string) => {
+    setExpandedFindings((prev) => {
       const next = new Set(prev)
       if (next.has(id)) next.delete(id)
       else next.add(id)
@@ -109,10 +196,12 @@ export function CoverageGrid({ title, categories }: CoverageGridProps) {
           const cfg = STATUS_CONFIG[cat.status]
           const StatusIcon = cfg.icon
           const isExpanded = expanded.has(id)
+          const issues = cat.issues ?? []
 
           return (
             <div key={id}>
               <button
+                type="button"
                 onClick={() => toggle(id)}
                 aria-expanded={isExpanded}
                 className="w-full flex items-center gap-2.5 px-4 py-2.5 hover:bg-foreground/2 transition-colors text-left"
@@ -149,11 +238,28 @@ export function CoverageGrid({ title, categories }: CoverageGridProps) {
                     <span>{cat.ruleCount} {cat.ruleCount === 1 ? 'rule' : 'rules'} mapped</span>
                     <span>{cat.findingCount} {cat.findingCount === 1 ? 'finding' : 'findings'}</span>
                     {cat.ruleIds.length > 0 && (
-                      <span className="font-mono truncate max-w-[200px]" title={cat.ruleIds.join(', ')}>
+                      <span className="min-w-0 break-all font-mono">
                         Rules: {cat.ruleIds.join(', ')}
                       </span>
                     )}
                   </div>
+                  {issues.length > 0 && (
+                    <div className="mt-3 flex flex-col gap-1.5" aria-label={`${issues.length} mapped findings`}>
+                      <p className="text-[10px] font-medium text-text-secondary">Mapped findings</p>
+                      {issues.map(issue => {
+                        const findingKey = `${id}:${issue.id}`
+                        return (
+                          <FindingRow
+                            key={findingKey}
+                            issue={issue}
+                            expanded={expandedFindings.has(findingKey)}
+                            onToggle={() => toggleFinding(findingKey)}
+                            onNavigateToFile={onNavigateToFile}
+                          />
+                        )
+                      })}
+                    </div>
+                  )}
                 </div>
               )}
             </div>

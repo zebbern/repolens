@@ -1,6 +1,6 @@
 import type { IssueSeverity, IssueCategory, CodeIssue } from '@/lib/code/issue-scanner'
 
-export type ViewMode = 'issues' | 'compliance'
+export type ViewMode = 'overview' | 'issues' | 'compliance'
 export type CategoryFilterKey = IssueCategory | 'supply-chain' | 'structural'
 export type FilterMode = 'all' | IssueSeverity | CategoryFilterKey
 

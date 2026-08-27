@@ -16,9 +16,10 @@ import { CveSection } from './cve-section'
 interface ComplianceDashboardProps {
   codeIndex: CodeIndex
   scanResults: ScanResults
+  onNavigateToFile?: (path: string) => void
 }
 
-export function ComplianceDashboard({ codeIndex, scanResults }: ComplianceDashboardProps) {
+export function ComplianceDashboard({ codeIndex, scanResults, onNavigateToFile }: ComplianceDashboardProps) {
   const report = useMemo(() => {
     const allRules = getAllRules()
     return generateComplianceReport(scanResults, allRules)
@@ -47,7 +48,7 @@ export function ComplianceDashboard({ codeIndex, scanResults }: ComplianceDashbo
   }, [report])
 
   return (
-    <div className="flex flex-col gap-4 p-4 overflow-y-auto h-full">
+    <div className="flex flex-col gap-4 p-4">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
@@ -57,6 +58,7 @@ export function ComplianceDashboard({ codeIndex, scanResults }: ComplianceDashbo
           </h2>
         </div>
         <button
+          type="button"
           onClick={handleExport}
           className="flex items-center gap-1.5 text-[11px] px-2.5 py-1 rounded-md border border-foreground/10 bg-foreground/4 text-text-secondary hover:bg-foreground/8 hover:text-text-primary transition-colors"
         >
@@ -72,12 +74,14 @@ export function ComplianceDashboard({ codeIndex, scanResults }: ComplianceDashbo
       <CoverageGrid
         title="OWASP Top 10 — 2025"
         categories={report.owaspCoverage}
+        onNavigateToFile={onNavigateToFile}
       />
 
       {/* CWE Top 25 Grid */}
       <CoverageGrid
         title="CWE Top 25 — 2024"
         categories={report.cweCoverage}
+        onNavigateToFile={onNavigateToFile}
       />
 
       {/* CVE Vulnerabilities */}

@@ -6,6 +6,7 @@ export type GitHubFixtureScenario =
   | 'dependencies'
   | 'truncatedTree'
   | 'fileFailure'
+  | 'analysisFailures'
   | 'mediumIdb'
   | 'onDemand'
   | 'noPullRequests'
@@ -89,6 +90,24 @@ function fixtureRepoName(scenario: GitHubFixtureScenario, testInfo: TestInfo): s
 
 function filesForScenario(scenario: GitHubFixtureScenario): Record<string, string> {
   if (scenario === 'dependencies') return DEPENDENCY_FILES
+  if (scenario === 'analysisFailures') {
+    return {
+      'README.md': BASE_FILES['README.md'],
+      'package.json': BASE_FILES['package.json'],
+      'src/index.ts': BASE_FILES['src/index.ts'],
+      'src/download.ts': [
+        "import { readFile } from 'node:fs'",
+        'export function download(req: { params: { filename: string } }) {',
+        '  return readFile(`./uploads/${req.params.filename}`, () => undefined)',
+        '}',
+        '',
+      ].join('\n'),
+      ...Object.fromEntries(Array.from({ length: 6 }, (_, index) => [
+        `src/unavailable-${index}.ts`,
+        '<<<<<<< CONFLICT',
+      ])),
+    }
+  }
   if (scenario === 'fileFailure') {
     return {
       'README.md': BASE_FILES['README.md'],

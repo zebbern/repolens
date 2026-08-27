@@ -51,13 +51,11 @@ describe('generateTreemap', () => {
     expect(result.data).toHaveLength(0)
   })
 
-  it('identifies the largest file in stats', () => {
+  it('does not mislabel the largest file as most imported', () => {
     const codeIndex = createMockCodeIndex()
     const files = createMockFileTree()
     const result = generateTreemap(codeIndex, files)
 
-    // stats.mostImported is used for largest file info
-    expect(result.stats.mostImported).toBeDefined()
-    expect(result.stats.mostImported!.count).toBeGreaterThan(0)
+    expect(result.stats.mostImported).toBeUndefined()
   })
 })

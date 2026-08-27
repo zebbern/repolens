@@ -2,12 +2,14 @@
 
 import type { FullAnalysis } from '@/lib/code/import-parser'
 import type { MermaidDiagramResult } from '../types'
+import { escapeMermaidLabel, sanitizeId, MERMAID_EDGE_BUDGET, MERMAID_SOURCE_BUDGET } from '../helpers'
 
 export function generateClassDiagram(analysis: FullAnalysis): MermaidDiagramResult {
   const nodePathMap = new Map<string, string>()
 
   // Sanitize a name so it's valid as a Mermaid class identifier
   const sanitizeName = (n: string) => n.replace(/[^a-zA-Z0-9_]/g, '_').replace(/_+/g, '_').replace(/^_|_$/g, '') || 'Unknown'
+  const sanitizeClassIdentifier = (name: string): string => `type_${sanitizeName(name)}`
 
   // Strip all leading TypeScript modifiers from a declaration string
   const MOD_RE = /^(?:readonly|static|abstract|const|override|declare|public|private|protected)\s+/
@@ -205,6 +207,7 @@ export function generateClassDiagram(analysis: FullAnalysis): MermaidDiagramResu
   // First pass: collect ALL types/classes and score them by importance
   type TypeEntry = {
     safeName: string
+    displayName: string
     path: string
     kind: 'interface' | 'enum' | 'type' | 'class'
     properties: string[]
@@ -217,36 +220,69 @@ export function generateClassDiagram(analysis: FullAnalysis): MermaidDiagramResu
     isObjectType: boolean // true if properties are real declarations, false for type expressions
   }
   const allTypes: TypeEntry[] = []
-  const seenNames = new Set<string>()
 
   for (const [path, fileAnalysis] of analysis.files) {
     for (const t of fileAnalysis.types) {
       if (!t.exported && t.properties.length === 0) continue
-      const safeName = sanitizeName(t.name)
-      if (seenNames.has(safeName)) continue
-      seenNames.add(safeName)
+      const safeName = sanitizeClassIdentifier(t.name)
       const hasRel = !!(t.extends && t.extends.length > 0)
       const splitProps = splitRawProperties(t.properties)
       const isObj = t.kind === 'interface' || t.kind === 'enum' || isObjectLikeProperties(splitProps)
       allTypes.push({
-        safeName, path, kind: t.kind as 'interface' | 'enum' | 'type',
+        safeName, displayName: t.name, path, kind: t.kind as 'interface' | 'enum' | 'type',
         properties: splitProps, exported: t.exported, hasRelationship: hasRel,
         propCount: splitProps.length, extends: t.extends, isObjectType: isObj,
       })
     }
     for (const cls of fileAnalysis.classes) {
-      const safeName = sanitizeName(cls.name)
-      if (seenNames.has(safeName)) continue
-      seenNames.add(safeName)
+      const safeName = sanitizeClassIdentifier(cls.name)
       const hasRel = !!(cls.extends || (cls.implements && cls.implements.length > 0))
       allTypes.push({
-        safeName, path, kind: 'class',
+        safeName, displayName: cls.name, path, kind: 'class',
         properties: cls.properties, methods: cls.methods, exported: true,
         hasRelationship: hasRel, propCount: cls.properties.length + cls.methods.length,
         extends: cls.extends ? [cls.extends] : undefined, implements: cls.implements,
         isObjectType: true,
       })
     }
+  }
+
+  // Mermaid class identifiers must be unique even when separate modules
+  // declare the same readable type name. Keep the simple name for unique
+  // declarations and add a path-derived suffix only for duplicates.
+  const nameCounts = new Map<string, number>()
+  for (const t of allTypes) nameCounts.set(t.safeName, (nameCounts.get(t.safeName) || 0) + 1)
+  const usedIds = new Set<string>()
+  for (const t of allTypes) {
+    const base = t.safeName
+    if ((nameCounts.get(base) || 0) > 1) {
+      const pathId = sanitizeId(t.path).replace(/[^a-zA-Z0-9_]/g, '_')
+      t.safeName = `${base}_${pathId}`
+    }
+    let id = t.safeName
+    let suffix = 2
+    while (usedIds.has(id)) id = `${t.safeName}_${suffix++}`
+    t.safeName = id
+    usedIds.add(id)
+  }
+  const typesByName = new Map<string, TypeEntry[]>()
+  for (const t of allTypes) {
+    const list = typesByName.get(sanitizeName(t.displayName)) || []
+    list.push(t)
+    typesByName.set(sanitizeName(t.displayName), list)
+  }
+  const resolveType = (name: string, owner: TypeEntry): TypeEntry | undefined => {
+    const requestedName = name.trim()
+    const matchingCandidates = typesByName.get(sanitizeName(requestedName)) || []
+    const exactCandidates = matchingCandidates.filter(candidate => candidate.displayName === requestedName)
+    const candidates = exactCandidates.length > 0 ? exactCandidates : matchingCandidates
+    if (candidates.length === 0) return undefined
+    const sameFile = candidates.find(candidate => candidate.path === owner.path)
+    if (sameFile) return sameFile
+    const imports = analysis.files.get(owner.path)?.imports || []
+    const imported = candidates.filter(candidate => imports.some(imp => imp.resolvedPath === candidate.path && imp.specifiers.includes(requestedName)))
+    if (imported.length === 1) return imported[0]
+    return candidates.length === 1 ? candidates[0] : undefined
   }
 
   const totalFound = allTypes.length
@@ -270,17 +306,15 @@ export function generateClassDiagram(analysis: FullAnalysis): MermaidDiagramResu
   const renderedNames = new Set(typesToRender.map(t => t.safeName))
   for (const t of typesToRender) {
     if (t.extends) for (const ext of t.extends) {
-      const safeExt = sanitizeName(ext.trim())
-      if (!renderedNames.has(safeExt)) {
-        const parent = allTypes.find(a => a.safeName === safeExt)
-        if (parent) { typesToRender.push(parent); renderedNames.add(safeExt) }
+      const parent = resolveType(ext, t)
+      if (parent && !renderedNames.has(parent.safeName)) {
+        typesToRender.push(parent); renderedNames.add(parent.safeName)
       }
     }
     if (t.implements) for (const impl of t.implements) {
-      const safeImpl = sanitizeName(impl.trim())
-      if (!renderedNames.has(safeImpl)) {
-        const parent = allTypes.find(a => a.safeName === safeImpl)
-        if (parent) { typesToRender.push(parent); renderedNames.add(safeImpl) }
+      const parent = resolveType(impl, t)
+      if (parent && !renderedNames.has(parent.safeName)) {
+        typesToRender.push(parent); renderedNames.add(parent.safeName)
       }
     }
   }
@@ -312,38 +346,39 @@ export function generateClassDiagram(analysis: FullAnalysis): MermaidDiagramResu
     return refs
   }
 
-  // ── Pass 1: Compute ALL edges before rendering ──
+  // ── Pass 1: Compute all edges before applying display limits ──
   type EdgeEntry = { from: string; to: string; syntax: string }
-  const allEdges: EdgeEntry[] = []
+  const allRelationshipEdges: EdgeEntry[] = []
   const compositionEdgeKeys = new Set<string>()
 
-  for (const t of typesToRender) {
+  for (const t of allTypes) {
     if (t.extends) for (const ext of t.extends) {
-      const safeExt = sanitizeName(ext.trim())
-      if (safeExt && safeExt !== t.safeName && renderedNames.has(safeExt)) {
-        allEdges.push({ from: safeExt, to: t.safeName, syntax: `  ${safeExt} <|-- ${t.safeName}` })
+      const parent = resolveType(ext, t)
+      if (parent && parent.safeName !== t.safeName) {
+        allRelationshipEdges.push({ from: parent.safeName, to: t.safeName, syntax: `  ${parent.safeName} <|-- ${t.safeName}` })
       }
     }
     if (t.implements) for (const impl of t.implements) {
-      const safeImpl = sanitizeName(impl.trim())
-      if (safeImpl && renderedNames.has(safeImpl)) {
-        allEdges.push({ from: safeImpl, to: t.safeName, syntax: `  ${safeImpl} <|.. ${t.safeName}` })
+      const parent = resolveType(impl, t)
+      if (parent) {
+        allRelationshipEdges.push({ from: parent.safeName, to: t.safeName, syntax: `  ${parent.safeName} <|.. ${t.safeName}` })
       }
     }
     const members = [...t.properties, ...(t.methods || [])]
     for (const member of members) {
       for (const ref of extractReferencedTypes(member)) {
-        const safeRef = sanitizeName(ref)
-        if (safeRef !== t.safeName && renderedNames.has(safeRef)) {
-          const edgeKey = `${t.safeName}--${safeRef}`
+        const referenced = resolveType(ref, t)
+        if (referenced && referenced.safeName !== t.safeName) {
+          const edgeKey = `${t.safeName}--${referenced.safeName}`
           if (!compositionEdgeKeys.has(edgeKey)) {
             compositionEdgeKeys.add(edgeKey)
-            allEdges.push({ from: t.safeName, to: safeRef, syntax: `  ${t.safeName} *-- ${safeRef}` })
+            allRelationshipEdges.push({ from: t.safeName, to: referenced.safeName, syntax: `  ${t.safeName} *-- ${referenced.safeName}` })
           }
         }
       }
     }
   }
+  const allEdges = allRelationshipEdges.filter(edge => renderedNames.has(edge.from) && renderedNames.has(edge.to))
 
   // ── Build connected types set ──
   const connectedTypes = new Set<string>()
@@ -365,42 +400,33 @@ export function generateClassDiagram(analysis: FullAnalysis): MermaidDiagramResu
   }
 
   // ── Derive module name from file path ──
-  function getModuleName(filePath: string): string {
+  function getModule(filePath: string): { idSource: string; label: string } {
     const lastSlash = filePath.lastIndexOf('/')
-    if (lastSlash < 0) return 'root'
-    let dir = filePath.slice(0, lastSlash)
-    dir = dir.replace(/^(?:src|lib)(?:\/|$)/, '')
-    if (!dir) return 'root'
-    return dir.replace(/\//g, '_').replace(/[^a-zA-Z0-9_]/g, '_') || 'root'
-  }
-
-  // ── Group types by module ──
-  const moduleGroups = new Map<string, TypeEntry[]>()
-  for (const t of typesToDisplay) {
-    const mod = getModuleName(t.path)
-    if (!moduleGroups.has(mod)) moduleGroups.set(mod, [])
-    moduleGroups.get(mod)!.push(t)
+    if (lastSlash < 0) return { idSource: 'repository-root:', label: 'root' }
+    const directory = filePath.slice(0, lastSlash)
+    return { idSource: `directory:${directory}`, label: directory || 'root' }
   }
 
   // ── Render a single type block ──
   function renderTypeBlock(t: TypeEntry, indent: string): string {
     let block = ''
+    const classRef = (name: string) => `${name}["${escapeMermaidLabel(t.displayName)}"]`
     if (t.kind === 'interface') {
-      block += `${indent}class ${t.safeName} {\n${indent}  <<interface>>\n`
+      block += `${indent}class ${classRef(t.safeName)} {\n${indent}  <<interface>>\n`
       for (const prop of getCleanProperties(t.properties, 6)) {
         const s = sanitizeProp(prop)
         if (s) block += `${indent}  +${s}\n`
       }
       block += `${indent}}\n`
     } else if (t.kind === 'enum') {
-      block += `${indent}class ${t.safeName} {\n${indent}  <<enumeration>>\n`
+      block += `${indent}class ${classRef(t.safeName)} {\n${indent}  <<enumeration>>\n`
       for (const prop of t.properties.slice(0, 6)) {
         const s = sanitizeProp(prop)
         if (s) block += `${indent}  ${s}\n`
       }
       block += `${indent}}\n`
     } else if (t.kind === 'class') {
-      block += `${indent}class ${t.safeName} {\n`
+      block += `${indent}class ${classRef(t.safeName)} {\n`
       for (const prop of getCleanProperties(t.properties, 5)) {
         const s = sanitizeProp(prop)
         if (s) block += `${indent}  +${s}\n`
@@ -411,14 +437,14 @@ export function generateClassDiagram(analysis: FullAnalysis): MermaidDiagramResu
       }
       block += `${indent}}\n`
     } else if (t.isObjectType) {
-      block += `${indent}class ${t.safeName} {\n${indent}  <<type>>\n`
+      block += `${indent}class ${classRef(t.safeName)} {\n${indent}  <<type>>\n`
       for (const prop of getCleanProperties(t.properties, 4)) {
         const s = sanitizeProp(prop)
         if (s) block += `${indent}  ${s}\n`
       }
       block += `${indent}}\n`
     } else {
-      block += `${indent}class ${t.safeName} {\n${indent}  <<type>>\n`
+      block += `${indent}class ${classRef(t.safeName)} {\n${indent}  <<type>>\n`
       const cleanProps = getCleanProperties(t.properties, t.properties.length)
       if (cleanProps.length > 0) {
         for (const prop of cleanProps.slice(0, 4)) {
@@ -434,41 +460,84 @@ export function generateClassDiagram(analysis: FullAnalysis): MermaidDiagramResu
     return block
   }
 
-  // ── Pass 2: Render diagram with module namespaces ──
-  let chart = 'classDiagram\n'
-  let nodeCount = 0
-  const displayNames = new Set(typesToDisplay.map(t => t.safeName))
-
-  for (const [moduleName, types] of moduleGroups) {
-    chart += `  namespace ${moduleName} {\n`
-    for (const t of types) {
-      nodePathMap.set(t.safeName, t.path)
-      nodeCount++
-      chart += renderTypeBlock(t, '    ')
-    }
-    chart += `  }\n`
-  }
-
-  // Render edges after all namespace blocks
-  let edgeCount = 0
+  // ── Pass 2: Render a deterministic, bounded diagram ──
+  const edgeDegree = new Map<string, number>()
   for (const edge of allEdges) {
-    if (displayNames.has(edge.from) && displayNames.has(edge.to)) {
-      chart += `${edge.syntax}\n`
-      edgeCount++
+    edgeDegree.set(edge.from, (edgeDegree.get(edge.from) || 0) + 1)
+    edgeDegree.set(edge.to, (edgeDegree.get(edge.to) || 0) + 1)
+  }
+  const rankedTypes = [...typesToDisplay].sort((a, b) => {
+    const degree = (edgeDegree.get(b.safeName) || 0) - (edgeDegree.get(a.safeName) || 0)
+    return degree !== 0 ? degree : a.safeName.localeCompare(b.safeName)
+  })
+  const typesById = new Map(typesToDisplay.map(type => [type.safeName, type]))
+  const edgeOrderedTypes: TypeEntry[] = []
+  const edgeOrderedIds = new Set<string>()
+  const rankedEdges = [...allEdges].sort((left, right) => {
+    const leftDegree = (edgeDegree.get(left.from) || 0) + (edgeDegree.get(left.to) || 0)
+    const rightDegree = (edgeDegree.get(right.from) || 0) + (edgeDegree.get(right.to) || 0)
+    return rightDegree - leftDegree || `${left.from}|${left.to}`.localeCompare(`${right.from}|${right.to}`)
+  })
+  for (const edge of rankedEdges) {
+    for (const id of [edge.to, edge.from]) {
+      const type = typesById.get(id)
+      if (type && !edgeOrderedIds.has(id)) {
+        edgeOrderedIds.add(id)
+        edgeOrderedTypes.push(type)
+      }
     }
   }
+  const orderedTypes = [...edgeOrderedTypes, ...rankedTypes.filter(type => !edgeOrderedIds.has(type.safeName))]
 
-  if (nodeCount === 0) chart = 'flowchart TD\n  empty["No classes, interfaces, or types found"]\n'
+  const renderBounded = (maxTypes: number) => {
+    const selectedTypes = orderedTypes.slice(0, maxTypes)
+    const selectedNames = new Set(selectedTypes.map(t => t.safeName))
+    const groups = new Map<string, { label: string; types: TypeEntry[] }>()
+    for (const t of selectedTypes) {
+      const moduleInfo = getModule(t.path)
+      const namespaceId = `module_${sanitizeId(moduleInfo.idSource)}`
+      if (!groups.has(namespaceId)) groups.set(namespaceId, { label: moduleInfo.label, types: [] })
+      groups.get(namespaceId)!.types.push(t)
+    }
+    let renderedChart = 'classDiagram\n'
+    const renderedMap = new Map<string, string>()
+    for (const [namespaceId, group] of [...groups.entries()].sort(([a], [b]) => a.localeCompare(b))) {
+      renderedChart += `  namespace ${namespaceId}["${escapeMermaidLabel(group.label)}"] {\n`
+      const { types } = group
+      for (const t of types) {
+        renderedMap.set(t.safeName, t.path)
+        renderedChart += renderTypeBlock(t, '    ')
+      }
+      renderedChart += '  }\n'
+    }
+    const eligibleEdges = allEdges.filter(edge => selectedNames.has(edge.from) && selectedNames.has(edge.to))
+    const renderedEdges = eligibleEdges.slice(0, MERMAID_EDGE_BUDGET)
+    for (const edge of renderedEdges) renderedChart += `${edge.syntax}\n`
+    const omittedNodes = totalFound - selectedTypes.length
+    const omittedEdges = allRelationshipEdges.length - renderedEdges.length
+    if (omittedNodes > 0 || omittedEdges > 0) renderedChart += `%% ${omittedNodes} nodes and ${omittedEdges} edges omitted\n`
+    return { chart: renderedChart, nodePathMap: renderedMap, nodeCount: selectedTypes.length, edgeCount: renderedEdges.length, omittedNodes, omittedEdges }
+  }
 
-  const title = isFallback || nodeCount === 0
-    ? `Type & Class Diagram (${nodeCount} types)`
-    : `Type Relationships (${nodeCount} connected types from ${totalFound} total)`
+  let low = 0
+  let high = orderedTypes.length
+  while (low < high) {
+    const mid = Math.ceil((low + high) / 2)
+    if (renderBounded(mid).chart.length <= MERMAID_SOURCE_BUDGET) low = mid
+    else high = mid - 1
+  }
+  const rendered = renderBounded(low)
+  for (const [id, path] of rendered.nodePathMap) nodePathMap.set(id, path)
+  const chart = rendered.nodeCount === 0 ? 'flowchart TD\n  empty["No classes, interfaces, or types found"]\n' : rendered.chart
+  const title = isFallback || rendered.nodeCount === 0
+    ? `Type & Class Diagram (${rendered.nodeCount} of ${totalFound} types)`
+    : `Type Relationships (${rendered.nodeCount} connected types from ${totalFound} total)`
 
   return {
     type: 'classes',
     title,
     chart,
-    stats: { totalNodes: nodeCount, totalEdges: edgeCount },
+    stats: { totalNodes: rendered.nodeCount, totalEdges: rendered.edgeCount, omittedNodes: rendered.omittedNodes, omittedEdges: rendered.omittedEdges },
     nodePathMap,
   }
 }

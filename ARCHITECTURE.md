@@ -10,7 +10,7 @@ Users paste a GitHub URL (or navigate to `/:owner/:repo`). The app resolves the 
 
 ```mermaid
 graph LR
-  A["User enters URL"] --> B["Middleware rewrite"]
+  A["User enters URL"] --> B["Proxy rewrite"]
   B --> C["RepositoryProvider"]
   C --> D{"Cache hit?"}
   D -->|Yes| E["Hydrate from IndexedDB"]
@@ -34,14 +34,14 @@ graph LR
 ### Step-by-step
 
 1. **URL entry** — The user enters a GitHub URL or navigates to `/:owner/:repo`.
-2. **Middleware rewrite** — Next.js middleware rewrites `/:owner/:repo` to `/?repo=https://github.com/owner/repo`, preserving query params. Reserved segments (`api`, `_next`, `compare`, etc.) are excluded.
+2. **Proxy rewrite** — `proxy()` in `proxy.ts` (the Next.js 16 replacement for middleware) rewrites `/:owner/:repo` to `/?repo=https://github.com/owner/repo`, preserving query params. Reserved segments (`api`, `_next`, `compare`, etc.) are excluded.
 3. **Metadata fetch** — `RepositoryProvider.connectRepository()` parses the URL and calls `fetchRepoViaProxy()` through the authenticated GitHub client.
 4. **Tree fetch** — The adaptive resolver retrieves the recursive tree and splits truncated subtrees within request/time budgets. Partial discovery remains usable and is represented explicitly in repository coverage.
-5. **Cache check** — The provider checks IndexedDB (`getCachedRepo`) for a cached entry matching the tree SHA. On hit, the `CodeIndex` is hydrated immediately from cache.
+5. **Cache check** — When tree discovery is complete, the provider calls `withHydratedCachedRepo()` (`lib/cache/repo-cache.ts`). Under the cache lock it looks up the IndexedDB entry and checks that it matches the tree SHA and, for an entry cached as private, the current credential principal. On hit, the `CodeIndex` is hydrated immediately from cache.
 6. **Content fetch** — On cache miss, the provider attempts a streaming zipball download for repos under 250 MB. The server streams the GitHub zipball response body directly (no buffering), and the client uses fflate's streaming `Unzip` + `UnzipInflate` to extract and index files as chunks arrive, reducing peak memory from ~3–4× zip size to ~1×. If streaming extraction fails or the repo is larger, it falls back to per-file fetching with concurrency.
-7. **Indexing** — `batchIndexFiles()` builds the `CodeIndex` — a `Map<string, IndexedFile>` with split lines, language detection, and file metadata.
+7. **Indexing** — `batchIndexFiles()` builds the `CodeIndex`, whose `files` map (`Map<string, IndexedFile>`) holds per-file line counts, language detection, and file metadata. Lines are split lazily by `getFileLines()` and cached in a `WeakMap`.
 8. **Cache persist** — Complete, failure-free indexed data is written to IndexedDB with LRU eviction (max 5 repos). Partial sessions are not reused as complete caches.
-9. **Structural index** — On chat/docs requests, `buildStructuralIndexAsync()` extracts exports, imports, and symbol signatures from the `CodeIndex` into a compact JSON string sized to ~15% of the model's context window.
+9. **Structural index** — On chat, docs, and changelog requests, `buildStructuralIndexAsync()` extracts exports, imports, and symbol signatures from the `CodeIndex` into a compact JSON string sized by `getMaxIndexBytesForModel()` to 15% of the model's context window (10% above 200K tokens), at about 4 bytes per token and capped at 1 MB.
 10. **AI interaction** — Selected repository context is sent through the server to the provider inside a typed untrusted-data envelope. Tool calls stream back, execute locally through `executeToolLocally()`, and their results return through the server/provider boundary.
 
 ## ContentStore (Tiered Content Storage)
@@ -72,7 +72,7 @@ graph TD
 
 - Thresholds are configured via `IDB_CONTENT_STORE_THRESHOLD_KB` (50,000 KB by default; 25,000 KB on devices reporting at most 4 GB of memory) and `LAZY_CONTENT_THRESHOLD_KB` (250,000 KB) in `config/constants.ts`.
 - `indexing-pipeline.ts` checks repo size to choose the store tier.
-- During indexing, content is written to the chosen store. `CodeIndex.files` holds metadata-only `CodeIndexMeta` entries when IDB or Lazy is active.
+- During indexing, content is written to the chosen store. When IDB or Lazy is active, `CodeIndex.files` holds `IndexedFile` entries with `content` omitted; `CodeIndexMeta` records live in the parallel `CodeIndex.meta` map.
 - For IDB-tier repos, `IndexedFile.content` is set during indexing but stripped from the JS heap afterward — consumers access content via `contentStore.get()` or the async helpers in `code-index.ts` (see [Content Stripping (Phase 6)](#content-stripping-phase-6)).
 
 ### Worker Optimization
@@ -140,14 +140,14 @@ graph TD
 
 | Context | Interface | Contents | Update Frequency |
 | ------- | --------- | -------- | ---------------- |
-| **RepositoryDataCtx** | `RepositoryDataContextType` | `repo`, `files`, `parsedFiles`, `codeIndex`, `codebaseAnalysis`, `failedFiles`, `isCacheHit` | Rare — stable after load completes |
-| **RepositoryActionsCtx** | `RepositoryActionsContextType` | `connectRepository`, `disconnectRepository`, `loadFileContent`, `getFileByPath`, `updateCodeIndex`, `pinFile`, `unpinFile`, `clearPins`, `getPinnedContents`, `getTabCache`, `setTabCache`, `setSearchState`, `setModifiedContents`, `getFileContent` | Never — stable callback references |
-| **RepositoryProgressCtx** | `RepositoryProgressContextType` | `isLoading`, `error`, `indexingProgress`, `searchState`, `modifiedContents`, `loadingStage`, `contentAvailability`, `contentLoadingStats`, `pinnedFiles`, `isPinned` | Frequent — updates during indexing, search, and pin changes |
+| **RepositoryDataCtx** | `RepositoryDataContextType` | `repo`, `files`, `parsedFiles`, `codeIndex`, `codebaseAnalysis`, `failedFiles`, `isCacheHit`, `repositorySession`, `coverage` | Rare — stable after load completes |
+| **RepositoryActionsCtx** | `RepositoryActionsContextType` | `connectRepository`, `disconnectRepository`, `loadFileContent`, `getFileByPath`, `updateCodeIndex` (takes a `CodeIndexUpdate`: a `CodeIndex` or an updater `(current) => CodeIndex` applied to the latest index), `pinFile`, `unpinFile`, `clearPins`, `renameFiles`, `getPinnedContents`, `getTabCache`, `setTabCache`, `setSearchState`, `setModifiedContents`, `setOriginalContents`, `getFileContent`, `getRepositorySession`, `isRepositorySessionCurrent` | Low — memoized callbacks; some (`getFileContent`, `loadFileContent`, `getFileByPath`, `getPinnedContents`, `pinFile`, `connectRepository`) are recreated when the file tree, index, edits, pins, or GitHub token change |
+| **RepositoryProgressCtx** | `RepositoryProgressContextType` | `isLoading`, `error`, `indexingProgress`, `searchState`, `modifiedContents`, `originalContents`, `loadingStage`, `contentAvailability`, `contentLoadingStats`, `pinnedFiles`, `isPinned` | Frequent — updates during indexing, search, and pin changes |
 
 **Hooks**:
 
 - `useRepositoryData()` — subscribe to repo data only (components displaying file trees, code browser)
-- `useRepositoryActions()` — subscribe to stable callbacks only (components triggering actions)
+- `useRepositoryActions()` — subscribe to memoized callbacks only (components triggering actions)
 - `useRepositoryProgress()` — subscribe to loading/progress state only (progress bars, loading indicators)
 - `useRepository()` — backward-compatible convenience hook that spreads all 3 sub-contexts
 
@@ -169,7 +169,7 @@ graph LR
     G --> H["CodeIndex"]
   end
   subgraph Server
-    D --> I["streamText with codeTools"]
+    D --> I["repoLensAgent via createAgentUIStreamResponse (agentTools)"]
     I --> J["AI Model via provider SDK"]
   end
   J --> |"tool_call stream"| B
@@ -181,7 +181,7 @@ graph LR
 
 1. **User sends message** — `ChatSidebar.handleSubmit()` calls `sendMessage()` with the message text and a body containing the selected model, API key, repo context, and structural index.
 2. **Server receives request** — The API route (`/api/chat` or `/api/docs/generate`) validates the request with Zod, applies rate limiting via `applyRateLimit()`, and delegates to `repoLensAgent` which uses `createAgentUIStreamResponse` to stream the response.
-3. **Tools have no `execute`** — The `codeTools` object defines 13 local tools using `tool()` from the AI SDK, each with a Zod `inputSchema` but no `execute` function. Together with 2 server-executed skill tools, the agent has 15 progressively available tools. Local tool calls are streamed to the client instead of being executed on the server.
+3. **Tools have no `execute`** — The `codeTools` object defines 12 local tools using `tool()` from the AI SDK, each with a Zod `inputSchema` but no `execute` function. Together with 2 server-executed skill tools, the agent has 14 progressively available tools. Local tool calls are streamed to the client instead of being executed on the server.
 4. **Client intercepts tool calls** — The `useChat` hook's `onToolCall` callback fires for each tool call. It delegates to `handleToolCall()`, which calls `executeToolLocally()`.
 5. **Local execution** — `executeToolLocally()` runs the tool against the in-memory `CodeIndex`: reading files, searching content, listing directories, finding symbols, scanning issues, or generating diagrams.
 6. **Results fed back** — Tool results are passed to `addToolOutput()`, which adds them to the message stream.
@@ -203,6 +203,7 @@ graph LR
 | `generateDiagram` | Generate Mermaid diagrams (summary, topology, import-graph) |
 | `generateTour` | Generate an interactive code tour with ordered stops |
 | `getProjectOverview` | Get project-wide statistics and structure |
+| `getGitHistory` | Fetch commits, blame, or commit detail through the GitHub proxy (handled in `handleToolCall()`) |
 
 ### Context Compaction
 
@@ -267,7 +268,7 @@ graph LR
 | Rule Type | Module | How It Works |
 | --------- | ------ | ------------ |
 | **Regex** | `rules-security.ts`, `rules-quality.ts`, `rules-framework.ts`, `rules-security-lang.ts` | Single-pass pattern matching via `buildCompiledRuleIndex()`. Rules pre-compiled and grouped by extension. Supports file type filters, exclude patterns, context-aware suppression (comments, tests, type annotations) |
-| **AST** | `ast-analyzer.ts`, `ast-parser.ts` | Parses source into AST nodes, analyzes control flow, detects structural patterns (empty catch, eval usage, unsafe assignments) |
+| **AST** | `ast-analysis.ts`, `ast-parser.ts` (re-exported by the `ast-analyzer.ts` barrel) | Parses source into AST nodes, analyzes control flow, detects structural patterns (empty catch, eval usage, unsafe assignments) |
 | **Composite** | `rules-composite.ts` | Multi-pattern rules: ALL `requiredPatterns` must appear in the same file, reported at the `sinkPattern` line |
 | **Taint** | `taint-tracker.ts` | Tracks data flow from sources (user input) through the AST to sinks (SQL queries, DOM manipulation), detecting unsanitized paths |
 | **Structural** | `structural-scanner.ts` | Uses the dependency graph to detect circular dependencies, large files (>400 lines), high coupling (15+ importers), and dead modules |
@@ -311,15 +312,16 @@ Documentation is generated using the AI chat system with specialized system prom
 | `setup` | Prerequisites, installation, configuration, running locally |
 | `api-reference` | Exported functions, types, signatures, usage examples |
 | `file-explanation` | Deep dive into a specific file's purpose and logic |
+| `onboarding` | AGENTS.md-style context document for AI coding agents: entry points, configs, core modules, types, tests, shared abstractions |
 | `custom` | User-provided free-form prompt |
 
 ### Generation Flow
 
 1. **User selects preset** — In DocViewer, user picks a doc type and optional target file.
 2. **`useDocsEngine` orchestrates** — The hook manages generation lifecycle: context setup, message sending, completion handling, and doc persistence.
-3. **Context is set** — `setGenContext()` pushes `{ docType, targetFile, customPrompt, maxSteps }` to the provider's ref.
-4. **Transport sends request** — `DocsProvider`'s stable `DefaultChatTransport` reads the current model, API keys, repo context, and structural index from refs at request time, posting to `/api/docs/generate`.
-5. **Server streams response** — The docs API route uses the same `codeTools` and `streamText()` pattern as chat, but with doc-type-specific system prompts.
+3. **Context is set** — `setGenContext()` stores `{ docType, targetFile, customPrompt, maxSteps, activeSkills }` in provider state. An effect pushes it, with the selected model, API keys, repo context, and code index, into the transport controller via `update()`.
+4. **Transport sends request** — `DocsProvider`'s stable `DefaultChatTransport` reads that runtime at request time, builds the structural index, and posts to `/api/docs/generate`.
+5. **Server streams response** — The docs route delegates to `repoLensAgent` via `createAgentUIStreamResponse`, like chat, in docs mode with doc-type-specific system prompts.
 6. **Tool calls execute locally** — Same `onToolCall` → `handleToolCall` → `executeToolLocally` pattern as chat.
 7. **Doc is saved** — When generation completes (status transitions from streaming to ready), `useDocsEngine` creates a `GeneratedDoc` record stored in the `DocsProvider` state.
 
@@ -330,7 +332,7 @@ Documentation is generated using the AI chat system with specialized system prom
 - **DocsStateContext** (rarely changes): `generatedDocs[]`, `activeDocId`, `showNewDoc`
 - **DocsChatContext** (changes during streaming): `messages`, `status`, `error`, `isGenerating`
 
-The `useChat` instance lives in the provider so chat state survives component unmounts. A single stable `DefaultChatTransport` reads dynamic values from refs to avoid recreating the Chat instance.
+The `useChat` instance lives in the provider so chat state survives component unmounts. A single stable `DefaultChatTransport`, created once by `createDocsTransportController()`, reads dynamic values from a runtime that an effect refreshes, to avoid recreating the Chat instance.
 
 ## Diagram Generation
 
@@ -340,15 +342,16 @@ Diagrams are generated from the `FullAnalysis` (dependency graph and topology an
 
 | Type | Generator | Output |
 | ---- | --------- | ------ |
-| `summary` | `generateProjectSummary()` | `ProjectSummary` data object (language breakdown, hubs, consumers, health issues, folder breakdown) |
 | `topology` | `generateTopologyDiagram()` | Mermaid flowchart with nodes colored by topology role (entry, hub, connector, leaf, orphan) |
-| `imports` | `generateImportGraph()` | Mermaid flowchart showing import relationships. Collapses to directory-level for repos with 50+ files |
+| `imports` | `generateImportGraph()` | Mermaid flowchart showing import relationships. Collapses to directory-level for repos with more than 50 files |
 | `classes` | `generateClassDiagram()` | Mermaid class diagram from extracted classes and interfaces |
 | `entrypoints` | `generateEntryPoints()` | Mermaid flowchart showing entry point files and their dependencies |
 | `modules` | `generateModuleUsageTree()` | Mermaid flowchart of module usage patterns |
 | `treemap` | `generateTreemap()` | Hierarchical tree data for visual treemap rendering |
 | `externals` | `generateExternalDeps()` | Mermaid flowchart of external package dependencies |
 | `focus` | `generateFocusDiagram()` | Mermaid flowchart centered on a specific file showing N-hop neighbors |
+
+`generateProjectSummary()` is not a `DiagramType`. It returns a `SummaryDiagramResult` whose `data` is a `ProjectSummary` (language breakdown, hubs, consumers, health issues, folder breakdown), and the diagram viewer, project summary, and export menu call it directly.
 
 ### Generation Pipeline
 
@@ -358,25 +361,25 @@ Diagrams are generated from the `FullAnalysis` (dependency graph and topology an
    - Phase 3: Circular dependency detection via DFS
    - Phase 4: Topology analysis (entry points, hubs, orphans, leaves, connectors, clusters)
    - Phase 5: Framework detection
-2. **Diagram dispatch** — `generateDiagram(type, codeIndex, files, analysis)` routes to the appropriate generator.
+2. **Diagram dispatch** — `generateDiagram(type, codeIndex, files, analysis)` routes each `DiagramType` to the appropriate generator (unknown types fall back to topology).
 3. **Adaptive rendering** — Generators automatically collapse to directory-level representation when file count exceeds thresholds (e.g., 50 for import graphs, 80 for topology).
 
 ## Chat Context Pinning
 
-Users pin files or folders to the AI chat context for targeted analysis. Pinned files are stored in `RepositoryProvider` state as a set of file paths. When sending a message, pinned file contents are fetched from the `CodeIndex` and injected into the system prompt after the file tree.
+Users pin files or folders to the AI chat context for targeted analysis. Pins are stored in `RepositoryProvider` state as a `Map<string, PinnedFile>` keyed by path, where each entry is a file or a directory (directories are expanded when content is assembled). When sending a message, pinned file contents are resolved from the `CodeIndex` and sent as `pinnedContext`, which the agent places in an untrusted context message after the file tree and structural index.
 
 ### Constraints
 
 - Maximum 20 pinned files
 - Maximum 100 KB total pinned content
 - Maximum 50 KB per individual file
-- Limits are configurable via `PINNED_CONTEXT_CONFIG` in the chat system
+- Limits are configurable via `PINNED_CONTEXT_CONFIG` in `config/constants.ts`
 
 ### Pinning Flow
 
 1. **User pins files** — The file tree and code browser expose pin/unpin actions that update `RepositoryProvider.pinnedFiles`.
-2. **Context injection** — On chat submit, `ChatSidebar` reads pinned file paths, resolves their content from the `CodeIndex`, and appends them to the request body.
-3. **System prompt** — The API route inserts pinned file contents into the system prompt between the file tree and the structural index, giving the AI direct access to the pinned code without requiring tool calls.
+2. **Context injection** — `ChatSidebar` resolves pins ahead of time: an effect calls `getPinnedContents()`, which resolves pinned content through the index's `ContentStore`, whenever the pins or the index change. On submit, the latest result is sent as `pinnedContext` in the request body.
+3. **Untrusted context block** — The chat route validates `pinnedContext` and passes it to the agent. `prepare-call.ts` appends it as a `pinned-files` block after the file tree and structural index, inside a prepended untrusted-context user message rather than the system prompt, giving the AI direct access to the pinned code without requiring tool calls.
 
 ## Inline Code Actions
 
@@ -384,10 +387,10 @@ A hover action bar appears on code symbols (functions, classes) in the code brow
 
 ### Action Flow
 
-1. **Symbol detection** — `computeSymbolRanges()` identifies function and class boundaries in the current file using declaration patterns.
+1. **Symbol detection** — `useSymbolExtraction()` finds symbols in the current file. `computeSymbolRanges()` (via `useSymbolRanges()`) then sorts them by line and ends each range at the line before the next symbol, or at the end of the file.
 2. **Action trigger** — Clicking an action (Explain, Refactor, Complexity) sends a `POST` request to `/api/inline-actions` with the symbol text and the selected action type.
 3. **AI streaming** — The API route streams back markdown analysis displayed in a slide-out panel overlaying the code browser.
-4. **Find Usages** — Runs entirely client-side via `CodeIndex.searchFiles()`, displaying results inline without an API call.
+4. **Find Usages** — Runs entirely client-side via `searchIndexAsync(codeIndex, symbolName)` from `lib/code/code-index.ts`, which resolves content through the index's `ContentStore`, displaying results inline without an API call.
 
 ## Dependency Health Dashboard
 
@@ -398,7 +401,7 @@ Assesses npm dependencies on four weighted axes and renders the results in a sor
 | Axis | Weight | Data Source |
 | ---- | ------ | ----------- |
 | Downloads | 20% | npm registry download counts |
-| Maintenance | 30% | Last publish date, open issues ratio |
+| Maintenance | 30% | Last publish date recency; deprecated packages score 0 |
 | Security | 30% | OSV.dev vulnerability database |
 | Freshness | 20% | Semver distance from latest version |
 
@@ -422,15 +425,15 @@ Multi-signal scoring determines how similar two repositories are, detecting pote
 
 | Signal | Weight | Description |
 | ------ | ------ | ----------- |
-| SHA Jaccard | 0.40 | Jaccard similarity of commit SHAs |
+| SHA Jaccard | 0.40 | Jaccard similarity of file blob SHAs (identical file contents) |
 | Path Jaccard | 0.25 | Jaccard similarity of file paths |
 | Dependency Overlap | 0.15 | Overlap of declared dependencies |
-| SHA Containment | 0.10 | Fraction of one repo's SHAs contained in the other |
-| Language Cosine | 0.10 | Cosine similarity of language byte distributions |
+| SHA Containment | 0.10 | Shared blob SHAs divided by the smaller repo's blob-SHA set |
+| Language Cosine | 0.10 | Cosine similarity of per-language file-count distributions |
 
-- Boilerplate paths are filtered out before path comparison.
+- Boilerplate paths are filtered out before path and SHA comparison.
 - Fork relationships are detected and flagged.
-- The overall score is 0–100 with a confidence level (low / medium / high).
+- The overall score is a 0–1 weighted sum (shown as a percentage) with a label (`likely-clone` ≥ 0.8, `highly-similar` ≥ 0.5, `some-overlap` ≥ 0.2, otherwise `different`) and a boolean `isLowConfidence` flag (fewer than 10 non-boilerplate blob SHAs across both repos, or either tree partial).
 - **Files**: `lib/compare/similarity-utils.ts`, `components/features/compare/similarity-section.tsx`.
 
 ## Annotated Repo Tours
@@ -446,7 +449,7 @@ Interactive code tours are stored in IndexedDB. Each tour has ordered stops — 
 ### Tour Lifecycle
 
 1. **CRUD** — `ToursProvider` manages repository-scoped tour state. Create, update, and delete operations persist to IndexedDB via `tour-cache.ts`; private tours are bound to the current credential principal. Credential cleanup removes private and legacy unknown-visibility tours while preserving explicitly public tours.
-2. **Playback** — The provider tracks `activeTour`, `currentStopIndex`, and `isPlaying`. Navigation (next/prev stop) updates the code browser's selected file and scroll position.
+2. **Playback** — The provider tracks `activeTour`, `activeStopIndex`, and `isPlaying`. Navigation (next/prev stop) updates the code browser's selected file and scroll position.
 3. **Local generation** — The Tours tab invokes the local `generateTour` executor directly. A focus path/topic prioritizes deterministic path and symbol matches; it is not sent as an AI prompt.
 4. **Rendering** — The tour player highlights the target line range in the code editor with a `bg-blue-500/10` overlay and displays the stop annotation in a side panel.
 
@@ -466,8 +469,8 @@ Generates changelogs from Git ref ranges using AI with configurable presets.
 ### Changelog Generation Flow
 
 1. **User selects refs** — In `NewChangelogView`, the user picks base and head refs (tags or branches), a preset, and a quality level (Fast / Balanced / Thorough).
-2. **Commit fetching** — Commits between the refs are fetched via `fetchCommitsViaProxy` and `fetchCompareViaProxy` from the GitHub API.
-3. **AI generation** — Commits are sent to `/api/changelog/generate` with a preset-specific system prompt built by `prompt-builder.ts`. The AI streams back a formatted changelog.
+2. **Commit fetching** — Commits between the refs are fetched via `fetchCompareViaProxy` from the GitHub API.
+3. **AI generation** — Commits are sent to `/api/changelog/generate`. `lib/changelog/prompt-builder.ts` builds the user prompt (ref range plus preset prompt); the preset-specific system prompt comes from `lib/ai/agent/prompts/changelog.ts`. The AI streams back a formatted changelog.
 4. **Regeneration** — Stored commit data enables regeneration with a different preset or quality level without re-fetching.
 5. **Provider** — `ChangelogProvider` uses the same split-context pattern as `DocsProvider`: `ChangelogStateContext` (changelog list, active ID) and `ChangelogChatContext` (streaming state).
 
@@ -483,10 +486,10 @@ Line-by-line blame, commit timeline, file-specific history, and commit detail wi
 
 ### View Pipeline
 
-1. **Blame view** — `BlameView` fetches blame data for the currently selected file via the GraphQL proxy. Blame ranges are expanded into per-line annotations by `blame-utils.ts`. Lines are colored with an age-based heatmap (newer = green, older = red).
-2. **Commit timeline** — `CommitTimeline` fetches paginated commit history and groups commits by date using `commit-utils.ts`.
+1. **Blame view** — `GitHistoryPanel` calls `fetchBlame` from the `useGitHistory` hook (`hooks/use-git-history.ts`) to fetch blame data for the currently selected file via the GraphQL proxy, and passes it to the prop-driven `BlameView`. Blame ranges are expanded into per-line annotations by `blame-utils.ts`. Lines are colored with an age-based heatmap (newer = green, older = red).
+2. **Commit timeline** — `useGitHistory` fetches paginated commit history (`fetchCommits`, `loadMoreCommits`) and groups commits by date with `groupCommitsByDate()` from `commit-utils.ts`. `CommitTimeline` renders the groups and load-more callback it receives as props.
 3. **File history** — `FileHistoryList` shows commits that modified a specific file, driven by the `path` query parameter on the commits API.
-4. **Commit detail** — `CommitDetailView` fetches a single commit's metadata and patch. `parsePatch()` in `diff-utils.ts` converts unified diffs into structured hunks with line numbers for rendering.
+4. **Commit detail** — `useGitHistory`'s `fetchCommitDetail` loads a single commit's metadata and patch, which `CommitDetailView` renders. `parsePatch()` in `diff-utils.ts` converts unified diffs into structured hunks with line numbers for rendering.
 5. **File sync** — `AppProvider.selectedFilePath` syncs the currently selected file from the code browser, enabling file-aware blame without explicit user selection.
 
 ### Git Insights
@@ -494,7 +497,7 @@ Line-by-line blame, commit timeline, file-specific history, and commit detail wi
 The Git History panel includes an **Insights** sub-tab providing visual analytics derived from commit history.
 
 - **Coding hours estimation** — `lib/git-history/hours-estimation.ts` implements a session-based algorithm that groups commits into coding sessions and estimates total development hours.
-- **Pulse Cards** — Summary metric cards showing total estimated hours, average session length, longest streak, and most active day (`insights-pulse-cards.tsx`).
+- **Pulse Cards** — Summary metric cards showing total estimated hours, contributor count, active days (highest single-contributor count), and average session length (`insights-pulse-cards.tsx`).
 - **Hours Chart** — Recharts area chart displaying estimated coding hours over time (`insights-hours-chart.tsx`).
 - **Punchcard** — Day-of-week × hour-of-day activity heatmap visualizing when commits occur (`insights-punchcard.tsx`).
 - **Author Chart** — Per-author contribution breakdown chart (`insights-author-chart.tsx`).
@@ -521,6 +524,7 @@ graph TD
     G3["client.ts"]
     G4["zipball.ts"]
     G5["graphql.ts"]
+    G6["indexing-pipeline.ts"]
   end
 
   subgraph LibAI["lib/ai"]
@@ -533,6 +537,9 @@ graph TD
     A7["context-compactor.ts"]
     A8["agent/agent.ts"]
     A9["skills/registry.ts"]
+    A10["agent/prepare-call.ts"]
+    A11["agent/prepare-step.ts"]
+    A12["agent/route-tools.ts"]
   end
 
   subgraph LibCode["lib/code"]
@@ -591,7 +598,7 @@ graph TD
   end
 
   P3 --> G1
-  P3 --> G4
+  P3 --> G6
   P3 --> C1
   P3 --> CA1
   P3 --> C2
@@ -601,24 +608,28 @@ graph TD
   P7 --> CA2
   P8 --> A4
   P8 --> A6
+  P8 --> CL1
+  P8 --> CL2
 
   R1 --> A8
-  R1 --> A6
-  R1 --> A7
+  R1 --> A12
   R2 --> A8
-  R2 --> A6
-  R2 --> A7
-  R5 --> DP2
+  R2 --> A12
+  DP2 --> R5
   R6 --> A6
-  R7 --> A6
-  R7 --> CL2
-  R8 --> G5
+  R7 --> A8
+  R7 --> A12
 
-  A8 --> A1
   A8 --> A8b["agent-tools.ts"]
   A8 --> A6
-  A8 --> A7
-  A8 --> A9
+  A8 --> A10
+  A8 --> A11
+  A10 --> A6
+  A10 --> A1
+  A11 --> A7
+  A11 --> A8b
+  A11 --> A10
+  A12 --> A8b
   A8b --> A1
   A8b --> A9
   A1 --> A2
@@ -636,6 +647,8 @@ graph TD
   D1 --> C2
   D1 --> C1
   G3 --> CA3
+  G1 --> G5
+  G6 --> G4
 
   R3 --> G1
   R8 --> G1
@@ -690,9 +703,9 @@ graph TD
   B --> C["batchIndexMetadataOnly: files with content omitted"]
   C --> D["CodeIndex ready (metadata-only)"]
   D --> E{"Consumer requests content"}
-  E -->|"AI readFile"| F["LazyContentStore.get() → FetchQueue.enqueue(high)"]
-  E -->|"Code browser"| G["LazyContentStore.get() → FetchQueue.enqueue(normal)"]
-  E -->|"Search"| H["searchIndexPartial: search loaded files, report unsearched"]
+  E -->|"AI readFile"| F["getFileContent → LazyContentStore.get() → FetchQueue.enqueue(normal)"]
+  E -->|"Code browser"| G["RepositoryProvider.loadFileContent() → FetchQueue.enqueue(critical), then contentStore.put()"]
+  E -->|"Search"| H["searchInWorker → searchIndexAsync: search resident content, report unsearched paths"]
   E -->|"Scanner"| I["metadataOnly mode: structural rules only"]
   F --> J["Fetched content retained in session memory"]
   G --> J
@@ -739,7 +752,7 @@ Priority-based, concurrency-limited queue for fetching file content from GitHub'
 ### Security
 
 - `buildRawContentUrl()` in `lib/github/parser.ts` URL-encodes path segments to prevent injection.
-- `FetchQueue` rejects paths with path traversal patterns (`..`, absolute paths).
+- `LazyContentStore` only enqueues paths registered from the repository tree, and the `/api/github/file` route schema rejects paths containing `..`. `FetchQueue` itself does no path validation.
 - Abort signal integration prevents orphaned fetches on repo disconnect.
 
 ## Content Stripping (Phase 6)
@@ -772,9 +785,9 @@ The most distinctive pattern in the codebase. AI tool definitions on the server 
 
 Repository data is cached in IndexedDB (`repolens-cache` database, `repos` object store) keyed by `owner/repo`. Cache freshness is determined by tree SHA comparison. LRU eviction keeps at most 5 repos, sorting by last-access timestamp. Complete cache publication finishes under the cross-context mutation lock before the indexing pipeline returns; a cache failure remains non-fatal to the current analysis. Private records require a matching credential principal, and legacy records without explicit visibility fail closed. From the effective IDB threshold to below 250 MB, file content is stored separately in `repolens-content` via `IDBContentStore` to reduce heap memory usage.
 
-### Provider Composition with Ref-Based Stability
+### Provider Composition with a Stable Transport Controller
 
-Providers like `DocsProvider` use `useRef` for frequently-changing values (selected model, API keys, code index) and create a single stable `DefaultChatTransport` in `useMemo(() => ..., [])`. This prevents the AI SDK's `useChat` from being recreated when dynamic values change — a critical pattern since the Chat instance is initialized once and reuses its transport.
+`DocsProvider` and `ChangelogProvider` create a transport controller once with `useState(createDocsTransportController)` / `useState(createChangelogTransportController)`. Its single stable `DefaultChatTransport` reads from a closure runtime that an effect refreshes through `controller.update({ selectedModel, apiKeys, repoContext, codeIndex, genContext })`. This prevents the AI SDK's `useChat` from being recreated when dynamic values change — a critical pattern since the Chat instance is initialized once and reuses its transport.
 
 ### Structural Index
 
@@ -788,19 +801,21 @@ The initial repository context built by `buildStructuralIndexAsync()` favors a c
 
 `analyzeCodebase()` runs a 5-phase pipeline (per-file analysis → dependency graph → circular detection → topology → framework detection) producing a `FullAnalysis` object that powers both diagrams and structural scanning. The analysis is computed once after indexing completes (debounced by 50ms) and stored in `RepositoryProvider`.
 
-### Middleware URL Rewriting
+### Proxy URL Rewriting
 
-The Next.js middleware enables clean URLs (`/owner/repo`) by rewriting to `/?repo=https://github.com/owner/repo`. It uses a reserved-segment set and GitHub-name regex validation to distinguish repo paths from app routes. Security headers (X-Frame-Options, X-Content-Type-Options, etc.) are added to all responses.
+`proxy()` in `proxy.ts` (the Next.js 16 replacement for middleware) enables clean URLs (`/owner/repo`) by rewriting to `/?repo=https://github.com/owner/repo`. It uses a reserved-segment set and GitHub-name regex validation to distinguish repo paths from app routes. Security headers (X-Frame-Options, X-Content-Type-Options, etc.) are added to every response the proxy matcher covers; the matcher excludes `/api`, `_next/static`, `_next/image`, `favicon.ico`, and `public/`. CSP is set separately for all paths in `next.config.mjs`.
 
 ## Extension Points
 
 ### Adding a New AI Tool
 
 1. **Define the schema** in `lib/ai/tool-schemas.ts` using Zod.
-2. **Add the tool definition** in `lib/ai/tool-definitions.ts` using `tool()` with a description and `inputSchema` (no `execute`).
-3. **Implement the executor** in `lib/ai/client-tool-executor.ts` — add a case to the `switch (toolName)` in `executeToolLocally()`.
-4. **Register in `agent-tools.ts`** — Add the tool to the `agentTools` object in `lib/ai/agent/agent-tools.ts`. This makes it available to the `repoLensAgent` and adds its name to the `AgentToolName` union.
-5. If the tool is skill-gated, add it to `SKILL_TOOLS` in `lib/ai/agent/prepare-step.ts`; otherwise add it to `CORE_TOOLS`.
+2. **Add the tool definition** to the `codeTools` object in `lib/ai/tool-definitions.ts` using `tool()` with a description and `inputSchema` (no `execute`).
+3. **Implement the executor** in `lib/ai/client-tool-executor.ts` — add a case to the `switch (toolName)` in `executeToolLocally()` that validates input with the schema. Tools that call the network instead of reading the `CodeIndex` (like `getGitHistory`) are handled in `handleToolCall()` in `lib/ai/tool-call-handler.ts` before `executeToolLocally()` runs.
+4. **No change in `agent-tools.ts`** — `agentTools` in `lib/ai/agent/agent-tools.ts` spreads `codeTools`, so the tool is registered on `repoLensAgent` and added to the `AgentToolName` union automatically.
+5. **Activate it** in `lib/ai/agent/prepare-step.ts` — add the name to `CORE_TOOLS` for an always-available tool, or to the `SKILL_TOOLS` entry of the skill ID that unlocks it. A tool in neither list is never offered to the model.
+6. **Describe it in the prompts** — add it to the hand-written tool list under "Your Capabilities" in `lib/ai/agent/prompts/chat.ts` (the tool count there is computed from `codeTools`, the list is not), and to the tool lists in `prompts/docs.ts` and `prompts/changelog.ts` if those modes should use it.
+7. **Update the tests** — raise the tool counts in `lib/ai/__tests__/client-tool-executor.test.ts` (`codeTools`) and `lib/ai/agent/__tests__/agent-integration.test.ts` (all agent tools). If you added it to `CORE_TOOLS`, also update the `CORE_TOOLS` copy in `lib/ai/agent/__tests__/prepare-step.test.ts`.
 
 ### Adding a New Scanner Rule
 
@@ -808,7 +823,7 @@ The Next.js middleware enables clean URLs (`/owner/repo`) by rewriting to `/?rep
 
 **Composite rule**: Add to `COMPOSITE_RULES` in `rules-composite.ts` with `requiredPatterns[]` (all must match in the same file) and `sinkPattern` (line to report on).
 
-**AST rule**: Extend `analyzeAST()` in `ast-analyzer.ts` to detect new patterns in the parsed syntax tree.
+**AST rule**: Extend `analyzeAST()` in `lib/code/scanner/ast-analysis.ts` — add a visitor to its Babel `traverse()` call and push issues built with `createASTIssue()`. `ast-analyzer.ts` only re-exports it; `runAstAnalysis()` in `scanner.ts` calls it for files whose language is in `AST_LANGUAGES`.
 
 **Structural rule**: Add detection logic to `scanStructuralIssues()` in `structural-scanner.ts` using the dependency graph and topology data.
 
@@ -827,9 +842,11 @@ The Next.js middleware enables clean URLs (`/owner/repo`) by rewriting to `/?rep
 
 ### Adding a New Doc Type
 
-1. **Add the type** to the `DocType` union in `providers/docs-provider.tsx`.
-2. **Add a preset** to `DOC_PRESETS` with label, description, and default prompt.
-3. **Add a system prompt** in `lib/ai/agent/prompts/docs.ts` for the new doc type.
+1. **Add the type** to the `DocType` union in `lib/docs/preset-config.ts` (`providers/docs-provider.tsx` only re-exports it).
+2. **Add a preset** to `DOC_PRESETS` in the same file (`id`, `label`, `description`, `icon: null`, `prompt`), and an icon to `DOC_PRESET_ICONS` in `components/features/docs/doc-viewer.tsx`. The preset then appears in the DocViewer picker.
+3. **Add a system prompt** — add the member to the separate `DocType` union in `lib/ai/agent/prompts/docs.ts` and an entry to its `DOC_BASE_PROMPTS`.
+4. **Allow it in request validation** — extend the `docType` `z.enum` in `app/api/docs/generate/route.ts` and in `docsOptionsSchema` in `lib/ai/agent/options.ts`.
+5. **Update the tests** — change the preset count and the expected type list in `lib/docs/__tests__/preset-config.test.ts`, and add the type to `DOC_TYPES` in `lib/ai/agent/__tests__/docs-prompt.test.ts` so its prompt is covered.
 
 ### Adding a New Preview Tab
 
@@ -843,16 +860,18 @@ The Next.js middleware enables clean URLs (`/owner/repo`) by rewriting to `/?rep
 
 ### Adding a New Changelog Preset
 
-1. **Add the preset key** to the `ChangelogPreset` union in `lib/changelog/types.ts`.
-2. **Define the preset config** in `PRESET_CONFIGS` in `lib/changelog/preset-config.ts` (label, description, system prompt template).
-3. **Template interpolation** — The prompt template supports `{{commits}}` and `{{dateRange}}` placeholders via `lib/changelog/prompt-builder.ts`.
-4. The preset appears automatically in the `NewChangelogView` component selector.
+1. **Add the preset key** to the `ChangelogType` union in `lib/changelog/types.ts`.
+2. **Define the preset** — add an entry `{ id, label, description, icon: null, prompt }` to `CHANGELOG_PRESETS` in `lib/changelog/preset-config.ts`, and an icon to `CHANGELOG_PRESET_ICONS` in `components/features/changelog/changelog-helpers.tsx`.
+3. **Add a system prompt** to `CHANGELOG_BASE_PROMPTS` in `lib/ai/agent/prompts/changelog.ts`.
+4. **Allow it in request validation** — extend the `changelogType` `z.enum` in `app/api/changelog/generate/route.ts` and in `changelogOptionsSchema` in `lib/ai/agent/options.ts`.
+5. **No template placeholders** — `buildChangelogPrompt()` in `lib/changelog/prompt-builder.ts` prefixes the preset's `prompt` with the ref range; commit data is sent separately as `commitData`. The preset appears automatically in the `NewChangelogView` component selector.
+6. **Update the tests** — change the preset count and the preset id list in `lib/changelog/__tests__/preset-config.test.ts`.
 
 ## Skills System
 
 The skills system provides specialized analysis methodologies that the AI can load on-demand. See the `lib/ai/skills/` module for implementation details.
 
-- **16 skill definitions** stored as `.md` files with YAML frontmatter in `lib/ai/skills/definitions/`.
+- **17 skill definitions** stored as `.md` files with YAML frontmatter in `lib/ai/skills/definitions/`.
 - **SkillRegistry** lazily loads and caches skill definitions, validates frontmatter via Zod, and enforces filename-to-ID consistency.
 - **Server-executed tools** (`discoverSkills`, `loadSkill`) allow the AI to discover and load skills at runtime.
 - **UI**: `SkillSelector` component lets users pre-select skills before chatting.
@@ -871,7 +890,7 @@ The AI agent is a `ToolLoopAgent` from the Vercel AI SDK that orchestrates all A
 | `AgentTools` | `typeof agentTools` | Full tools object type for generic type parameters |
 | `AgentToolName` | `keyof AgentTools` | String union of all tool names — used to type `CORE_TOOLS` and `SKILL_TOOLS` in `prepare-step.ts` |
 
-This module was extracted to break a circular import between `agent.ts` (which defines the agent) and `prepare-step.ts` (which references tool names for skill-gating). Both now import tool types from `agent-tools.ts` without depending on each other.
+This module was extracted to break a circular import between `agent.ts` (which defines the agent) and `prepare-step.ts` (which references tool names for skill-gating). Both now get tool names and types from `agent-tools.ts`: from that module `prepare-step.ts` imports only the `AgentToolName` type, and it does not import `agent.ts`, while `agent.ts` imports `agentTools` and `buildPrepareStep()`, so the dependency runs one way (`agent.ts` → `prepare-step.ts`).
 
 ### Tool Gating via Skills
 
@@ -892,12 +911,15 @@ All AI API routes apply rate limiting via `lib/api/rate-limit.ts` using `applyRa
 
 ## API Proxy Caching
 
-GitHub API proxy routes set `Cache-Control` headers to reduce redundant upstream requests:
+GitHub API proxy routes wrapped in `withGitHubCachePolicy()` (`lib/api/github-cache.ts`) set browser `Cache-Control` to `public, max-age=0, must-revalidate`, or to `private, no-store, max-age=0` with `CDN-Cache-Control: no-store` when a GitHub token is present. To reduce redundant upstream requests, unauthenticated responses from the routes below also get a CDN `s-maxage`:
 
-| Route | `max-age` |
+| Route | `CDN-Cache-Control` `s-maxage` (unauthenticated) |
 | ----- | --------- |
 | Repo metadata | 300 s |
 | Tree | 600 s |
 | Tags | 600 s |
 | Branches | 300 s |
+| Refs | 300 s |
 | Commits | 300 s |
+| Languages | 600 s |
+| Pull requests (list, detail, comments, files) | 60 s |

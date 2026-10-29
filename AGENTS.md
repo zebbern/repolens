@@ -41,6 +41,7 @@ workproject/                    # Next.js application root
 │   ├── not-found.tsx           # 404 page
 │   ├── loading.tsx             # Global loading fallback
 │   ├── globals.css             # CSS variables, Tailwind base, theme tokens
+│   ├── [owner]/[repo]/page.tsx # Re-exports the home page
 │   ├── compare/                # Repository comparison page
 │   └── api/                    # API route handlers
 │       ├── auth/               # NextAuth routes (GitHub OAuth)
@@ -49,7 +50,7 @@ workproject/                    # Next.js application root
 │       ├── deps/               # Dependency health endpoint
 │       │   └── cve/            # CVE proxy for OSV API
 │       ├── docs/               # AI documentation generation endpoint
-│       ├── github/             # GitHub API proxy routes (blame, commits, tags, branches, compare, zipball)
+│       ├── github/             # GitHub API proxy routes (repo, tree, file, blame, commits, commit/[sha], tags, branches, compare, languages, pulls, rate-limit, validate-token, zipball)
 │       │   └── refs/           # Combined tags+branches endpoint
 │       ├── inline-actions/     # Inline code action AI endpoint
 │       ├── issues/             # Issues-related API routes
@@ -58,7 +59,10 @@ workproject/                    # Next.js application root
 ├── components/
 │   ├── layout/                 # App shell — header, resizable split layout
 │   ├── ui/                     # shadcn/ui primitives (button, dialog, card, etc.)
-│   ├── theme-provider.tsx      # Dark/light theme toggle
+│   │   └── sonner.tsx          # Toaster wrapper (mounted in root layout; call toast() from sonner)
+│   ├── icons/                  # Custom icons (GitHub mark; lucide-react 1.x has no brand icons)
+│   ├── theme-toggle.tsx        # Theme switcher dropdown (rendered in header)
+│   ├── theme-provider.tsx      # Unused next-themes wrapper (providers/index.tsx uses next-themes directly)
 │   └── features/               # Feature-specific components
 │       ├── auth/               # Login button, user menu
 │       ├── changelog/          # AI changelog generator
@@ -67,6 +71,7 @@ workproject/                    # Next.js application root
 │       │   └── changelog-helpers.tsx # Shared sub-components
 │       ├── chat/               # Chat sidebar, message display, input, model selector
 │       ├── code/               # Code browser, file tree, syntax viewer
+│       ├── command-palette/    # Global command palette (mounted in providers/index.tsx)
 │       ├── compare/            # Side-by-side repo comparison UI
 │       │   └── similarity-section.tsx # Similarity/clone detection UI section
 │       ├── deps/               # Dependency health dashboard
@@ -95,9 +100,11 @@ workproject/                    # Next.js application root
 │       ├── issues/             # Issue scanner results display
 │       ├── landing/            # Landing page hero/CTA
 │       ├── loading/            # Loading skeletons and progress indicators
+│       ├── pr-review/          # Pull request review panel (PR selector, file navigator, diff viewer)
 │       ├── preview/            # Main preview panel (tab-based content area)
 │       ├── repo/               # Repository info display
-│       └── settings/           # Settings modal (API keys, preferences)
+│       ├── settings/           # Settings modal (API keys, preferences)
+│       └── tours/              # Code tour list, generation dialog, playback
 ├── providers/                  # React Context providers
 │   ├── index.tsx               # Composed provider tree (see ARCHITECTURE)
 │   ├── api-keys-provider.tsx   # API key storage/validation (localStorage)
@@ -105,8 +112,9 @@ workproject/                    # Next.js application root
 │   ├── tours-provider.tsx      # Tour CRUD and playback state
 │   ├── docs-provider.tsx       # Documentation generation state
 │   ├── changelog-provider.tsx  # Changelog generation state (split contexts)
-│   ├── app-provider.tsx        # Global app state (active tab, selected file, etc.)
+│   ├── app-provider.tsx        # Global UI state (selected file, preview URL, sidebar width, chat collapse/focus)
 │   ├── comparison-provider.tsx # Comparison feature state
+│   ├── pr-review-provider.tsx  # PR review state (mounted in preview-panel.tsx)
 │   └── github-token-provider.tsx # GitHub token management for authenticated API access
 ├── lib/                        # Core business logic (non-UI)
 │   ├── utils.ts                # cn() helper (clsx + tailwind-merge)
@@ -118,15 +126,19 @@ workproject/                    # Next.js application root
 │   │   ├── tool-call-handler.ts # Bridges useChat tool calls to executeToolLocally
 │   │   ├── structural-index.ts # Structural summary builder for AI context
 │   │   ├── context-compactor.ts # Context window management
+│   │   ├── token-cost.ts       # Approximate per-model token pricing
 │   │   ├── tour-schemas.ts     # Zod schemas for tour creation tool
 │   │   ├── agent/              # ToolLoopAgent AI system
 │   │   │   ├── agent.ts        # ToolLoopAgent singleton with all tools
+│   │   │   ├── agent-tools.ts  # agentTools (codeTools + discoverSkills/loadSkill) and AgentToolName
+│   │   │   ├── route-tools.ts  # AGENT_ROUTE_TOOLS for validating replayed UI tool parts
+│   │   │   ├── prompt-context.ts # Untrusted repository/commit context messages
 │   │   │   ├── options.ts      # callOptionsSchema (discriminated union for chat/docs/changelog)
 │   │   │   ├── prepare-call.ts # Mode-based model, prompt, and stop conditions
 │   │   │   ├── prepare-step.ts # Per-step pruneMessages + progressive tool disclosure
 │   │   │   ├── middleware.ts   # Logging middleware wrapper
 │   │   │   └── prompts/        # Composable system prompt builders
-│   │   │       ├── shared.ts   # Shared prompt sections (role, guidelines, skill discovery)
+│   │   │       ├── shared.ts   # Shared sections (Mermaid rules, self-verification, untrusted-data policy, structural-index guidance, skill discovery)
 │   │   │       ├── chat.ts     # Chat mode system prompt
 │   │   │       ├── docs.ts     # Documentation mode system prompt
 │   │   │       └── changelog.ts# Changelog mode system prompt
@@ -135,15 +147,23 @@ workproject/                    # Next.js application root
 │   │       ├── registry.ts     # SkillRegistry with lazy loading and freshness metadata
 │   │       ├── skill-tools.ts  # discoverSkills and loadSkill server-executed tools
 │   │       ├── index.ts        # Barrel exports
-│   │       └── definitions/    # 16 skill definition .md files with YAML frontmatter
+│   │       └── definitions/    # Skill definition .md files with YAML frontmatter
+│   ├── api/                    # API utilities
+│   │   ├── ai-request.ts       # Bounded AI request body reading + UI message validation
+│   │   ├── error.ts            # Standardized API error responses
+│   │   ├── github-cache.ts     # Cache headers for GitHub proxy responses
+│   │   ├── json-body.ts        # Bounded JSON body helpers
+│   │   └── rate-limit.ts       # Rate limiting for API routes
+│   ├── api-keys/               # Provider/model constants, key storage, model fetching
 │   ├── auth/                   # NextAuth config (GitHub OAuth provider)
 │   ├── cache/                  # Caching infrastructure
 │   │   ├── repo-cache.ts       # IndexedDB repo caching (v2, includes tours store)
 │   │   ├── tour-cache.ts       # IndexedDB tour CRUD operations
+│   │   ├── cache-mutation-lock.ts # Cache mutation lock (Web Locks, local mutex fallback)
 │   │   └── memory-cache.ts     # In-memory FIFO cache with TTL and SWR
 │   ├── changelog/              # Changelog generation
 │   │   ├── types.ts            # Changelog types and presets
-│   │   ├── preset-config.ts    # 4 changelog presets
+│   │   ├── preset-config.ts    # CHANGELOG_PRESETS
 │   │   ├── prompt-builder.ts   # AI prompt construction
 │   │   └── index.ts            # Barrel exports
 │   ├── code/                   # Code analysis engine
@@ -151,17 +171,31 @@ workproject/                    # Next.js application root
 │   │   ├── content-store.ts    # ContentStore abstraction (InMemory + IDB + Lazy)
 │   │   ├── fetch-queue.ts      # Priority-based fetch queue for lazy content loading
 │   │   ├── import-parser.ts    # Dependency graph analysis
-│   │   ├── issue-scanner.ts    # Issue scanning orchestrator
+│   │   ├── issue-scanner.ts    # Tree-shakable re-export facade for scanner/ (orchestration is in scanner/scanner.ts)
+│   │   ├── search.worker.ts    # Content search Web Worker
+│   │   ├── search-worker-client.ts # searchInWorker() client for the search worker
+│   │   ├── search-path-filter.ts # Include-path rules evaluated in the search worker
+│   │   ├── fuzzy-match.ts      # Fuzzy file path matching
+│   │   ├── rename-files.ts     # Session-local file rename helpers
+│   │   ├── cve-proxy-client.ts # OSV lookups via the same-origin CVE proxy route
+│   │   ├── language-colors.ts  # Extension → language color map
+│   │   ├── open-indexed-db.ts  # Cancellable IndexedDB open helper
 │   │   ├── parser/             # Language-specific AST parsers
-│   │   └── scanner/            # Security/quality scanner (268+ rules)
-│   │       ├── scanner.ts            # Main scanner entry
+│   │   └── scanner/            # Security/quality scanner (regex, composite, and tree-sitter rules)
+│   │       ├── scanner.ts            # Main scanner entry (assembles RULES, orchestrates scans)
+│   │       ├── scanner.worker.ts     # Web Worker entry for async scans
+│   │       ├── scanner-client.ts     # Dispatches scans to the worker (in-thread fallback)
+│   │       ├── serialization.ts      # Worker-boundary serialization helpers
 │   │       ├── rules-security.ts     # Security vulnerability rules
 │   │       ├── rules-security-lang.ts # Language-specific security rules
 │   │       ├── rules-quality.ts      # Code quality rules
 │   │       ├── rules-framework.ts    # Framework-specific rules
-│   │       ├── rules-composite.ts    # Multi-file composite rules
+│   │       ├── rules-composite.ts    # File-level composite rules (co-occurring patterns)
+│   │       ├── rules-tree-sitter.ts  # Tree-sitter query rules (non-JS/TS languages)
+│   │       ├── tree-sitter-scanner.ts # Runs tree-sitter query rules
 │   │       ├── ast-analyzer.ts       # AST-based analysis
 │   │       ├── ast-parser.ts         # AST parsing and caching
+│   │       ├── ast-analysis.ts       # Babel traversal issue detection
 │   │       ├── taint-tracker.ts      # Taint tracking for data flow
 │   │       ├── cve-lookup.ts         # CVE database matching
 │   │       ├── compliance-matrix.ts  # OWASP/CWE compliance mapping
@@ -176,14 +210,17 @@ workproject/                    # Next.js application root
 │   │       ├── types.ts              # Scanner type definitions
 │   │       └── index.ts              # Barrel exports
 │   ├── compare/                # Repository comparison logic
+│   │   ├── dependency-utils.ts # Shared/unique dependency comparison across repos
 │   │   └── similarity-utils.ts # Multi-signal repo similarity/clone detection scoring
 │   ├── deps/                   # Dependency health scoring
 │   │   ├── types.ts            # Dependency health types
+│   │   ├── constants.ts        # Dependency API batch/rate limits
 │   │   ├── health-scorer.ts    # Health scoring algorithm
 │   │   ├── version-checker.ts  # Semver version comparison
 │   │   ├── npm-client.ts       # npm registry API client
 │   │   └── index.ts            # Barrel exports
 │   ├── diagrams/               # Mermaid diagram generation
+│   ├── docs/                   # Documentation presets (DOC_PRESETS) and prompt builder
 │   ├── export/                 # Export formats (markdown, JSON, clipboard, URL)
 │   ├── git-history/            # Git history processing
 │   │   ├── types.ts            # Internal blame/commit types
@@ -196,25 +233,31 @@ workproject/                    # Next.js application root
 │   │   ├── client.ts           # Authenticated GitHub API wrapper + cached proxy functions
 │   │   ├── fetcher.ts          # Repo metadata, tree, file, blame, commit detail fetching
 │   │   ├── graphql.ts          # GitHub GraphQL API utility
+│   │   ├── indexing-pipeline.ts # Zipball download → CodeIndex build, per-file fetch fallback, caching
+│   │   ├── tree-resolver.ts    # resolveRepoTree(): bounded repo tree resolution
+│   │   ├── request-signal.ts   # fetchGitHub() with caller cancellation and timeout
+│   │   ├── fetch-utils.ts      # Concurrency-limited parallel task executor
 │   │   ├── validation.ts       # Shared GITHUB_NAME_RE constant
 │   │   ├── parser.ts           # GitHub URL parsing
-│   │   └── zipball.ts          # Streaming zipball extraction (fflate Unzip API) + legacy buffered fallback
-│   └── parsers/                # Language parsers (TypeScript AST)
-├── lib/api/                    # API utilities
-│   ├── error.ts                # Standardized API error responses
-│   └── rate-limit.ts           # Rate limiting for API routes
+│   │   ├── index.ts            # Barrel exports
+│   │   └── zipball.ts          # Streaming zipball extraction (fflate Unzip API) + indexability helpers (isFileIndexable, isProbablyBinaryContent, MAX_FILE_SIZE)
+│   ├── github-token/           # GitHub token localStorage helpers
+│   ├── repository/             # Repository state types, indexing progress, coverage helpers
+│   ├── stubs/                  # Empty browser stubs for Node built-ins (turbopack resolveAlias)
+│   ├── lazy-recharts.ts        # Lazy Recharts loader
+│   └── parsers/                # tree-sitter.ts (web-tree-sitter AST, main thread + worker); typescript-parser.ts (regex-based, currently unused)
 ├── hooks/                      # Custom React hooks
 │   ├── use-changelog-engine.ts # Changelog generation lifecycle
 │   ├── use-docs-engine.ts      # Documentation generation hook
 │   ├── use-git-history.ts      # Git history state management
 │   ├── use-mobile.ts           # Mobile breakpoint detection
 │   ├── use-skills.ts           # Skills discovery and caching hook
-│   ├── use-batch-operations.ts # Batch operation utilities
-│   └── use-toast.ts            # Toast notification hook
+│   └── use-batch-operations.ts # Batch operation utilities
 ├── types/                      # Shared TypeScript type definitions
 │   ├── types.ts                # Core app types (AI providers, API keys, etc.)
 │   ├── repository.ts           # Repository-related types (FileNode, GitHubRepo)
-│   ├── comparison.ts           # Comparison feature types (includes SimilarityResult, SimilaritySignal, clone detection signals, treeItems)
+│   ├── comparison.ts           # Comparison feature types (includes SimilarityResult, SimilaritySignals, SimilarityLabel, treeItems)
+│   ├── pr-review.ts            # Pull request metadata, file, and comment types
 │   ├── tours.ts                # Tour and stop types
 │   └── git-history.ts          # Blame and commit detail types
 ├── config/
@@ -222,6 +265,7 @@ workproject/                    # Next.js application root
 ├── test/
 │   └── setup.ts                # Vitest global setup
 ├── e2e/
+│   ├── fixtures/               # Mocked GitHub repository routes for deterministic tests
 │   ├── trustworthy-analysis.spec.ts # Deterministic desktop and mobile flows
 │   └── live.spec.ts            # Opt-in live GitHub flows
 ├── proxy.ts                    # URL rewriting (owner/repo → /?repo=...) + security headers
@@ -242,8 +286,9 @@ workproject/                    # Next.js application root
 
 ### Naming
 
-- **Components**: PascalCase files and exports (`ChatSidebar`, `PreviewPanel`).
-- **Utilities/lib**: camelCase files and functions (`code-index.ts → createEmptyIndex()`).
+- **Files**: kebab-case everywhere (`chat-sidebar.tsx`, `code-index.ts`).
+- **Components**: PascalCase exports (`ChatSidebar`, `PreviewPanel`).
+- **Utilities/lib**: camelCase function exports (`code-index.ts → createEmptyIndex()`).
 - **Types**: PascalCase interfaces and types (`FileNode`, `GitHubRepo`, `CodeIndex`).
 - **Constants**: UPPER_SNAKE_CASE (`SIDEBAR_CONFIG`, `DB_NAME`, `MAX_REPOS`).
 - **CSS variables**: kebab-case with semantic names (`--text-primary`, `--interactive-hover`).
@@ -264,7 +309,7 @@ workproject/                    # Next.js application root
 ### Styling
 
 - Tailwind utility classes with the `cn()` helper for conditional merging.
-- Semantic color tokens defined as CSS custom properties in `globals.css`, consumed via `hsl(var(--token-name))` in Tailwind config.
+- Semantic color tokens defined as CSS custom properties in `app/globals.css` and mapped to Tailwind colors as `--color-<name>: hsl(var(--<name>))` in its Tailwind v4 `@theme` block (there is no `tailwind.config` file).
 - Dark mode via `class` strategy (controlled by `next-themes`).
 - No CSS modules or styled-components.
 
@@ -279,16 +324,16 @@ AI tools (file reading, search, symbol lookup, issue scanning, diagram generatio
 AI routes (chat, docs, changelog) use a single `ToolLoopAgent` instance from `lib/ai/agent/agent.ts`. The agent handles:
 - **Mode dispatch** via `prepareCall`: Selects model, system prompt, and stop conditions based on the `callOptionsSchema` discriminated union (chat/docs/changelog modes).
 - **Per-step processing** via `prepareStep`: Applies `pruneMessages` for context window management and progressive tool disclosure (skills tools unlocked only after `loadSkill` results detected).
-- **Composable prompts**: System prompts are built from reusable sections in `lib/ai/agent/prompts/` (shared role/guidelines + mode-specific instructions).
+- **Composable prompts**: System prompts are built in `lib/ai/agent/prompts/` from shared sections in `shared.ts` (Mermaid rules, self-verification, untrusted-data policy, structural-index guidance, skill discovery) plus a role and instructions defined per mode, doc type, or changelog preset in `chat.ts`, `docs.ts`, and `changelog.ts`.
 - **Tool repair**: Stateless `experimental_repairToolCall` for malformed tool invocations.
 - **Logging middleware**: Wraps the model with logging via `wrapLanguageModel`.
 
-Routes use `createAgentUIStreamResponse` to stream agent responses, reducing each route handler to ~20 lines.
+Routes use `createAgentUIStreamResponse` to stream agent responses; handlers mainly validate the request body and UI messages, apply rate limiting, and delegate to `repoLensAgent`.
 
 ### Skills System
 
 The skills system provides specialized analysis methodologies that the AI can load on-demand:
-- **16 skill definitions** stored as markdown files with YAML frontmatter in `lib/ai/skills/definitions/`.
+- **Skill definitions** stored as markdown files with YAML frontmatter in `lib/ai/skills/definitions/` (the full ID list is `KNOWN_SKILL_IDS` in `lib/ai/skills/__tests__/registry.test.ts`).
 - **SkillRegistry**: Lazy-loads and caches skill definitions. Validates frontmatter via Zod schema. Enforces filename-to-ID consistency.
 - **Server-executed tools**: `discoverSkills` lists available skills; `loadSkill` returns full instructions wrapped in `<skill-instructions>` provenance tags.
 - **Freshness metadata**: Each skill has `lastReviewed` date, `reviewCycleDays`, and optional `standardsReferenced` with pinned versions. `loadSkill` injects temporal context (current date, review date, staleness warning).
@@ -318,7 +363,7 @@ Each provider has a clear dependency chain. `RepositoryProvider` depends on no A
 
 ### Streaming Zipball Extraction
 
-The zipball pipeline uses streaming extraction to reduce peak memory. The server route (`app/api/github/zipball/route.ts`) streams the GitHub zipball response body directly to the client without buffering. On the client, `streamUnzipFiles()` in `lib/github/zipball.ts` uses fflate's streaming `Unzip` + `UnzipInflate` API to extract files as chunks arrive, and `indexing-pipeline.ts` indexes files during streaming. This reduces peak memory from ~3–4× zip size to ~1×. Protection mechanisms include `MAX_FILE_SIZE` (500 KB), `MAX_TOTAL_EXTRACTED_SIZE` (200 MB), path traversal rejection, a 120-second fetch timeout, and `AbortSignal` support. On failure, the pipeline falls back to per-file fetching.
+The zipball pipeline uses streaming extraction to reduce peak memory. The server route (`app/api/github/zipball/route.ts`) streams the GitHub zipball response body directly to the client without buffering. On the client, `streamUnzipFiles()` in `lib/github/zipball.ts` uses fflate's streaming `Unzip` + `UnzipInflate` API to extract files as chunks arrive and hands each one to a callback in `indexing-pipeline.ts` that collects it; once extraction completes, the pipeline builds the `CodeIndex` with `batchIndexFiles()`. This reduces peak memory from ~3–4× zip size to ~1×. Protection mechanisms include `MAX_FILE_SIZE` (500 KB), `MAX_TOTAL_EXTRACTED_SIZE` (200 MB), path traversal rejection, a 120-second fetch timeout, and `AbortSignal` support. On failure, the pipeline falls back to per-file fetching.
 
 ### URL Rewriting
 
@@ -326,7 +371,7 @@ Proxy (`proxy.ts`) rewrites `/:owner/:repo` paths to `/?repo=https://github.com/
 
 ### Security Headers
 
-Security headers (`X-Frame-Options`, `X-Content-Type-Options`, `Referrer-Policy`) are applied in the proxy. CSP is configured in `next.config.mjs` with `unsafe-inline`/`unsafe-eval` required for Mermaid rendering and Shiki WASM.
+Security headers (`X-Frame-Options`, `X-Content-Type-Options`, `Referrer-Policy`) are applied in the proxy. CSP is configured in `next.config.mjs`: `script-src` allows `unsafe-inline` (Next.js inline scripts), `unsafe-eval` (Mermaid), and `wasm-unsafe-eval` (Shiki's Oniguruma WASM engine); `style-src` allows `unsafe-inline` (Mermaid style injection).
 
 ### ContentStore (Tiered Content Storage)
 
@@ -336,11 +381,11 @@ Three-tier content storage routes repos by size: below the effective IDB thresho
 
 ### Scanner Architecture
 
-The issue scanner uses 268+ rules across four rule sets (security, quality, framework, composite). It supports AST-based analysis via Babel, taint tracking for data flow vulnerabilities, CVE lookup, and maps findings to OWASP Top 10 and CWE Top 25 standards.
+The issue scanner combines regex rule sets (security, language-specific security, quality = bad-practice + reliability, framework), file-level composite rules, and tree-sitter query rules (`rules-tree-sitter.ts`, run by `tree-sitter-scanner.ts` for non-JS/TS languages). It supports AST-based analysis via Babel for JS/TS, taint tracking for data flow vulnerabilities, CVE lookup, and maps findings to OWASP Top 10 and CWE Top 25 standards.
 
 ### Provider Split Contexts
 
-`ToursProvider`, `DocsProvider`, and `ChangelogProvider` use split contexts to minimize re-renders. State that changes infrequently (list of items, active ID) lives in one context; rapidly-changing streaming state (messages, status) lives in a second context. Components subscribe only to the context they need.
+`DocsProvider` and `ChangelogProvider` use split contexts to minimize re-renders. State that changes infrequently (list of items, active ID) lives in a State context; rapidly-changing streaming state (messages, status) lives in a Chat context. `RepositoryProvider` (Data/Actions/Progress) and `PRReviewProvider` (State/Actions) also split their contexts; `ToursProvider` uses a single context. Components subscribe only to the context they need.
 
 ### GraphQL Blame
 
@@ -348,7 +393,7 @@ The GitHub REST API does not support blame. `lib/github/graphql.ts` provides a l
 
 ### In-Memory SWR Cache
 
-`lib/cache/memory-cache.ts` provides a FIFO cache with configurable TTL and stale-while-revalidate semantics. GitHub API proxy functions in `lib/github/client.ts` use it to cache responses, serving stale data immediately while revalidating in the background. Max 500 entries with 5-minute TTL and 1-minute SWR window by default.
+`lib/cache/memory-cache.ts` provides a FIFO cache with configurable TTL and stale-while-revalidate semantics. GitHub API proxy functions in `lib/github/client.ts` use it to cache responses, serving stale data immediately while revalidating in the background. Max 500 entries (FIFO eviction). There is no default TTL: every `setCache()` call passes one (the `CACHE_TTL_*` constants in `lib/github/client.ts`, 30 seconds to 10 minutes; `lib/deps/npm-client.ts` uses its own 10-minute `CACHE_TTL_MS`). There is no fixed SWR window: `cachedProxyFetch()` and the blame fetch serve a stale entry of any age while revalidating.
 
 ## BUILD_AND_TEST
 
@@ -389,15 +434,17 @@ The GitHub REST API does not support blame. `lib/github/graphql.ts` provides a l
 ### Adding a New AI Tool
 
 1. Define the Zod input schema in `lib/ai/tool-schemas.ts`.
-2. Add the tool declaration (no `execute`) in `lib/ai/tool-definitions.ts`.
-3. Implement local execution in `lib/ai/client-tool-executor.ts`.
-4. The tool is automatically available via the `repoLensAgent` ToolLoopAgent (imported in `lib/ai/agent/agent.ts`). Chat, docs, and changelog routes all use the same agent instance.
+2. Add the tool declaration (`tool({ description, inputSchema })`, no `execute`) to the `codeTools` object in `lib/ai/tool-definitions.ts`. `lib/ai/agent/agent-tools.ts` spreads `codeTools` into `agentTools`, which registers it on `repoLensAgent` and in `AGENT_ROUTE_TOOLS` for the chat, docs, and changelog routes.
+3. Implement local execution as a `case` in the `executeToolLocally` switch in `lib/ai/client-tool-executor.ts` (validate input with the step 1 schema). `lib/ai/tool-call-handler.ts` routes client tool calls there.
+4. Add the tool name to `CORE_TOOLS` (always offered) or to a skill's entry in `SKILL_TOOLS` (offered after that skill is loaded) in `lib/ai/agent/prepare-step.ts`. `prepareStep` sets `activeTools` on every step, so a tool listed in neither is registered but never offered to the model.
+5. Describe the tool in the hand-written tool list under "Your Capabilities" in `lib/ai/agent/prompts/chat.ts` (the count there comes from `codeTools`, the list does not), and in the tool lists in `prompts/docs.ts` and `prompts/changelog.ts` if those modes should use it.
+6. Update the tool counts asserted in `lib/ai/__tests__/client-tool-executor.test.ts` (`codeTools`) and `lib/ai/agent/__tests__/agent-integration.test.ts` (all agent tools), and the `CORE_TOOLS` copy in `lib/ai/agent/__tests__/prepare-step.test.ts` if you changed it. Optionally add an icon/label in `components/features/chat/chat-message.tsx` (`TOOL_ICONS`, `buildToolLabel`) and a renderer in `components/features/chat/tool-renderers/index.ts` (`TOOL_RENDERERS`); both fall back to defaults.
 
 ### Adding a New Scanner Rule
 
-1. Add the rule to the appropriate rule file in `lib/code/scanner/` (`rules-security.ts`, `rules-quality.ts`, `rules-framework.ts`, or `rules-composite.ts`).
-2. Each rule implements the `ScanRule` interface with `id`, `severity`, `category`, `pattern`/`check`, and `message`.
-3. Rules are auto-discovered by `getAllRules()` in `scanner.ts`.
+1. Append the rule to an existing exported array in `lib/code/scanner/`: `SECURITY_RULES` (`rules-security.ts`), `SECURITY_LANG_RULES` (`rules-security-lang.ts`), `BAD_PRACTICE_RULES` or `RELIABILITY_RULES` (`rules-quality.ts`), or `FRAMEWORK_RULES` (`rules-framework.ts`).
+2. Each rule is a `ScanRule` (`lib/code/scanner/types.ts`) with required `id`, `category`, `severity`, `title`, and `description`, plus a `pattern` (rules without one are skipped). `pattern` is matched as a case-insensitive literal unless `patternOptions` sets `regex: true` (and/or `caseSensitive: true`). Optional fields include `fileFilter` (extensions, e.g. `JS_TS` from `constants.ts`), `excludePattern`, `excludeFiles`, `suggestion`, `cwe`, `owasp`, `confidence`, `fix`, and `fixDescription`.
+3. Those five arrays are spread by hand into `RULES` in `scanner.ts` (also returned by `getAllRules()`); a new array or file is not picked up until it is added to that spread. File-level co-occurrence rules use a different interface (`CompositeRule`) and go in `COMPOSITE_RULES` in `rules-composite.ts` (run by `scanCompositeRules()`); tree-sitter query rules (`TreeSitterRule`) go in the arrays in `rules-tree-sitter.ts`.
 
 ### Adding a New Provider
 
@@ -417,10 +464,12 @@ The GitHub REST API does not support blame. `lib/github/graphql.ts` provides a l
 
 ### Adding a New Changelog Preset
 
-1. Add the preset key to the `ChangelogPreset` union in `lib/changelog/types.ts`.
-2. Define the preset config in `PRESET_CONFIGS` in `lib/changelog/preset-config.ts` (label, description, system prompt template).
-3. The prompt template supports `{{commits}}` and `{{dateRange}}` interpolation via `lib/changelog/prompt-builder.ts`.
-4. The preset appears automatically in the `NewChangelogView` component selector.
+1. Add the preset key to the `ChangelogType` union in `lib/changelog/types.ts`.
+2. Add an entry (`id`, `label`, `description`, `icon: null`, `prompt`) to `CHANGELOG_PRESETS` in `lib/changelog/preset-config.ts`. `prompt` is the user-message instruction: `buildChangelogPrompt()` in `lib/changelog/prompt-builder.ts` prepends a "Changes from `<fromRef>` to `<toRef>`" label to it. There is no placeholder interpolation; commit data is sent separately as `commitData`.
+3. Add the preset's system prompt to `CHANGELOG_BASE_PROMPTS` in `lib/ai/agent/prompts/changelog.ts` and its icon to `CHANGELOG_PRESET_ICONS` in `components/features/changelog/changelog-helpers.tsx` (both are `Record<ChangelogType, ...>`, so type-checking fails until they are added).
+4. Add the key to the `changelogType` `z.enum` in both `lib/ai/agent/options.ts` and `app/api/changelog/generate/route.ts`; otherwise requests for the preset are rejected.
+5. The preset then appears automatically in the `NewChangelogView` component selector.
+6. Update the preset count and the preset id list in `lib/changelog/__tests__/preset-config.test.ts`.
 
 ### Adding a New API Route
 

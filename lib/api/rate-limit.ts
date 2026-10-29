@@ -130,6 +130,17 @@ export function applyRateLimit(
   return null
 }
 
+/**
+ * Return unused cost for a request admitted at its worst-case cost that
+ * finished with less work (for example fewer upstream pages). Refunds only
+ * the client's current window and never below zero.
+ */
+export function refundRateLimit(request: Request, policy: RateLimitPolicy): void {
+  const entry = store.get(JSON.stringify([policy.bucket, getClientIp(request)]))
+  if (!entry || entry.resetAt <= Date.now()) return
+  entry.count = Math.max(0, entry.count - Math.max(0, policy.cost ?? 1))
+}
+
 /** Exposed for testing — clears the internal rate limit store. */
 export function _resetStore(): void {
   store.clear()

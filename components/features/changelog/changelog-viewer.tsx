@@ -74,6 +74,7 @@ export function ChangelogViewer({ className }: ChangelogViewerProps) {
   // --- Tags/Branches fetching ---
   const [tags, setTags] = useState<GitHubTag[]>([])
   const [branches, setBranches] = useState<GitHubBranch[]>([])
+  const [refsTruncation, setRefsTruncation] = useState({ tags: false, branches: false })
   const [refsLoading, setRefsLoading] = useState(false)
   const [refsError, setRefsError] = useState<string | null>(null)
   const [commitFetchError, setCommitFetchError] = useState<string | null>(null)
@@ -96,6 +97,7 @@ export function ChangelogViewer({ className }: ChangelogViewerProps) {
       setToRef('')
       setTags([])
       setBranches([])
+      setRefsTruncation({ tags: false, branches: false })
       setRefsLoading(false)
       setRefsError(null)
       setCommitFetchError(null)
@@ -119,12 +121,15 @@ export function ChangelogViewer({ className }: ChangelogViewerProps) {
     })
 
     Promise.all([
-      fetchTagsViaProxy(repo.owner, repo.name, 100).catch(() => [] as GitHubTag[]),
-      fetchBranchesViaProxy(repo.owner, repo.name, 100).catch(() => [] as GitHubBranch[]),
-    ]).then(([fetchedTags, fetchedBranches]) => {
+      fetchTagsViaProxy(repo.owner, repo.name, 100).catch(() => ({ tags: [] as GitHubTag[], truncated: false })),
+      fetchBranchesViaProxy(repo.owner, repo.name, 100).catch(() => ({ branches: [] as GitHubBranch[], truncated: false })),
+    ]).then(([tagList, branchList]) => {
       if (cancelled) return
+      const fetchedTags = tagList.tags
+      const fetchedBranches = branchList.branches
       setTags(fetchedTags)
       setBranches(fetchedBranches)
+      setRefsTruncation({ tags: tagList.truncated, branches: branchList.truncated })
       if (fetchedTags.length === 0 && fetchedBranches.length === 0) {
         setRefsError('No tags or branches found for this repository.')
       }
@@ -326,6 +331,7 @@ export function ChangelogViewer({ className }: ChangelogViewerProps) {
             messages={messages} stop={stop} selectedModel={selectedModel}
             refSource={refSource} setRefSource={setRefSource} tags={tags} branches={branches}
             refsLoading={refsLoading} refsError={refsError} refOptions={refOptions}
+            refsTruncated={refsTruncation[refSource]}
             fromRef={fromRef} setFromRef={setFromRef} toRef={toRef} setToRef={setToRef}
             qualityLevel={qualityLevel} setQualityLevel={setQualityLevel}
             activeSkills={activeSkills} onSkillToggle={handleSkillToggle}

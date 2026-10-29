@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest'
-import { rateLimit, getClientIp, applyRateLimit, _resetStore } from '../rate-limit'
+import { rateLimit, getClientIp, applyRateLimit, refundRateLimit, _resetStore } from '../rate-limit'
 import { NextRequest } from 'next/server'
 
 function makeRequest(headers: Record<string, string> = {}): NextRequest {
@@ -138,5 +138,42 @@ describe('applyRateLimit', () => {
     expect(blocked!.headers.get('X-RateLimit-Limit')).toBe('2')
     expect(blocked!.headers.get('X-RateLimit-Remaining')).toBe('0')
     expect(Number(blocked!.headers.get('X-RateLimit-Reset'))).toBeGreaterThan(Date.now())
+  })
+})
+
+describe('refundRateLimit', () => {
+  beforeEach(() => {
+    _resetStore()
+  })
+
+  it('returns unused cost to the current window of the client', () => {
+    const req = makeRequest({ 'x-forwarded-for': '7.7.7.7' })
+    const policy = { bucket: '/api/test', limit: 10 }
+
+    expect(applyRateLimit(req, { ...policy, cost: 10 })).toBeNull()
+    refundRateLimit(req, { ...policy, cost: 9 })
+
+    expect(applyRateLimit(req, { ...policy, cost: 9 })).toBeNull()
+  })
+
+  it('never refunds below zero', () => {
+    const req = makeRequest({ 'x-forwarded-for': '7.7.7.8' })
+    const policy = { bucket: '/api/test', limit: 10 }
+
+    applyRateLimit(req, policy)
+    refundRateLimit(req, { ...policy, cost: 5 })
+
+    expect(applyRateLimit(req, { ...policy, cost: 10 })).toBeNull()
+    expect(applyRateLimit(req, policy)?.status).toBe(429)
+  })
+
+  it('only refunds the client that was charged', () => {
+    const policy = { bucket: '/api/test', limit: 10 }
+    const charged = makeRequest({ 'x-forwarded-for': '8.8.8.8' })
+    applyRateLimit(charged, { ...policy, cost: 10 })
+
+    refundRateLimit(makeRequest({ 'x-forwarded-for': '9.9.9.9' }), { ...policy, cost: 10 })
+
+    expect(applyRateLimit(charged, policy)?.status).toBe(429)
   })
 })

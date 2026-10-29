@@ -96,7 +96,8 @@ describe('GET /api/github/compare', () => {
     expect(res.status).toBe(400)
   })
 
-  it('returns 500 when GitHub API throws', async () => {
+  it('returns a generic 500 without the raw exception text when GitHub API throws', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
     mockFetchCompare.mockRejectedValue(new Error('Internal error'))
 
     const req = createRequest({ owner: 'o', name: 'r', base: 'v1', head: 'v2' })
@@ -104,7 +105,10 @@ describe('GET /api/github/compare', () => {
 
     expect(res.status).toBe(500)
     const body = await res.json()
-    expect(body.error.message).toBe('Internal error')
+    expect(body.error.message).toBe('Failed to fetch comparison')
+    expect(JSON.stringify(body)).not.toContain('Internal error')
+    expect(consoleError).toHaveBeenCalledWith('[compare] GitHub API error:', 'Internal error')
+    consoleError.mockRestore()
   })
 
   it('returns 404 when repo not found', async () => {

@@ -61,6 +61,7 @@ export const GET = withGitHubCachePolicy(async function GET(
       return apiError('RATE_LIMIT', message, 403)
     }
 
-    return apiError('GITHUB_ERROR', message, 500)
+    console.error('[pull-request-comments] GitHub API error:', message)
+    return apiError('GITHUB_ERROR', 'Failed to fetch pull request comments', 500)
   }
 }, 's-maxage=60, stale-while-revalidate=30')

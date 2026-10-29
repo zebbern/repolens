@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { act, fireEvent, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import React from 'react'
 
 // ---------------------------------------------------------------------------
@@ -56,8 +56,8 @@ vi.mock('@/hooks/use-mobile', () => ({
 }))
 
 vi.mock('@/lib/github/client', () => ({
-  fetchTagsViaProxy: vi.fn(() => Promise.resolve([])),
-  fetchBranchesViaProxy: vi.fn(() => Promise.resolve([])),
+  fetchTagsViaProxy: vi.fn(() => Promise.resolve({ tags: [], truncated: false })),
+  fetchBranchesViaProxy: vi.fn(() => Promise.resolve({ branches: [], truncated: false })),
   fetchCompareViaProxy: vi.fn(() => Promise.resolve({ commits: [], files: [], totalCommits: 0 })),
 }))
 
@@ -95,6 +95,12 @@ vi.mock('../new-changelog-view', () => ({
 }))
 
 import { ChangelogViewer } from '../changelog-viewer'
+import { NewChangelogView } from '../new-changelog-view'
+import { fetchBranchesViaProxy, fetchTagsViaProxy } from '@/lib/github/client'
+
+function lastNewChangelogProps() {
+  return vi.mocked(NewChangelogView).mock.lastCall?.[0]
+}
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -169,5 +175,26 @@ describe('ChangelogViewer', () => {
 
     expect(screen.getByLabelText('changelog draft')).toHaveValue('')
     expect(screen.getByText('skills:1')).toBeDefined()
+  })
+
+  it('loads the paginated tag and branch lists and flags a truncated list for the ref selector', async () => {
+    const tag = (name: string) => ({ name, commitSha: name, commitUrl: '', tarballUrl: '', zipballUrl: '' })
+    vi.mocked(fetchTagsViaProxy).mockResolvedValueOnce({ tags: [tag('v2'), tag('v1')], truncated: true })
+    vi.mocked(fetchBranchesViaProxy).mockResolvedValueOnce({
+      branches: [{ name: 'main', commitSha: 'm', isProtected: true }],
+      truncated: false,
+    })
+
+    render(React.createElement(ChangelogViewer))
+
+    await waitFor(() => {
+      expect(lastNewChangelogProps()).toMatchObject({ refSource: 'tags', fromRef: 'v1', toRef: 'v2', refsTruncated: true })
+    })
+    expect(lastNewChangelogProps()?.tags.map(t => t.name)).toEqual(['v2', 'v1'])
+    expect(lastNewChangelogProps()?.branches.map(b => b.name)).toEqual(['main'])
+
+    act(() => lastNewChangelogProps()?.setRefSource('branches'))
+
+    expect(lastNewChangelogProps()).toMatchObject({ refSource: 'branches', refsTruncated: false })
   })
 })

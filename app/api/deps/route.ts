@@ -80,6 +80,20 @@ async function mapWithConcurrency<T, R>(
 
 const REGISTRY_TIMEOUT_MS = 10_000
 
+/** A failure message written by this route, safe to return to the client. */
+class RegistryError extends Error {}
+
+/** Client-facing message for a failed package; other failures may echo upstream or network detail. */
+function clientRegistryError(reason: unknown, name: string): string {
+  if (reason instanceof RegistryError) return reason.message
+  if (reason instanceof ResponseBodyTooLargeError) return `${reason.message} for ${name}`
+  if (reason instanceof DOMException && reason.name === 'TimeoutError') {
+    return `npm metadata request timed out for ${name}`
+  }
+  console.error(`[deps] Failed to fetch npm metadata for ${name}:`, reason)
+  return `Failed to fetch npm metadata for ${name}`
+}
+
 async function cancelResponseBody(response: Response): Promise<void> {
   await response.body?.cancel().catch(() => {})
 }
@@ -201,7 +215,7 @@ async function fetchPackageMeta(
 
     if (!res.ok) {
       await cancelResponseBody(res)
-      throw new Error(`npm registry returned ${res.status} for ${name}`)
+      throw new RegistryError(`npm registry returned ${res.status} for ${name}`)
     }
 
     const { data } = await readBoundedJsonResponse<Record<string, unknown>>(res, MAX_NPM_METADATA_RESPONSE_BYTES)
@@ -210,7 +224,7 @@ async function fetchPackageMeta(
       || data.version.trim() === ''
       || data.version.length > MAX_NPM_VERSION_STRING_CHARS
     ) {
-      throw new Error(`npm registry returned incomplete metadata for ${name}`)
+      throw new RegistryError(`npm registry returned incomplete metadata for ${name}`)
     }
 
     // Extract repository URL from various formats
@@ -265,7 +279,7 @@ async function fetchLatestPublication(
 
     if (!res.ok) {
       await cancelResponseBody(res)
-      throw new Error(`npm publication search returned ${res.status} for ${name}`)
+      throw new RegistryError(`npm publication search returned ${res.status} for ${name}`)
     }
 
     let data: unknown
@@ -318,7 +332,7 @@ async function fetchDownloads(
 
     if (!res.ok) {
       await cancelResponseBody(res)
-      throw new Error(`npm download metadata returned ${res.status} for ${name}`)
+      throw new RegistryError(`npm download metadata returned ${res.status} for ${name}`)
     }
 
     const { data } = await readBoundedJsonResponse<{
@@ -326,10 +340,10 @@ async function fetchDownloads(
     }>(res, MAX_NPM_DOWNLOADS_RESPONSE_BYTES)
 
     if (!Array.isArray(data.downloads)) {
-      throw new Error(`npm download metadata was incomplete for ${name}`)
+      throw new RegistryError(`npm download metadata was incomplete for ${name}`)
     }
     if (data.downloads.length > MAX_NPM_DOWNLOAD_POINTS) {
-      throw new Error(`npm download metadata exceeded ${MAX_NPM_DOWNLOAD_POINTS} points for ${name}`)
+      throw new RegistryError(`npm download metadata exceeded ${MAX_NPM_DOWNLOAD_POINTS} points for ${name}`)
     }
     const points: DownloadPoint[] = data.downloads.map((d) => {
       if (
@@ -342,7 +356,7 @@ async function fetchDownloads(
         || d.downloads < 0
         || d.downloads > MAX_NPM_DOWNLOAD_COUNT
       ) {
-        throw new Error(`npm download metadata was incomplete for ${name}`)
+        throw new RegistryError(`npm download metadata was incomplete for ${name}`)
       }
       return { day: d.day, downloads: d.downloads }
     })
@@ -351,7 +365,7 @@ async function fetchDownloads(
     const lastWeek = points.slice(-7)
     const weeklyDownloads = lastWeek.reduce((sum, p) => sum + p.downloads, 0)
     if (!Number.isSafeInteger(weeklyDownloads) || weeklyDownloads > MAX_NPM_WEEKLY_DOWNLOADS) {
-      throw new Error(`npm download metadata had an unsafe weekly aggregate for ${name}`)
+      throw new RegistryError(`npm download metadata had an unsafe weekly aggregate for ${name}`)
     }
 
     return { weeklyDownloads, downloadTrend: points }
@@ -398,7 +412,7 @@ export async function POST(req: Request) {
 
   const settled = await raceCallerCancellation(mapWithConcurrency(packages, 10, async (name) => {
     if (rateLimited) {
-      throw new Error(`Skipped ${name}: rate limited`)
+      throw new RegistryError(`Skipped ${name}: rate limited`)
     }
 
     try {
@@ -422,7 +436,7 @@ export async function POST(req: Request) {
   }, () => !req.signal.aborted), req.signal)
   throwIfCallerAborted(req.signal)
 
-  for (const result of settled) {
+  for (const [index, result] of settled.entries()) {
     if (result.status === 'rejected') {
       const reason = result.reason instanceof Error ? result.reason.message : String(result.reason)
 
@@ -430,7 +444,7 @@ export async function POST(req: Request) {
       if (reason.includes('429') || reason.includes('rate limited')) {
         errors.push('npm registry rate limit reached — some packages were skipped')
       } else {
-        errors.push(reason)
+        errors.push(clientRegistryError(result.reason, packages[index]))
       }
       continue
     }

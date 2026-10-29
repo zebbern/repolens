@@ -60,7 +60,7 @@ describe('GitHub client — changelog proxy functions', () => {
 
   describe('fetchTagsViaProxy', () => {
     it('calls the correct proxy URL with owner and name', async () => {
-      const tags = [{ name: 'v1.0.0', commitSha: 'abc' }]
+      const tags = { tags: [{ name: 'v1.0.0', commitSha: 'abc' }], truncated: false }
       mockFetch.mockResolvedValueOnce(mockOkResponse(tags))
 
       const result = await fetchTagsViaProxy('facebook', 'react')
@@ -82,21 +82,21 @@ describe('GitHub client — changelog proxy functions', () => {
       expect(url).toContain('per_page=50')
     })
 
-    it('omits per_page when not provided', async () => {
-      mockFetch.mockResolvedValueOnce(mockOkResponse([]))
+    it('sends an explicit per_page=100 when not provided', async () => {
+      mockFetch.mockResolvedValueOnce(mockOkResponse({ tags: [], truncated: false }))
 
       await fetchTagsViaProxy('o', 'r')
 
       const url = mockFetch.mock.calls[0][0] as string
-      expect(url).not.toContain('per_page')
+      expect(url).toContain('per_page=100')
     })
 
     it('uses tags cache key prefix', async () => {
-      mockFetch.mockResolvedValueOnce(mockOkResponse([]))
+      mockFetch.mockResolvedValueOnce(mockOkResponse({ tags: [], truncated: false }))
 
       await fetchTagsViaProxy('owner', 'repo')
 
-      expect(cacheMock.getCached).toHaveBeenCalledWith(expect.stringMatching(/^tags:owner\/repo:30:principal:(?:anonymous|pat:\d+|oauth:[^:]+):epoch:\d+$/))
+      expect(cacheMock.getCached).toHaveBeenCalledWith(expect.stringMatching(/^tags:owner\/repo:100:principal:(?:anonymous|pat:\d+|oauth:[^:]+):epoch:\d+$/))
     })
 
     it('uses 10-minute (600,000ms) TTL', async () => {
@@ -111,16 +111,17 @@ describe('GitHub client — changelog proxy functions', () => {
       )
     })
 
-    it('returns typed GitHubTag[]', async () => {
+    it('returns typed GitHubTag[] with the truncation flag', async () => {
       const tags = [
         { name: 'v1.0.0', commitSha: 'abc', commitUrl: '', tarballUrl: '', zipballUrl: '' },
       ]
-      mockFetch.mockResolvedValueOnce(mockOkResponse(tags))
+      mockFetch.mockResolvedValueOnce(mockOkResponse({ tags, truncated: true }))
 
       const result = await fetchTagsViaProxy('o', 'r')
 
-      expect(Array.isArray(result)).toBe(true)
-      expect(result[0].name).toBe('v1.0.0')
+      expect(Array.isArray(result.tags)).toBe(true)
+      expect(result.tags[0].name).toBe('v1.0.0')
+      expect(result.truncated).toBe(true)
     })
   })
 
@@ -130,7 +131,7 @@ describe('GitHub client — changelog proxy functions', () => {
 
   describe('fetchBranchesViaProxy', () => {
     it('calls the correct proxy URL', async () => {
-      const branches = [{ name: 'main', commitSha: 'abc', isProtected: true }]
+      const branches = { branches: [{ name: 'main', commitSha: 'abc', isProtected: true }], truncated: false }
       mockFetch.mockResolvedValueOnce(mockOkResponse(branches))
 
       const result = await fetchBranchesViaProxy('facebook', 'react')
@@ -156,7 +157,7 @@ describe('GitHub client — changelog proxy functions', () => {
 
       await fetchBranchesViaProxy('owner', 'repo')
 
-      expect(cacheMock.getCached).toHaveBeenCalledWith(expect.stringMatching(/^branches:owner\/repo:30:principal:(?:anonymous|pat:\d+|oauth:[^:]+):epoch:\d+$/))
+      expect(cacheMock.getCached).toHaveBeenCalledWith(expect.stringMatching(/^branches:owner\/repo:100:principal:(?:anonymous|pat:\d+|oauth:[^:]+):epoch:\d+$/))
     })
 
     it('uses 5-minute (300,000ms) TTL', async () => {
@@ -224,7 +225,7 @@ describe('GitHub client — changelog proxy functions', () => {
       expect(url).toContain('per_page=50')
     })
 
-    it('omits optional params when not provided', async () => {
+    it('omits optional params when not provided but always sends per_page', async () => {
       mockFetch.mockResolvedValueOnce(mockOkResponse([]))
 
       await fetchCommitsViaProxy('o', 'r')
@@ -233,7 +234,8 @@ describe('GitHub client — changelog proxy functions', () => {
       expect(url).not.toContain('sha=')
       expect(url).not.toContain('since=')
       expect(url).not.toContain('until=')
-      expect(url).not.toContain('per_page=')
+      expect(new URL(url, 'http://localhost').searchParams.has('page')).toBe(false)
+      expect(url).toContain('per_page=100')
     })
 
     it('uses commits cache key prefix including params', async () => {

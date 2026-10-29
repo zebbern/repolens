@@ -62,6 +62,7 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     const message =
       error instanceof Error ? error.message : "Token validation failed"
-    return apiError("TOKEN_VALIDATION_ERROR", message, 500)
+    console.error('[validate-token] GitHub API error:', message)
+    return apiError("TOKEN_VALIDATION_ERROR", "Token validation failed", 500)
   }
 }

@@ -120,14 +120,18 @@ describe('POST /api/github/validate-token', () => {
     })
   })
 
-  it('returns 500 when fetch throws a network error', async () => {
+  it('returns a generic 500 without the raw exception text when fetch throws a network error', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
     mockFetch.mockRejectedValueOnce(new Error('Network error'))
 
     const response = await POST(mockRequest('ghp_network_fail'))
     const data = await response.json()
 
     expect(response.status).toBe(500)
-    expect(data.error.message).toBe('Network error')
+    expect(data.error.message).toBe('Token validation failed')
+    expect(JSON.stringify(data)).not.toContain('Network error')
+    expect(consoleError).toHaveBeenCalledWith('[validate-token] GitHub API error:', 'Network error')
+    consoleError.mockRestore()
   })
 
   it('handles empty scopes header gracefully', async () => {

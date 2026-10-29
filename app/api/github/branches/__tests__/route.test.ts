@@ -7,6 +7,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 const mockGetAccessToken = vi.fn()
 const mockFetchBranches = vi.fn()
 const mockApplyRateLimit = vi.fn()
+const mockRefundRateLimit = vi.fn()
 
 vi.mock('@/lib/auth/token', () => ({
   getAccessToken: (...args: unknown[]) => mockGetAccessToken(...args),
@@ -27,9 +28,11 @@ vi.mock('@/lib/api/error', () => ({
 
 vi.mock('@/lib/api/rate-limit', () => ({
   applyRateLimit: (...args: unknown[]) => mockApplyRateLimit(...args),
+  refundRateLimit: (...args: unknown[]) => mockRefundRateLimit(...args),
 }))
 
 import { GET } from '@/app/api/github/branches/route'
+import { GITHUB_LIST_MAX_PAGES } from '@/lib/github/pagination'
 import { NextRequest } from 'next/server'
 
 // ---------------------------------------------------------------------------
@@ -60,7 +63,7 @@ describe('GET /api/github/branches', () => {
       { name: 'main', commitSha: 'abc123', isProtected: true },
       { name: 'develop', commitSha: 'def456', isProtected: false },
     ]
-    mockFetchBranches.mockResolvedValue(mockBranches)
+    mockFetchBranches.mockResolvedValue({ items: mockBranches, truncated: false })
 
     const req = createRequest({ owner: 'facebook', name: 'react' })
     const res = await GET(req)
@@ -71,12 +74,71 @@ describe('GET /api/github/branches', () => {
     expect(res.headers.get('Vercel-Cache-Tag')).toBe('github-public')
     expect(res.headers.get('Vary')).toBe('X-GitHub-Token, Cookie')
     const body = await res.json()
-    expect(body).toEqual(mockBranches)
+    expect(body).toEqual({ branches: mockBranches, truncated: false })
+  })
+
+  it('reports when the branch list hit the page cap', async () => {
+    const mockBranches = [{ name: 'main', commitSha: 'abc123', isProtected: true }]
+    mockFetchBranches.mockResolvedValue({ items: mockBranches, truncated: true })
+
+    const res = await GET(createRequest({ owner: 'facebook', name: 'react' }))
+
+    await expect(res.json()).resolves.toEqual({ branches: mockBranches, truncated: true })
+  })
+
+  it('admits a request at the worst-case page walk', async () => {
+    mockFetchBranches.mockResolvedValue({ items: [], truncated: false })
+
+    await GET(createRequest({ owner: 'facebook', name: 'react' }))
+
+    expect(mockApplyRateLimit).toHaveBeenCalledWith(expect.any(Request), {
+      bucket: '/api/github/branches',
+      cost: GITHUB_LIST_MAX_PAGES,
+    })
+  })
+
+  it('refunds the pages a single-page walk did not use', async () => {
+    mockFetchBranches.mockResolvedValue({ items: Array.from({ length: 40 }, (_, i) => ({ name: `x${i}` })), truncated: false })
+
+    await GET(createRequest({ owner: 'facebook', name: 'react' }))
+
+    expect(mockRefundRateLimit).toHaveBeenCalledWith(expect.any(Request), {
+      bucket: '/api/github/branches',
+      cost: GITHUB_LIST_MAX_PAGES - 1,
+    })
+  })
+
+  it('refunds only the pages a walk of the requested size did not use', async () => {
+    mockFetchBranches.mockResolvedValue({ items: Array.from({ length: 45 }, (_, i) => ({ name: `x${i}` })), truncated: false })
+
+    await GET(createRequest({ owner: 'facebook', name: 'react', per_page: '20' }))
+
+    expect(mockRefundRateLimit).toHaveBeenCalledWith(expect.any(Request), {
+      bucket: '/api/github/branches',
+      cost: GITHUB_LIST_MAX_PAGES - 3,
+    })
+  })
+
+  it('refunds nothing when the walk hit the page cap', async () => {
+    mockFetchBranches.mockResolvedValue({ items: Array.from({ length: 1000 }, (_, i) => ({ name: `x${i}` })), truncated: true })
+
+    await GET(createRequest({ owner: 'facebook', name: 'react' }))
+
+    expect(mockRefundRateLimit).not.toHaveBeenCalled()
+  })
+
+  it('refunds nothing when the walk fails', async () => {
+    mockFetchBranches.mockRejectedValue(new Error('upstream exploded'))
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    await GET(createRequest({ owner: 'facebook', name: 'react' }))
+
+    expect(mockRefundRateLimit).not.toHaveBeenCalled()
   })
 
   it('returns no-store cache headers for a PAT success response', async () => {
     mockGetAccessToken.mockResolvedValue('ghp_pat_token')
-    mockFetchBranches.mockResolvedValue([])
+    mockFetchBranches.mockResolvedValue({ items: [], truncated: false })
 
     const res = await GET(createRequest({ owner: 'facebook', name: 'react' }))
 
@@ -88,7 +150,7 @@ describe('GET /api/github/branches', () => {
 
   it('returns no-store cache headers for an OAuth success response', async () => {
     mockGetAccessToken.mockResolvedValue('gho_oauth_token')
-    mockFetchBranches.mockResolvedValue([])
+    mockFetchBranches.mockResolvedValue({ items: [], truncated: false })
 
     const res = await GET(createRequest({ owner: 'facebook', name: 'react' }))
 
@@ -158,7 +220,7 @@ describe('GET /api/github/branches', () => {
   })
 
   it('passes per_page and page when provided', async () => {
-    mockFetchBranches.mockResolvedValue([])
+    mockFetchBranches.mockResolvedValue({ items: [], truncated: false })
 
     const req = createRequest({ owner: 'o', name: 'r', per_page: '30', page: '3' })
     await GET(req)
@@ -169,7 +231,8 @@ describe('GET /api/github/branches', () => {
     }))
   })
 
-  it('returns 500 when GitHub API throws', async () => {
+  it('returns a generic 500 without the raw exception text when GitHub API throws', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
     mockFetchBranches.mockRejectedValue(new Error('Server error'))
 
     const req = createRequest({ owner: 'o', name: 'r' })
@@ -177,7 +240,10 @@ describe('GET /api/github/branches', () => {
 
     expect(res.status).toBe(500)
     const body = await res.json()
-    expect(body.error.message).toBe('Server error')
+    expect(body.error.message).toBe('Failed to fetch branches')
+    expect(JSON.stringify(body)).not.toContain('Server error')
+    expect(consoleError).toHaveBeenCalledWith('[branches] GitHub API error:', 'Server error')
+    consoleError.mockRestore()
   })
 
   it('returns 404 when repo not found', async () => {

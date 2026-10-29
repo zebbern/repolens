@@ -7,6 +7,7 @@ import { buildRepoApiUrl, buildTreeApiUrl, buildRawContentUrl } from './parser'
 import { githubGraphQL } from './graphql'
 import { resolveRepoTree, TREE_RESOLUTION_MAX_RESPONSE_BYTES } from './tree-resolver'
 import { fetchGitHub } from './request-signal'
+import { collectGitHubPages, GITHUB_LIST_PAGE_SIZE, type PaginatedList } from './pagination'
 import { readBoundedJsonResponse } from '@/lib/api/json-body'
 
 const GITHUB_API_BASE = 'https://api.github.com'
@@ -202,27 +203,40 @@ function handleGitHubError(response: Response, context: string): never {
 }
 
 /**
- * Fetch repository tags.
+ * Fetch a GitHub list endpoint, following `Link` pagination up to the page cap.
+ */
+async function fetchAllPages<T>(
+  url: string,
+  options: FetchOptions,
+  context: string,
+  mapItem: (item: Record<string, unknown>) => T,
+): Promise<PaginatedList<T>> {
+  const headers = buildHeaders(options.token)
+  return collectGitHubPages(url, async (pageUrl) => {
+    const response = await fetchGitHub(pageUrl, { headers, signal: options.signal })
+
+    if (!response.ok) {
+      handleGitHubError(response, context)
+    }
+
+    const data = (await response.json()) as Array<Record<string, unknown>>
+    return { items: data.map(mapItem), linkHeader: response.headers.get('Link') }
+  })
+}
+
+/**
+ * Fetch repository tags, following pagination up to GITHUB_LIST_MAX_PAGES.
  */
 export async function fetchTags(
   owner: string,
   name: string,
   options: FetchOptions & { perPage?: number; page?: number } = {},
-): Promise<GitHubTag[]> {
-  const headers = buildHeaders(options.token)
-  const perPage = options.perPage ?? 100
+): Promise<PaginatedList<GitHubTag>> {
+  const perPage = options.perPage ?? GITHUB_LIST_PAGE_SIZE
   const page = options.page ?? 1
 
   const url = `${GITHUB_API_BASE}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/tags?per_page=${perPage}&page=${page}`
-  const response = await fetchGitHub(url, { headers, signal: options.signal })
-
-  if (!response.ok) {
-    handleGitHubError(response, 'Tags')
-  }
-
-  const data = await response.json()
-
-  return (data as Array<Record<string, unknown>>).map((tag) => ({
+  return fetchAllPages(url, options, 'Tags', (tag) => ({
     name: tag.name as string,
     commitSha: (tag.commit as Record<string, string>).sha,
     commitUrl: (tag.commit as Record<string, string>).url,
@@ -252,27 +266,18 @@ export async function fetchRepoLanguages(
 }
 
 /**
- * Fetch repository branches.
+ * Fetch repository branches, following pagination up to GITHUB_LIST_MAX_PAGES.
  */
 export async function fetchBranches(
   owner: string,
   name: string,
   options: FetchOptions & { perPage?: number; page?: number } = {},
-): Promise<GitHubBranch[]> {
-  const headers = buildHeaders(options.token)
-  const perPage = options.perPage ?? 100
+): Promise<PaginatedList<GitHubBranch>> {
+  const perPage = options.perPage ?? GITHUB_LIST_PAGE_SIZE
   const page = options.page ?? 1
 
   const url = `${GITHUB_API_BASE}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/branches?per_page=${perPage}&page=${page}`
-  const response = await fetchGitHub(url, { headers, signal: options.signal })
-
-  if (!response.ok) {
-    handleGitHubError(response, 'Branches')
-  }
-
-  const data = await response.json()
-
-  return (data as Array<Record<string, unknown>>).map((branch) => ({
+  return fetchAllPages(url, options, 'Branches', (branch) => ({
     name: branch.name as string,
     commitSha: (branch.commit as Record<string, string>).sha,
     isProtected: (branch.protected as boolean) ?? false,
@@ -536,9 +541,23 @@ function mapCommits(raw: Array<Record<string, unknown>>): GitHubCommit[] {
 export function buildFileTree(tree: RepoTree): FileNode[] {
   const root: FileNode[] = []
   const nodeMap = new Map<string, FileNode>()
-  
+
+  // Truncated or inconsistent trees can list an entry without its parent
+  // directory. Synthesize the missing ancestors so no entry is dropped; they
+  // go through the same sort as real directories.
+  const items = [...tree.tree]
+  const knownPaths = new Set(items.map(item => item.path))
+  for (const item of tree.tree) {
+    let dirPath = parentPathOf(item.path)
+    while (dirPath !== '' && !knownPaths.has(dirPath)) {
+      knownPaths.add(dirPath)
+      items.push({ path: dirPath, mode: '040000', type: 'tree', sha: '' })
+      dirPath = parentPathOf(dirPath)
+    }
+  }
+
   // Sort items so directories come before files at the same level
-  const sortedTree = [...tree.tree].sort((a, b) => {
+  const sortedTree = items.sort((a, b) => {
     const aDepth = a.path.split('/').length
     const bDepth = b.path.split('/').length
     if (aDepth !== bDepth) return aDepth - bDepth
@@ -579,6 +598,11 @@ export function buildFileTree(tree: RepoTree): FileNode[] {
   }
   
   return root
+}
+
+function parentPathOf(path: string): string {
+  const separator = path.lastIndexOf('/')
+  return separator === -1 ? '' : path.slice(0, separator)
 }
 
 /**

@@ -3,9 +3,10 @@ import type { NextRequest } from "next/server"
 import { z } from "zod"
 import { withGitHubCachePolicy } from "@/lib/api/github-cache"
 import { fetchBranches } from "@/lib/github/fetcher"
+import { GITHUB_LIST_MAX_PAGES, githubPagesFetched } from "@/lib/github/pagination"
 import { apiError } from "@/lib/api/error"
 import { GITHUB_NAME_RE } from "@/lib/github/validation"
-import { applyRateLimit } from "@/lib/api/rate-limit"
+import { applyRateLimit, refundRateLimit } from "@/lib/api/rate-limit"
 
 export const runtime = 'edge'
 
@@ -17,7 +18,9 @@ const branchesQuerySchema = z.object({
 })
 
 export const GET = withGitHubCachePolicy(async function GET(request: NextRequest, token: string | undefined) {
-  const rateLimited = applyRateLimit(request, { bucket: '/api/github/branches' })
+  // Admit at the worst-case page walk; a completed walk refunds the pages it
+  // did not use, while an aborted or failed one keeps the full charge.
+  const rateLimited = applyRateLimit(request, { bucket: '/api/github/branches', cost: GITHUB_LIST_MAX_PAGES })
   if (rateLimited) return rateLimited
 
   const params = branchesQuerySchema.safeParse({
@@ -41,7 +44,10 @@ export const GET = withGitHubCachePolicy(async function GET(request: NextRequest
       signal: request.signal,
     })
 
-    return NextResponse.json(branches)
+    const unusedPages = GITHUB_LIST_MAX_PAGES - githubPagesFetched(branches.items.length, per_page)
+    if (unusedPages > 0) refundRateLimit(request, { bucket: '/api/github/branches', cost: unusedPages })
+
+    return NextResponse.json({ branches: branches.items, truncated: branches.truncated })
   } catch (error) {
     const message = error instanceof Error ? error.message : "Failed to fetch branches"
 
@@ -52,6 +58,7 @@ export const GET = withGitHubCachePolicy(async function GET(request: NextRequest
       return apiError('RATE_LIMIT', message, 403)
     }
 
-    return apiError('GITHUB_ERROR', message, 500)
+    console.error('[branches] GitHub API error:', message)
+    return apiError('GITHUB_ERROR', 'Failed to fetch branches', 500)
   }
 }, 's-maxage=300, stale-while-revalidate=60')

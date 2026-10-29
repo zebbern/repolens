@@ -43,6 +43,7 @@ export const GET = withGitHubCachePolicy(async function GET(request: NextRequest
       return apiError('RATE_LIMIT', message, 403)
     }
 
-    return apiError('GITHUB_ERROR', message, 500)
+    console.error('[languages] GitHub API error:', message)
+    return apiError('GITHUB_ERROR', 'Failed to fetch languages', 500)
   }
 }, 's-maxage=600, stale-while-revalidate=120')

@@ -47,6 +47,7 @@ export const GET = withGitHubCachePolicy(async function GET(request: NextRequest
     if (request.signal.aborted) throw request.signal.reason ?? error
     if (error instanceof Error && error.name === 'AbortError') throw error
     const message = error instanceof Error ? error.message : "Failed to fetch tree"
-    return apiError('GITHUB_ERROR', message, 500)
+    console.error('[tree] GitHub API error:', message)
+    return apiError('GITHUB_ERROR', 'Failed to fetch tree', 500)
   }
 }, 's-maxage=600, stale-while-revalidate=120')

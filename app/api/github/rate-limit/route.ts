@@ -47,6 +47,7 @@ export const GET = withGitHubCachePolicy(async function GET(request: NextRequest
     })
   } catch (error) {
     const message = error instanceof Error ? error.message : "Failed to fetch rate limit"
-    return apiError('RATE_LIMIT_ERROR', message, 500)
+    console.error('[rate-limit] GitHub API error:', message)
+    return apiError('RATE_LIMIT_ERROR', 'Failed to fetch rate limit', 500)
   }
 })

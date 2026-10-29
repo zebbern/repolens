@@ -420,6 +420,8 @@ describe('deps API — POST handler', () => {
 
     expect(data.results.react).toBeUndefined()
     expect(data.errors.join(' ')).toMatch(/response body|bytes|large/i)
+    // The package suffix lets npm-client attribute the error to the right package.
+    expect(data.errors).toEqual([expect.stringMatching(/ for react$/)])
     expect(cancel).toHaveBeenCalled()
   })
 
@@ -455,6 +457,8 @@ describe('deps API — POST handler', () => {
 
     expect(data.results.react).toBeUndefined()
     expect(data.errors.join(' ')).toMatch(/response body|bytes|large/i)
+    // The package suffix lets npm-client attribute the error to the right package.
+    expect(data.errors).toEqual([expect.stringMatching(/ for react$/)])
     expect(cancel).toHaveBeenCalled()
   })
 
@@ -749,6 +753,31 @@ describe('deps API — POST handler', () => {
     const data = await res.json()
     expect(data.errors.length).toBeGreaterThan(0)
     expect(Object.keys(data.results)).toHaveLength(0)
+  })
+
+  it.each([
+    ['a network failure', () => Promise.reject(new TypeError('connect ECONNREFUSED 10.0.0.7:443 internal-upstream-detail')), 'internal-upstream-detail'],
+    ['a non-JSON upstream body', () => Promise.resolve(new Response('<!DOCTYPE html><title>internal-upstream-detail</title>', { status: 200 })), 'DOCTYPE'],
+  ])('returns a generic per-package error and logs the detail for %s', async (_name, respond, leaked) => {
+    globalThis.fetch = vi.fn().mockImplementation(respond)
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    vi.resetModules()
+    const mod = await import('../route')
+    POST = mod.POST
+
+    const res = await POST(new Request('http://localhost/api/deps', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ packages: ['react'] }),
+    }))
+    const body = await res.text()
+
+    expect(res.status).toBe(200)
+    expect(body).not.toContain(leaked)
+    expect(JSON.parse(body).errors).toEqual(['Failed to fetch npm metadata for react'])
+    expect(consoleError.mock.calls.flat().map(String).join(' ')).toContain(leaked)
+    consoleError.mockRestore()
   })
 
   it('aborts every npm metadata request when the client disconnects', async () => {

@@ -46,6 +46,7 @@ export const GET = withGitHubCachePolicy(async function GET(request: NextRequest
       return apiError('RATE_LIMIT', message, 403)
     }
 
-    return apiError('GITHUB_ERROR', message, 500)
+    console.error('[repo] GitHub API error:', message)
+    return apiError('GITHUB_ERROR', 'Failed to fetch repository', 500)
   }
 }, 's-maxage=300, stale-while-revalidate=60')

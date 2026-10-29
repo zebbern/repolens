@@ -53,6 +53,7 @@ export const GET = withGitHubCachePolicy(async function GET(request: NextRequest
       return apiError('VALIDATION_ERROR', message, 422)
     }
 
-    return apiError('GITHUB_ERROR', message, 500)
+    console.error('[compare] GitHub API error:', message)
+    return apiError('GITHUB_ERROR', 'Failed to fetch comparison', 500)
   }
 })

@@ -44,6 +44,7 @@ function jsonResponse(data: unknown, status = 200): Response {
     ok: status >= 200 && status < 300,
     status,
     statusText: status === 200 ? 'OK' : 'Error',
+    headers: new Headers(),
     json: () => Promise.resolve(data),
     text: () => Promise.resolve(typeof data === 'string' ? data : JSON.stringify(data)),
   } as unknown as Response
@@ -202,10 +203,10 @@ describe('Direct GitHub API calls (PAT mode)', () => {
       expect(url).toContain('per_page=10')
     })
 
-    it('maps branches endpoint', async () => {
+    it('maps branches endpoint with an explicit per_page', async () => {
       mockFetch.mockResolvedValueOnce(jsonResponse(RAW_BRANCHES))
       await fetchBranchesViaProxy('X', 'Y')
-      expect(mockFetch).toHaveBeenCalledWith('https://api.github.com/repos/X/Y/branches', expect.any(Object))
+      expect(mockFetch).toHaveBeenCalledWith('https://api.github.com/repos/X/Y/branches?per_page=100', expect.any(Object))
     })
 
     it('maps commits endpoint with query params', async () => {
@@ -589,7 +590,8 @@ describe('Direct GitHub API calls (PAT mode)', () => {
     it('normalizes tags', async () => {
       mockFetch.mockResolvedValueOnce(jsonResponse(RAW_TAGS))
       const result = await fetchTagsViaProxy('X', 'Y')
-      expect(result[0]).toEqual({
+      expect(result.truncated).toBe(false)
+      expect(result.tags[0]).toEqual({
         name: 'v18.0.0', commitSha: 'abc123',
         commitUrl: 'https://api.github.com/repos/X/Y/commits/abc123',
         tarballUrl: 'https://api.github.com/repos/X/Y/tarball/v18.0.0',
@@ -600,10 +602,13 @@ describe('Direct GitHub API calls (PAT mode)', () => {
     it('normalizes branches', async () => {
       mockFetch.mockResolvedValueOnce(jsonResponse(RAW_BRANCHES))
       const result = await fetchBranchesViaProxy('X', 'Y')
-      expect(result).toEqual([
-        { name: 'main', commitSha: 'def456', isProtected: true },
-        { name: 'dev', commitSha: 'ghi789', isProtected: false },
-      ])
+      expect(result).toEqual({
+        branches: [
+          { name: 'main', commitSha: 'def456', isProtected: true },
+          { name: 'dev', commitSha: 'ghi789', isProtected: false },
+        ],
+        truncated: false,
+      })
     })
 
     it('normalizes commits', async () => {

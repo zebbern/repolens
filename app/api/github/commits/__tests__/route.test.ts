@@ -124,7 +124,8 @@ describe('GET /api/github/commits', () => {
     }))
   })
 
-  it('returns 500 when GitHub API throws', async () => {
+  it('returns a generic 500 without the raw exception text when GitHub API throws', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
     mockFetchCommits.mockRejectedValue(new Error('Server error'))
 
     const req = createRequest({ owner: 'o', name: 'r' })
@@ -132,7 +133,10 @@ describe('GET /api/github/commits', () => {
 
     expect(res.status).toBe(500)
     const body = await res.json()
-    expect(body.error.message).toBe('Server error')
+    expect(body.error.message).toBe('Failed to fetch commits')
+    expect(JSON.stringify(body)).not.toContain('Server error')
+    expect(consoleError).toHaveBeenCalledWith('[commits] GitHub API error:', 'Server error')
+    consoleError.mockRestore()
   })
 
   it('returns 404 when repo not found', async () => {

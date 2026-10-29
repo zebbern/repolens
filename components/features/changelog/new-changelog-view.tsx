@@ -37,6 +37,8 @@ interface NewChangelogViewProps {
   refsLoading: boolean
   refsError: string | null
   refOptions: { label: string; value: string }[]
+  /** The listed refs stopped at the pagination cap; more exist on GitHub. */
+  refsTruncated: boolean
   fromRef: string
   setFromRef: (ref: string) => void
   toRef: string
@@ -58,7 +60,7 @@ export function NewChangelogView(props: NewChangelogViewProps) {
   const {
     contentRef, isMobile, sidebarOpen, setSidebarOpen, sidebarContent,
     isGenerating, isFetchingCommits, messages, stop, selectedModel,
-    refSource, setRefSource, tags, branches, refsLoading, refsError, refOptions,
+    refSource, setRefSource, tags, branches, refsLoading, refsError, refOptions, refsTruncated,
     fromRef, setFromRef, toRef, setToRef,
     qualityLevel, setQualityLevel,
     activeSkills, onSkillToggle,
@@ -109,7 +111,7 @@ export function NewChangelogView(props: NewChangelogViewProps) {
             <p className="text-xs text-text-muted text-center mb-6">AI reads your commit history and generates a formatted changelog.</p>
 
             <RefRangeSelector refSource={refSource} setRefSource={setRefSource} tags={tags} branches={branches}
-              refsLoading={refsLoading} refsError={refsError} refOptions={refOptions}
+              refsLoading={refsLoading} refsError={refsError} refOptions={refOptions} refsTruncated={refsTruncated}
               fromRef={fromRef} setFromRef={setFromRef} toRef={toRef} setToRef={setToRef} />
             <QualitySelector qualityLevel={qualityLevel} setQualityLevel={setQualityLevel}
               activeSkills={activeSkills} onSkillToggle={onSkillToggle} />
@@ -125,9 +127,9 @@ export function NewChangelogView(props: NewChangelogViewProps) {
   )
 }
 
-function RefRangeSelector({ refSource, setRefSource, tags, branches, refsLoading, refsError, refOptions, fromRef, setFromRef, toRef, setToRef }: {
+function RefRangeSelector({ refSource, setRefSource, tags, branches, refsLoading, refsError, refOptions, refsTruncated, fromRef, setFromRef, toRef, setToRef }: {
   refSource: RefSource; setRefSource: (s: RefSource) => void; tags: GitHubTag[]; branches: GitHubBranch[]
-  refsLoading: boolean; refsError: string | null; refOptions: { label: string; value: string }[]
+  refsLoading: boolean; refsError: string | null; refOptions: { label: string; value: string }[]; refsTruncated: boolean
   fromRef: string; setFromRef: (r: string) => void; toRef: string; setToRef: (r: string) => void
 }) {
   return (
@@ -171,6 +173,11 @@ function RefRangeSelector({ refSource, setRefSource, tags, branches, refsLoading
             </Select>
           </div>
         </div>
+      )}
+      {!refsLoading && refsTruncated && refOptions.length > 0 && (
+        <p className="mt-2 text-[10px] text-text-muted">
+          {`Showing the first ${refOptions.length} ${refSource}. This repository has more that are not listed.`}
+        </p>
       )}
     </div>
   )

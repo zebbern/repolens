@@ -13,6 +13,11 @@ import {
   TREE_RESOLUTION_MAX_RESPONSE_BYTES,
 } from '@/lib/github/tree-resolver'
 import { readBoundedJsonResponse, type BoundedJsonResponse } from '@/lib/api/json-body'
+import {
+  collectGitHubPages,
+  GITHUB_LIST_PAGE_SIZE,
+  type PaginatedList,
+} from '@/lib/github/pagination'
 
 // ---------------------------------------------------------------------------
 // TTL constants (milliseconds)
@@ -187,8 +192,10 @@ function mapProxyUrlToGitHubApi(proxyUrl: string): DirectUrlMapping | null {
 
   if (pathname === '/api/github/tags') {
     const qp = new URLSearchParams()
-    const perPage = params.get('per_page')
-    if (perPage) qp.set('per_page', perPage)
+    for (const key of ['per_page', 'page']) {
+      const val = params.get(key)
+      if (val) qp.set(key, val)
+    }
     const qs = qp.toString()
     return {
       url: `${GITHUB_API_BASE}/repos/${e(owner)}/${e(name)}/tags${qs ? `?${qs}` : ''}`,
@@ -198,8 +205,10 @@ function mapProxyUrlToGitHubApi(proxyUrl: string): DirectUrlMapping | null {
 
   if (pathname === '/api/github/branches') {
     const qp = new URLSearchParams()
-    const perPage = params.get('per_page')
-    if (perPage) qp.set('per_page', perPage)
+    for (const key of ['per_page', 'page']) {
+      const val = params.get(key)
+      if (val) qp.set(key, val)
+    }
     const qs = qp.toString()
     return {
       url: `${GITHUB_API_BASE}/repos/${e(owner)}/${e(name)}/branches${qs ? `?${qs}` : ''}`,
@@ -209,7 +218,7 @@ function mapProxyUrlToGitHubApi(proxyUrl: string): DirectUrlMapping | null {
 
   if (pathname === '/api/github/commits') {
     const qp = new URLSearchParams()
-    for (const key of ['sha', 'since', 'until', 'per_page', 'path']) {
+    for (const key of ['sha', 'since', 'until', 'per_page', 'page', 'path']) {
       const val = params.get(key)
       if (val) qp.set(key, val)
     }
@@ -283,6 +292,37 @@ async function directFetch<T = unknown>(
   options: ProxyRequestOptions = {},
   maxResponseBytes?: number,
 ): Promise<T | BoundedJsonResponse<T>> {
+  const response = await directFetchResponse(url, pat, options, maxResponseBytes)
+
+  if (maxResponseBytes !== undefined) {
+    return readBoundedJsonResponse<T>(response, maxResponseBytes)
+  }
+  return response.json() as Promise<T>
+}
+
+/**
+ * Fetch every page of a GitHub list endpoint directly, following `Link`
+ * pagination with the same cap as the server fetchers.
+ */
+async function directFetchAllPages<T>(
+  url: string,
+  pat: string,
+  options: ProxyRequestOptions = {},
+): Promise<PaginatedList<T>> {
+  const signal = getRequestSignal(options)
+  return collectGitHubPages(url, async (pageUrl) => {
+    const response = await directFetchResponse(pageUrl, pat, { signal })
+    return { items: (await response.json()) as T[], linkHeader: response.headers.get('Link') }
+  })
+}
+
+/** Send an authenticated GitHub request and map common error statuses. */
+async function directFetchResponse(
+  url: string,
+  pat: string,
+  options: ProxyRequestOptions,
+  maxResponseBytes?: number,
+): Promise<Response> {
   const fetchOptions: RequestInit = {
     headers: {
       'Accept': 'application/vnd.github.v3+json',
@@ -318,10 +358,7 @@ async function directFetch<T = unknown>(
     throw new Error(ghMessage ?? `Request failed: ${response.statusText}`)
   }
 
-  if (maxResponseBytes !== undefined) {
-    return readBoundedJsonResponse<T>(response, maxResponseBytes)
-  }
-  return response.json() as Promise<T>
+  return response
 }
 
 /**
@@ -568,8 +605,14 @@ function normalizeDirectResponse<T>(data: unknown, endpoint: ProxyEndpoint): T {
   switch (endpoint) {
     case 'repo':        return normalizeRepo(data as GitHubApiRepoResponse) as T
     case 'tree':        return data as T
-    case 'tags':        return normalizeTags(data as GitHubApiTagResponse[]) as T
-    case 'branches':    return normalizeBranches(data as GitHubApiBranchResponse[]) as T
+    case 'tags': {
+      const list = data as PaginatedList<GitHubApiTagResponse>
+      return { tags: normalizeTags(list.items), truncated: list.truncated } as T
+    }
+    case 'branches': {
+      const list = data as PaginatedList<GitHubApiBranchResponse>
+      return { branches: normalizeBranches(list.items), truncated: list.truncated } as T
+    }
     case 'commits':     return normalizeCommits(data as GitHubApiCommitResponse[]) as T
     case 'compare':     return normalizeCompare(data as GitHubApiCompareResponse) as T
     case 'commit':      return normalizeCommitDetail(data as GitHubApiCommitDetailResponse) as T
@@ -655,7 +698,10 @@ async function proxyFetch<T>(url: string, options: ProxyRequestOptions = {}): Pr
   if (pat) {
     const mapping = mapProxyUrlToGitHubApi(url)
     if (mapping && mapping.endpoint !== 'file') {
-      const raw = await directFetch(mapping.url, pat, options)
+      // List endpoints walk Link pages so both modes return identical lists.
+      const raw = mapping.endpoint === 'tags' || mapping.endpoint === 'branches'
+        ? await directFetchAllPages(mapping.url, pat, options)
+        : await directFetch(mapping.url, pat, options)
       return normalizeDirectResponse<T>(raw, mapping.endpoint)
     }
   }
@@ -849,54 +895,57 @@ export async function fetchLanguagesViaProxy(
 // ---------------------------------------------------------------------------
 
 /**
- * Fetch repository tags through the proxy.
+ * Fetch repository tags through the proxy. Pages are followed up to
+ * GITHUB_LIST_MAX_PAGES; `truncated` is true when more tags exist.
  */
 export async function fetchTagsViaProxy(
   owner: string,
   name: string,
-  perPage?: number,
-): Promise<GitHubTag[]> {
-  const key = `tags:${owner}/${name}:${perPage ?? 30}`
+  perPage: number = GITHUB_LIST_PAGE_SIZE,
+): Promise<{ tags: GitHubTag[]; truncated: boolean }> {
+  const key = `tags:${owner}/${name}:${perPage}`
   const params = new URLSearchParams({
     owner,
     name,
+    per_page: String(perPage),
   })
-  if (perPage !== undefined) params.set('per_page', String(perPage))
   const url = `/api/github/tags?${params.toString()}`
-  return cachedProxyFetch<GitHubTag[]>(key, url, CACHE_TTL_TAGS)
+  return cachedProxyFetch<{ tags: GitHubTag[]; truncated: boolean }>(key, url, CACHE_TTL_TAGS)
 }
 
 /**
- * Fetch repository branches through the proxy.
+ * Fetch repository branches through the proxy. Pages are followed up to
+ * GITHUB_LIST_MAX_PAGES; `truncated` is true when more branches exist.
  */
 export async function fetchBranchesViaProxy(
   owner: string,
   name: string,
-  perPage?: number,
-): Promise<GitHubBranch[]> {
-  const key = `branches:${owner}/${name}:${perPage ?? 30}`
+  perPage: number = GITHUB_LIST_PAGE_SIZE,
+): Promise<{ branches: GitHubBranch[]; truncated: boolean }> {
+  const key = `branches:${owner}/${name}:${perPage}`
   const params = new URLSearchParams({
     owner,
     name,
+    per_page: String(perPage),
   })
-  if (perPage !== undefined) params.set('per_page', String(perPage))
   const url = `/api/github/branches?${params.toString()}`
-  return cachedProxyFetch<GitHubBranch[]>(key, url, CACHE_TTL_BRANCHES)
+  return cachedProxyFetch<{ branches: GitHubBranch[]; truncated: boolean }>(key, url, CACHE_TTL_BRANCHES)
 }
 
 /**
- * Fetch repository commits through the proxy.
+ * Fetch one page of repository commits through the proxy.
  */
 export async function fetchCommitsViaProxy(
   owner: string,
   name: string,
-  opts?: { sha?: string; since?: string; until?: string; perPage?: number; signal?: AbortSignal },
+  opts?: { sha?: string; since?: string; until?: string; perPage?: number; page?: number; signal?: AbortSignal },
 ): Promise<GitHubCommit[]> {
   const params = new URLSearchParams({ owner, name })
   if (opts?.sha) params.set('sha', opts.sha)
   if (opts?.since) params.set('since', opts.since)
   if (opts?.until) params.set('until', opts.until)
-  if (opts?.perPage !== undefined) params.set('per_page', String(opts.perPage))
+  params.set('per_page', String(opts?.perPage ?? GITHUB_LIST_PAGE_SIZE))
+  if (opts?.page !== undefined) params.set('page', String(opts.page))
 
   const key = `commits:${owner}/${name}:${params.toString()}`
   const url = `/api/github/commits?${params.toString()}`
@@ -909,13 +958,12 @@ export async function fetchCommitsViaProxy(
 export async function fetchRefsViaProxy(
   owner: string,
   name: string,
-  perPage?: number,
-): Promise<{ tags: GitHubTag[]; branches: GitHubBranch[] }> {
-  const key = `refs:${owner}/${name}:${perPage ?? 30}`
-  const params = new URLSearchParams({ owner, name })
-  if (perPage !== undefined) params.set('per_page', String(perPage))
+  perPage: number = GITHUB_LIST_PAGE_SIZE,
+): Promise<{ tags: GitHubTag[]; branches: GitHubBranch[]; tagsTruncated: boolean; branchesTruncated: boolean }> {
+  const key = `refs:${owner}/${name}:${perPage}`
+  const params = new URLSearchParams({ owner, name, per_page: String(perPage) })
   const url = `/api/github/refs?${params.toString()}`
-  return cachedProxyFetch<{ tags: GitHubTag[]; branches: GitHubBranch[] }>(key, url, CACHE_TTL_TAGS)
+  return cachedProxyFetch<{ tags: GitHubTag[]; branches: GitHubBranch[]; tagsTruncated: boolean; branchesTruncated: boolean }>(key, url, CACHE_TTL_TAGS)
 }
 
 /**
@@ -1063,10 +1111,11 @@ export async function fetchFileCommitsViaProxy(
   owner: string,
   name: string,
   path: string,
-  opts?: { perPage?: number; signal?: AbortSignal },
+  opts?: { perPage?: number; page?: number; signal?: AbortSignal },
 ): Promise<GitHubCommit[]> {
   const params = new URLSearchParams({ owner, name, path })
-  if (opts?.perPage !== undefined) params.set('per_page', String(opts.perPage))
+  params.set('per_page', String(opts?.perPage ?? GITHUB_LIST_PAGE_SIZE))
+  if (opts?.page !== undefined) params.set('page', String(opts.page))
 
   const key = `file-commits:${owner}/${name}:${path}:${params.toString()}`
   const url = `/api/github/commits?${params.toString()}`

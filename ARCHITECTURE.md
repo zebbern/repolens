@@ -257,6 +257,8 @@ graph LR
   G --> H["Test each line against applicable rules"]
 ```
 
+Each rule keeps at most `MAX_PER_RULE` (15) findings per scan; Tree-sitter rules apply the cap per file. Security-category and critical findings are exempt (`isExemptFromRuleCap()` in `constants.ts`). Matches a cap drops are counted in the scan result's `ruleOverflow`, which the Issues panel lists under "Result limits", so truncation is never silent. The hardcoded-secret and hardcoded-password rules test their `excludePattern` against the asserted key path, value and enclosing container names (`labels = {`, `i18n.add(`) rather than the whole line, so a comment or sibling property cannot hide a real credential.
+
 - **Pre-compilation**: Each `ScanRule.pattern` is compiled to a `RegExp` via `buildSearchRegex()` once, stored in a `CompiledRule` alongside `isSecurityCritical` metadata.
 - **Extension grouping**: Rules with a `fileFilter` are indexed under each applicable extension (e.g., `.ts`, `.py`). Rules with no `fileFilter` go into `universalRules` and apply to every file.
 - **Dead-rule pruning**: Rules whose `fileFilter` extensions don't appear in the codebase's `presentExtensions` set are skipped entirely.
@@ -468,7 +470,7 @@ Generates changelogs from Git ref ranges using AI with configurable presets.
 
 ### Changelog Generation Flow
 
-1. **User selects refs** — In `NewChangelogView`, the user picks base and head refs (tags or branches), a preset, and a quality level (Fast / Balanced / Thorough).
+1. **User selects refs** — In `NewChangelogView`, the user picks base and head refs (tags or branches), a preset, and a quality level (Fast / Balanced / Thorough). `fetchTagsViaProxy` and `fetchBranchesViaProxy` follow GitHub `Link` pagination up to 10 pages of 100 through `collectGitHubPages()` (`lib/github/pagination.ts`), identically in proxy and PAT direct mode; a list cut at the cap is flagged `truncated` and the picker says more refs exist.
 2. **Commit fetching** — Commits between the refs are fetched via `fetchCompareViaProxy` from the GitHub API.
 3. **AI generation** — Commits are sent to `/api/changelog/generate`. `lib/changelog/prompt-builder.ts` builds the user prompt (ref range plus preset prompt); the preset-specific system prompt comes from `lib/ai/agent/prompts/changelog.ts`. The AI streams back a formatted changelog.
 4. **Regeneration** — Stored commit data enables regeneration with a different preset or quality level without re-fetching.
@@ -908,6 +910,8 @@ The `prepareStep` callback inspects the message history for `<skill-instructions
 ## Rate Limiting
 
 All AI API routes apply rate limiting via `lib/api/rate-limit.ts` using `applyRateLimit()`. The function returns `null` if allowed, or a `429` response with `Retry-After` and `X-RateLimit-*` headers if the limit is exceeded. Error responses use the standardized `apiError()` helper from `lib/api/error.ts`.
+
+GitHub list routes that walk pages (`/api/github/tags`, `/branches`, `/refs`) are admitted at their worst-case page cost (`cost` in the policy); after a completed walk, `refundRateLimit()` returns the pages it did not use, while an aborted or failed walk keeps the full charge. GitHub routes return a generic message for 5xx failures and log the upstream detail server-side.
 
 ## API Proxy Caching
 

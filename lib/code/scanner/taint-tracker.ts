@@ -1750,6 +1750,14 @@ function hasNoSqlReceiverEvidence(
   return resolveNoSqlBinding(root, invocationPath, lines, new Set(), true)
 }
 
+// Collection utilities whose find/where helpers search in-memory data, not a database.
+const COLLECTION_UTILITY_MODULE = /^(?:lodash(?:-es)?|lodash[./].+|underscore|ramda|rambda|remeda)$/
+const COLLECTION_UTILITY_GLOBAL = /^(?:_|lodash|underscore|R)$/
+
+function isCollectionUtilityModule(specifier: t.Node | undefined): boolean {
+  return t.isStringLiteral(specifier) && COLLECTION_UTILITY_MODULE.test(specifier.value)
+}
+
 function resolveNoSqlBinding(
   name: string,
   scopePath: NodePath,
@@ -1758,11 +1766,12 @@ function resolveNoSqlBinding(
   allowUnbound: boolean,
 ): boolean {
   const binding = scopePath.scope.getBinding(name)
-  if (!binding) return allowUnbound
+  if (!binding) return allowUnbound && !COLLECTION_UTILITY_GLOBAL.test(name)
   if (seen.has(binding.path.node)) return false
   seen.add(binding.path.node)
   if (binding.path.isImportSpecifier() || binding.path.isImportDefaultSpecifier() || binding.path.isImportNamespaceSpecifier()) {
-    return true
+    const declaration = binding.path.parentPath
+    return !(declaration?.isImportDeclaration() && isCollectionUtilityModule(declaration.node.source))
   }
   if (binding.path.isVariableDeclarator()) {
     const immutable = binding.constant
@@ -1787,7 +1796,8 @@ function isNoSqlModelExpression(
   if (t.isIdentifier(node)) return resolveNoSqlBinding(node.name, scopePath, lines, seen, false)
   if (t.isCallExpression(node) || t.isOptionalCallExpression(node)) {
     const callee = nodeToSource(node.callee, lines)
-    return /^(?:mongoose\.model|db\.collection)$/.test(callee) || callee === 'require'
+    if (/^(?:mongoose\.model|db\.collection)$/.test(callee)) return true
+    return callee === 'require' && !isCollectionUtilityModule(node.arguments[0])
   }
   if (t.isMemberExpression(node) || t.isOptionalMemberExpression(node)) {
     if (getMemberPath(node) === 'mongoose.Model') return true

@@ -1522,6 +1522,47 @@ function handler(req) { User.find(req.body.filter); }`)[0]
   })
 })
 
+describe('trackTaint — NoSQL sink false positives', () => {
+  const noSqlFlows = (code: string) => getFlows(code).filter(flow => flow.sink.type === 'nosql-injection')
+
+  it.each([
+    ['Array.find on a local array', 'function handler(req) { const arr = getItems(); return arr.find(x => x.id === req.params.id); }'],
+    ['Array.find on an unbound array', 'function handler(req) { return arr.find(x => x.id === req.params.id); }'],
+    ['Array.find on a parameter', 'function handler(req, arr) { return arr.find(x => x.id === req.params.id); }'],
+    ['Array.find after filter', 'function handler(req) { return users.filter(u => u.active).find(u => u.id === req.query.id); }'],
+    ['Array.find on an imported array', "import { users } from './data';\nfunction handler(req) { return users.find(u => u.id === req.query.id); }"],
+    ['a callback capturing a tainted value', "import { users } from './data';\nfunction handler(req) { const id = req.params.id; return users.find(u => u.id === id); }"],
+    ['imported lodash find with a predicate object', "import _ from 'lodash';\nfunction handler(req) { return _.find(list, { id: req.params.id }); }"],
+    ['required lodash find with a predicate object', "const _ = require('lodash');\nfunction handler(req) { return _.find(list, { id: req.params.id }); }"],
+    ['global lodash find with a predicate object', 'function handler(req) { return _.find(list, { id: req.params.id }); }'],
+    ['imported underscore find with a predicate object',"import _ from 'underscore';\nfunction handler(req) { return _.find(list, { id: req.params.id }); }"],
+    ['lodash-es where with a predicate object', "import { default as lodash } from 'lodash-es';\nfunction handler(req) { return lodash.where(list, { id: req.params.id }); }"],
+    ['imported lodash find with a callback', "import _ from 'lodash';\nfunction handler(req) { return _.find(list, u => u.id === req.params.id); }"],
+    ['imported Ramda find with a predicate', "import * as R from 'ramda';\nfunction handler(req) { return R.find(R.propEq('id', req.params.id), list); }"],
+    ['required Ramda where spec', "const R = require('ramda');\nfunction handler(req) { return R.where({ id: R.equals(req.params.id) })(item); }"],
+    ['global Ramda find with a predicate', "function handler(req) { return R.find(R.propEq('id', req.params.id), list); }"],
+    ['imported Rambda find with a predicate', "import * as R from 'rambda';\nfunction handler(req) { return R.find(R.propEq('id', req.params.id), list); }"],
+    ['imported Remeda find with a predicate', "import * as R from 'remeda';\nfunction handler(req) { return R.find(list, R.isDeepEqual({ id: req.params.id })); }"],
+    ['knex query builder where', "import knex from 'knex';\nfunction handler(req) { return knex('users').where('id', req.params.id); }"],
+    ['knex chained where', "import knex from 'knex';\nfunction handler(req) { return knex.select('*').from('users').where({ id: req.params.id }); }"],
+    ['RxJS observable find', "import { of } from 'rxjs';\nfunction handler(req) { const items$ = of(1, 2, 3); return items$.find(x => x === req.params.id); }"],
+    ['RxJS imported stream find', "import { items$ } from './stream';\nfunction handler(req) { return items$.find(x => x.id === req.params.id); }"],
+    ['a callback-only argument on an imported model-like name', "import User from './models/user';\nfunction handler(req) { return User.find(u => u.id === req.body.id); }"],
+    ['a function-expression argument on an unbound model-like name', 'function handler(req) { return User.find(function (u) { return u.id === req.body.id }); }'],
+  ])('does not report %s as NoSQL injection', (_name, code) => {
+    expect(noSqlFlows(code)).toHaveLength(0)
+  })
+
+  it.each([
+    ['a collection query', "function handler(req) { return db.collection('u').find({ name: req.query.name }); }"],
+    ['a Mongoose model', "import mongoose from 'mongoose';\nconst User = mongoose.model('User', schema);\nfunction handler(req) { return User.find(req.body); }"],
+    ['an imported model', "import User from './models/user';\nfunction handler(req) { return User.find(req.body); }"],
+    ['a model query with a trailing callback', "import User from './models/user';\nfunction handler(req) { return User.find({ name: req.query.name }, (err, docs) => docs); }"],
+  ])('still reports %s as NoSQL injection', (_name, code) => {
+    expect(noSqlFlows(code)).toHaveLength(1)
+  })
+})
+
 describe('trackTaint — binding-qualified local state', () => {
   it('keeps an outer tainted binding after a safe block shadow', () => {
     const flows = getFlows(`function handler(req) {

@@ -1,6 +1,7 @@
 // Scanner constants — language extension mappings and detection helpers
 
 import type { CodeIndex } from '../code-index'
+import type { IssueCategory, IssueSeverity } from './types'
 
 // ---------------------------------------------------------------------------
 // Language detection
@@ -60,3 +61,12 @@ export const SKIP_VENDORED = /node_modules|vendor|dist|build|\.min\.|\.lock$|pac
  * vulnerable-looking patterns.
  */
 export const SCANNER_EXCLUDE_PATTERNS = /__tests__\/|__mocks__\/|\.test\.tsx?$|\.spec\.tsx?$|test\/fixtures\/|test\/setup|fixtures\/|e2e\//i
+
+// ---------------------------------------------------------------------------
+// Per-rule finding cap
+// ---------------------------------------------------------------------------
+
+/** Security and critical findings are never dropped by a per-rule cap. */
+export function isExemptFromRuleCap(finding: { category: IssueCategory; severity: IssueSeverity }): boolean {
+  return finding.category === 'security' || finding.severity === 'critical'
+}

@@ -310,14 +310,14 @@ describe('IssuesPanel', () => {
     expect(tabs.map(tab => tab.textContent)).toEqual(['Overview', 'Issues', 'Compliance'])
     expect(screen.getByRole('tab', { name: 'Overview' })).toHaveAttribute('aria-selected', 'true')
     expect(screen.getByTestId('issue-summary')).toBeInTheDocument()
-    expect(screen.getByText('Showing top 15 findings per rule.')).toBeInTheDocument()
+    expect(screen.getByText('Showing top 15 findings per rule; security and critical findings are never capped.')).toBeInTheDocument()
     expect(screen.getByText('5 additional matches')).toBeInTheDocument()
     expect(screen.queryByTestId('issue-list')).not.toBeInTheDocument()
 
     await user.click(screen.getByRole('tab', { name: 'Issues' }))
     expect(screen.getByTestId('issue-filters')).toBeInTheDocument()
     expect(screen.getByTestId('issue-list')).toBeInTheDocument()
-    expect(screen.queryByText('Showing top 15 findings per rule.')).not.toBeInTheDocument()
+    expect(screen.queryByText('Showing top 15 findings per rule; security and critical findings are never capped.')).not.toBeInTheDocument()
 
     await user.click(screen.getByRole('tab', { name: 'Compliance' }))
     expect(screen.getByTestId('compliance-dashboard')).toBeInTheDocument()

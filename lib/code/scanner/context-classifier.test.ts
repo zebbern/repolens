@@ -113,6 +113,14 @@ describe('classifyLine', () => {
       expect(result.isTypeAnnotation).toBe(true)
     })
 
+    it.each([
+      'export type Mode = { password: "visible" | "hidden" }',
+      'declare type Mode = { password: "masked" }',
+      'export declare interface Secret { value: "x" }',
+    ])('detects an exported or declared type: %s', (line) => {
+      expect(classifyLine(line, 'src/types.ts').isTypeAnnotation).toBe(true)
+    })
+
     it('detects interface', () => {
       const result = classifyLine('interface ApiKey { value: string }', 'src/types.ts')
       expect(result.isTypeAnnotation).toBe(true)

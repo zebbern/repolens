@@ -403,13 +403,13 @@ describe('scanIssuesAsync', () => {
     expect(treeSitterBatchSizes).toEqual([50, 50, 1])
   })
 
-  it('bounds deferred AST candidates while prioritizing later regex batches', async () => {
+  it('never caps security findings across content batches and matches the sync scan', async () => {
     const entries = new Map<string, string>()
-    const metadata = Array.from({ length: 65 }, (_, index) => {
-      const path = index < 50 ? `src/ast-${index}.ts` : `src/regex-${index}.ts`
+    const metadata = Array.from({ length: 85 }, (_, index) => {
+      const path = index < 50 ? `src/ast-${index}.ts` : index < 65 ? `src/regex-${index}.ts` : `src/log-${index}.ts`
       const content = index < 50
         ? 'Function("return 1")'
-        : 'eval(userInput)'
+        : index < 65 ? 'eval(userInput)' : 'console.log("debug")'
       entries.set(path, content)
       return { path, language: 'typescript', lineCount: 1 }
     })
@@ -419,13 +419,17 @@ describe('scanIssuesAsync', () => {
     )
 
     const result = await scanIssuesAsync(index, null)
-    const evalIssues = result.issues.filter(issue => issue.ruleId === 'eval-usage')
 
-    expect(evalIssues).toHaveLength(15)
-    expect(evalIssues.map(issue => issue.file)).toEqual(
-      Array.from({ length: 15 }, (_, index) => `src/regex-${index + 50}.ts`),
-    )
-    expect(result.ruleOverflow.get('eval-usage')).toBe(50)
+    expect(result.issues.filter(issue => issue.ruleId === 'eval-usage')).toHaveLength(65)
+    expect(result.ruleOverflow.has('eval-usage')).toBe(false)
+    expect(result.issues.filter(issue => issue.ruleId === 'console-log')).toHaveLength(15)
+    expect(result.ruleOverflow.get('console-log')).toBe(5)
+
+    let syncIndex = createEmptyIndex()
+    for (const [path, content] of entries) syncIndex = indexFile(syncIndex, path, content, 'typescript')
+    const syncResult = scanIssues(syncIndex, null)
+    expect(result.issues.map(issue => issue.id).sort()).toEqual(syncResult.issues.map(issue => issue.id).sort())
+    expect([...result.ruleOverflow].sort()).toEqual([...syncResult.ruleOverflow].sort())
   })
 
   it('reports partial AST and taint coverage when an eligible file cannot be parsed', async () => {

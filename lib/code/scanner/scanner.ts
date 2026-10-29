@@ -16,7 +16,7 @@ import type {
   ScanDiagnostics,
   ScanEngine,
 } from './types'
-import { SKIP_VENDORED, SCANNER_EXCLUDE_PATTERNS, detectLanguages } from './constants'
+import { SKIP_VENDORED, SCANNER_EXCLUDE_PATTERNS, detectLanguages, isExemptFromRuleCap } from './constants'
 import { SECURITY_RULES } from './rules-security'
 import { SECURITY_LANG_RULES } from './rules-security-lang'
 import { BAD_PRACTICE_RULES, RELIABILITY_RULES } from './rules-quality'
@@ -101,6 +101,104 @@ function isRuntimeCredentialReference(matchedText: string, ruleId: string, path:
   if (!value) return false
   if (BATCH_CREDENTIAL_REFERENCE.test(value)) return BATCH_SCRIPT_FILE.test(path)
   return RUNTIME_CREDENTIAL_REFERENCE.test(value)
+}
+
+// Credential rules test their excludePattern against the asserted key path,
+// the value, and the names of the containers enclosing it in the same
+// statement (`labels = {`, `i18n.add(`, `LABELS = Object.freeze({`), so a
+// comment or sibling property on the same line cannot hide a real credential.
+const CREDENTIAL_RULE_IDS = new Set(['hardcoded-secret', 'hardcoded-password'])
+const KEY_PATH_CHAR = /[\w$.]/
+const CONTAINER_NAME_SEPARATOR = /[\s=:]/
+// Bounds the backward scan so long minified lines stay linear. A cut-short
+// scan still checks the line's leading assignment target (`var labels = {`).
+const CONTAINER_SCAN_CHARS = 2_000
+const LEADING_ASSIGNMENT_TARGET = /^\s*(?:export\s+)?(?:(?:const|let|var)\s+)?([\w$.]+)\s*(?::[^=]{0,200})?=(?![=>])/
+// API keys and tokens never read as a sentence; a value of three or more
+// short words is UI copy (`apiKey: "API key is required"`). Key material
+// such as an inline PEM block keeps a long unbroken run.
+const PROSE_VALUE = /\S\s+\S+\s+\S/
+const KEY_MATERIAL_RUN = /\S{20}/
+
+/** Last index of `char` in `line` before `before` and not below `floor`, or -1. */
+function lastIndexAbove(line: string, char: string, before: number, floor: number, skipEscaped = false): number {
+  for (let i = before - 1; i >= floor; i--) {
+    if (line[i] === char && !(skipEscaped && line[i - 1] === '\\')) return i
+  }
+  return -1
+}
+
+/** Start of the key path ending at `end`, including bracketed segments such as `labels['en']`. */
+function keyPathStart(line: string, end: number, floor: number): number {
+  let start = end
+  while (start > floor) {
+    const ch = line[start - 1]
+    if (KEY_PATH_CHAR.test(ch)) {
+      start--
+    } else if (ch === ']') {
+      const open = lastIndexAbove(line, '[', start - 1, floor)
+      if (open < 0) break
+      start = open
+    } else {
+      break
+    }
+  }
+  return start
+}
+
+function isAssignmentOperator(line: string, index: number): boolean {
+  return line[index + 1] !== '=' && line[index + 1] !== '>' && !/[=!<>]/.test(line[index - 1] ?? '')
+}
+
+function pushNameBefore(line: string, index: number, floor: number, names: string[]): void {
+  let end = index
+  while (end > floor && CONTAINER_NAME_SEPARATOR.test(line[end - 1])) end--
+  const start = keyPathStart(line, end, floor)
+  if (start < end) names.push(line.slice(start, end))
+}
+
+/**
+ * Names of the unclosed objects, arrays and calls left of `index`, and the
+ * targets assigned to them, innermost first. Stops at the statement boundary.
+ */
+function enclosingContainerNames(line: string, index: number): string[] {
+  const names: string[] = []
+  const floor = Math.max(0, index - CONTAINER_SCAN_CHARS)
+  let depth = 0
+  for (let i = index - 1; i >= floor; i--) {
+    const ch = line[i]
+    if (ch === '"' || ch === "'" || ch === '`') {
+      i = lastIndexAbove(line, ch, i, floor, true)
+      if (i < 0) break
+    } else if (ch === '}' || ch === ')' || ch === ']') {
+      depth++
+    } else if (ch === '{' || ch === '(' || ch === '[') {
+      if (depth > 0) depth--
+      else pushNameBefore(line, i, floor, names)
+    } else if (depth === 0 && ch === ';') {
+      return names
+    } else if (depth === 0 && ch === '=' && isAssignmentOperator(line, i)) {
+      pushNameBefore(line, i, floor, names)
+    }
+  }
+  if (floor > 0) {
+    const target = LEADING_ASSIGNMENT_TARGET.exec(line)?.[1]
+    if (target) names.push(target)
+  }
+  return names
+}
+
+function isExcludedCredential(rule: ScanRule, lineContent: string, match: RegExpExecArray): boolean {
+  const excludePattern = rule.excludePattern
+  if (!excludePattern || !CREDENTIAL_RULE_IDS.has(rule.id)) return false
+  if (rule.id === 'hardcoded-secret') {
+    const value = match[0].match(CREDENTIAL_ASSIGNMENT)?.[2] ?? ''
+    if (PROSE_VALUE.test(value) && !KEY_MATERIAL_RUN.test(value)) return true
+  }
+
+  const start = keyPathStart(lineContent, match.index, Math.max(0, match.index - CONTAINER_SCAN_CHARS))
+  if (excludePattern.test(lineContent.slice(start, match.index + match[0].length))) return true
+  return enclosingContainerNames(lineContent, start).some(name => excludePattern.test(name))
 }
 
 // ---------------------------------------------------------------------------
@@ -276,13 +374,16 @@ function runRegexRules(
         // Test compiled regex against the line
         regex.lastIndex = 0
         let ruleMatch = regex.exec(lineContent)
-        while (ruleMatch && isRuntimeCredentialReference(ruleMatch[0], rule.id, path)) {
+        while (
+          ruleMatch
+          && (isRuntimeCredentialReference(ruleMatch[0], rule.id, path) || isExcludedCredential(rule, lineContent, ruleMatch))
+        ) {
           ruleMatch = regex.exec(lineContent)
         }
         if (!ruleMatch) continue
 
-        // Per-rule line exclusion
-        if (rule.excludePattern && rule.excludePattern.test(lineContent)) continue
+        // Per-rule line exclusion (credential rules were checked per match above)
+        if (rule.excludePattern && !CREDENTIAL_RULE_IDS.has(rule.id) && rule.excludePattern.test(lineContent)) continue
         if (
           rule.id === 'nextjs-rsc-ssrf'
           && SSRF_FILE_VALIDATION.test(file.content)
@@ -352,18 +453,16 @@ function runRegexRules(
           sharedRuleMatchIds.add(issueId)
         }
 
-        // --- Per-rule cap ---
+        // --- Per-rule cap (security and critical findings are never dropped) ---
         const ruleCount = (ruleCounts.get(rule.id) || 0) + 1
         ruleCounts.set(rule.id, ruleCount)
-        if (ruleCount > MAX_PER_RULE) {
+        if (ruleCount > MAX_PER_RULE && !isExemptFromRuleCap(rule)) {
           ruleOverflow.set(rule.id, (ruleOverflow.get(rule.id) || 0) + 1)
           continue
         }
 
-        // --- Compute column from match position ---
-        regex.lastIndex = 0
-        const matchResult = regex.exec(lineContent)
-        const column = matchResult ? matchResult.index : 0
+        // --- Compute column from the accepted match position ---
+        const column = ruleMatch.index
 
         issues.push({
           id: issueId,
@@ -484,7 +583,7 @@ function runRegexRules(
         }
         const ruleCount = (ruleCounts.get(rule.id) || 0) + 1
         ruleCounts.set(rule.id, ruleCount)
-        if (ruleCount > MAX_PER_RULE) {
+        if (ruleCount > MAX_PER_RULE && !isExemptFromRuleCap(rule)) {
           ruleOverflow.set(rule.id, (ruleOverflow.get(rule.id) || 0) + 1)
           continue
         }
@@ -716,16 +815,17 @@ function deduplicateIssues(
       issues.splice(i, 1)
       continue
     }
-    if (deferredAstEval) {
+    const capExempt = isExemptFromRuleCap(issue)
+    if (deferredAstEval && !capExempt) {
       deferredAstEval.count++
       deferredAstEval.issueIds.add(issue.id)
       continue
     }
-    // Apply MAX_PER_RULE cap
+    // Apply MAX_PER_RULE cap (security and critical findings are never dropped)
     normalizedEvalCount++
     ruleCounts?.set('eval-usage', normalizedEvalCount)
     ruleMatchIds?.add(issue.id)
-    if (normalizedEvalCount > MAX_PER_RULE) {
+    if (normalizedEvalCount > MAX_PER_RULE && !capExempt) {
       ruleOverflow.set('eval-usage', (ruleOverflow.get('eval-usage') || 0) + 1)
       issues.splice(i, 1)
     }

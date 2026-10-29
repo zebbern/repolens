@@ -225,6 +225,77 @@ describe('Category A: Secrets & Credentials', () => {
     const hits = issuesForRule(result.issues, 'hardcoded-secret')
     expect(hits.length).toBeGreaterThanOrEqual(1)
   })
+
+  it.each([
+    ['a comment with generic words', 'src/config.ts', 'const apiKey = "Zx9QpL2mVn8RtY4wKs7HbJ3c" // message type', 'typescript', 'hardcoded-secret'],
+    ['a TODO comment', 'src/config.ts', 'const apiKey = "Zx9QpL2mVn8RtY4wKs7HbJ3c" // TODO: rotate', 'typescript', 'hardcoded-secret'],
+    ['a label property', 'src/config.ts', 'export const c = { label: "prod", api_key: "Zx9QpL2mVn8RtY4wKs7HbJ3c" }', 'typescript', 'hardcoded-secret'],
+    ['a placeholder sibling property', 'src/config.ts', 'const keys = { api_key: "your-api-key-here", client_secret: "Zx9QpL2mVn8RtY4wKs7HbJ3c" }', 'typescript', 'hardcoded-secret'],
+    ['a field-prefixed key name', 'config/settings.py', 'FIELD_ENCRYPTION_KEY = "Zx9QpL2mVn8RtY4wKs7HbJ3c"', 'python', 'hardcoded-secret'],
+    ['a type property', 'src/db.ts', 'const db = { type: "postgres", password: "Hunter2Secret!" }', 'typescript', 'hardcoded-password'],
+    ['an args property', 'src/db.ts', 'connect({ args: [], password: "Hunter2Secret!" })', 'typescript', 'hardcoded-password'],
+    ['a value containing a generic substring', 'src/db.ts', 'const dbPassword = "Target2024!"', 'typescript', 'hardcoded-password'],
+    ['a message-prefixed key name', 'src/config.ts', 'MESSAGE_SIGNING_KEY = "Zx9QpL2mVn8RtY4wKs7HbJ3c"', 'typescript', 'hardcoded-secret'],
+    ['a type segment in the key path', 'src/config.ts', 'config.type.secret = "Zx9QpL2mVn8RtY4wKs7HbJ3c"', 'typescript', 'hardcoded-secret'],
+    ['a form segment in the key path', 'src/config.ts', 'this.form.api_key = "Zx9QpL2mVn8RtY4wKs7HbJ3c"', 'typescript', 'hardcoded-secret'],
+    ['an input segment in the key path', 'src/config.ts', 'input.api_key = "Zx9QpL2mVn8RtY4wKs7HbJ3c"', 'typescript', 'hardcoded-secret'],
+    ['a display segment in the key path', 'src/config.ts', 'display.api_key = "Zx9QpL2mVn8RtY4wKs7HbJ3c"', 'typescript', 'hardcoded-secret'],
+    ['a value containing "param"', 'src/db.ts', 'const dbPassword = "Param2024!x"', 'typescript', 'hardcoded-password'],
+    ['a value containing "type"', 'src/db.ts', 'const db = { password: "Mytype#2024" }', 'typescript', 'hardcoded-password'],
+    ['a replacement-prefixed password name', 'src/db.ts', 'const replacementPassword = "Hunter2Secret!"', 'typescript', 'hardcoded-password'],
+    ['a replacement-prefixed secret name', 'src/config.ts', 'REPLACEMENT_SECRET = "Zx9QpL2mVn8RtY4wKs7HbJ3c"', 'typescript', 'hardcoded-secret'],
+    ['a base64 secret starting with "+"', 'src/config.ts', 'const JWT_SECRET = "+3kTq9vB2nX0wY7zP4rL8mF6hJ1sD5gA="', 'typescript', 'hardcoded-secret'],
+    ['a password starting with "+"', 'src/db.ts', 'password = "+Hunter2Secret"', 'typescript', 'hardcoded-password'],
+    ['a password starting with ".."', 'src/db.ts', 'password = "..Hunter2Secret"', 'typescript', 'hardcoded-password'],
+    ['a password starting with ".$"', 'src/db.ts', 'password = ".$Hunter2Secret"', 'typescript', 'hardcoded-password'],
+    ['a secret starting with ". "', 'src/config.ts', 'api_key = " . Zx9QpL2mVn8RtY4wKs7HbJ3c"', 'typescript', 'hardcoded-secret'],
+    ['an inline PEM private key', 'src/keys.ts', "const privateKey = '-----BEGIN RSA PRIVATE KEY-----\\nMIICXAIBAAKBgQDNwqLEe9wgTXCbC7RPdDbBbeqjdbs4kOPOIGzqLpXvJX'", 'typescript', 'hardcoded-secret'],
+  ])('A16: detects a credential next to %s', (_name, path, code, lang, ruleId) => {
+    const result = scanCode(path, code, lang)
+    expect(issuesForRule(result.issues, ruleId)).toHaveLength(1)
+  })
+
+  it('A16b: reports the column of the credential that was not excluded', () => {
+    const code = 'const keys = { api_key: "your-api-key-here", client_secret: "Zx9QpL2mVn8RtY4wKs7HbJ3c" }'
+    const result = scanCode('src/config.ts', code, 'typescript')
+    const hits = issuesForRule(result.issues, 'hardcoded-secret')
+    expect(hits.map(hit => hit.column)).toEqual([code.indexOf('client_secret')])
+  })
+
+  it.each([
+    ['an example key name', 'src/config.ts', 'const EXAMPLE_API_KEY = "Zx9QpL2mVn8RtY4wKs7HbJ3c"', 'typescript', 'hardcoded-secret'],
+    ['a label key name', 'src/providers.ts', "labelForGetApiKey = 'Get LMStudio';", 'typescript', 'hardcoded-secret'],
+    ['an i18n label key value', 'src/copy.ts', 'const copy = { apiKey: "settings.apiKey.label" }', 'typescript', 'hardcoded-secret'],
+    ['a field-name constant', 'src/constants.ts', "const CREDENTIALS_FIELD_PASSWORD = 'password';", 'typescript', 'hardcoded-password'],
+    ['an i18n password label key value', 'src/copy.ts', 'const copy = { password: "auth.form.password.label" }', 'typescript', 'hardcoded-password'],
+    ['a hashed password key name', 'src/seed.ts', 'hashed_password = "$2b$12$Zx9QpL2mVn8RtY4wKs7HbJ"', 'typescript', 'hardcoded-password'],
+    ['a REPLACE_WITH placeholder value', 'src/flow.ts', "const params = { apiKey: 'REPLACE_WITH_APIKEY' }", 'typescript', 'hardcoded-secret'],
+    ['a labels map', 'src/copy.ts', "const labels = { username: 'Username', password: 'Password' }", 'typescript', 'hardcoded-password'],
+    ['a messages map', 'src/copy.ts', "const messages = { password: 'Password is required' }", 'typescript', 'hardcoded-password'],
+    ['a placeholders map', 'src/copy.ts', "const placeholders = { email: 'you@site.com', password: 'Enter password' }", 'typescript', 'hardcoded-password'],
+    ['a nested translations map', 'src/copy.ts', "const translations = { en: { password: 'Password' } }", 'typescript', 'hardcoded-password'],
+    ['an i18n call argument', 'src/copy.ts', "i18n.add('en', { password: 'Password' })", 'typescript', 'hardcoded-password'],
+    ['a schema map', 'src/schema.ts', "const schema = { password: 'string|min:8' }", 'typescript', 'hardcoded-password'],
+    ['a field errors map', 'src/copy.ts', "const fieldErrors = { password: 'Must be at least 8 characters' }", 'typescript', 'hardcoded-password'],
+    ['a bracketed labels key path', 'src/copy.ts', "labels['en'].password = 'Password'", 'typescript', 'hardcoded-password'],
+    ['a Go concatenation with a runtime password', 'cmd/db.go', 'cmd.Env = append(os.Environ(), "PGPASSWORD="+pass, "PGUSER="+user)', 'go', 'hardcoded-password'],
+    ['a JS concatenation with a runtime password', 'src/db.ts', 'const conn = process.env.DATABASE_URL || "Server=db;Password=" + pw + ";User=sa"', 'typescript', 'hardcoded-password'],
+    ['a PHP concatenation with a runtime password', 'src/db.php', '$dsn = "host=db;password=" . $pw . ";port=5432";', 'php', 'hardcoded-password'],
+    ['a PHP concatenation without spaces', 'src/db.php', '$dsn = "password=".$pw.";port=5432";', 'php', 'hardcoded-password'],
+    ['a PHP concatenation with a getter', 'src/db.php', '$dsn = "password=" . getPw() . ";port=5432";', 'php', 'hardcoded-password'],
+    ['a Lua concatenation', 'src/db.lua', 'local dsn = "password=" .. pw .. ";port=5432"', 'lua', 'hardcoded-password'],
+    ['a Java concatenation with a password getter', 'src/Db.java', 'return getConnection("PASSWORD=" + getDatabasePassword() + ";");', 'java', 'hardcoded-password'],
+    ['a labels map wrapped in a call', 'src/copy.ts', 'export const LABELS = Object.freeze({ password: "Password" })', 'typescript', 'hardcoded-password'],
+    ['a labels map returned from a memo callback', 'src/copy.tsx', 'const labels = useMemo(() => ({ password: "Password" }), [])', 'typescript', 'hardcoded-password'],
+    ['a Python labels dict call', 'src/copy.py', 'LABELS = dict(username="Username", password="Password")', 'python', 'hardcoded-password'],
+    ['a labels map after an escaped quote', 'src/copy.ts', 'const labels = { hint: "5\\" screen", password: "Password" }', 'typescript', 'hardcoded-password'],
+    ['a secret-named message string', 'src/copy.ts', 'const messages = { apiKey: "API key is required for this provider" }', 'typescript', 'hardcoded-secret'],
+    ['a secret-named error message assignment', 'src/copy.ts', 'errorMessages.apiKey = "The API key you entered is invalid"', 'typescript', 'hardcoded-secret'],
+    ['an exported type literal', 'src/types.ts', 'export type Mode = { password: "visible" | "hidden" }', 'typescript', 'hardcoded-password'],
+  ])('A16c: FALSE POSITIVE — %s is not flagged', (_name, path, code, lang, ruleId) => {
+    const result = scanCode(path, code, lang)
+    expect(issuesForRule(result.issues, ruleId)).toHaveLength(0)
+  })
 })
 
 // ============================================================================
@@ -1034,12 +1105,19 @@ describe('Category J: Edge Cases & Obfuscation', () => {
     expect(hits.length).toBeGreaterThanOrEqual(3)
   })
 
-  it('J3: rule overflow — MAX_PER_RULE caps at 15', () => {
+  it('J3: rule overflow — MAX_PER_RULE caps non-security rules at 15', () => {
+    const lines = Array.from({ length: 20 }, (_, i) => `console.log(input_${i})`)
+    const result = scanCode('src/bad.ts', lines.join('\n'), 'typescript')
+    const hits = issuesForRule(result.issues, 'console-log')
+    expect(hits).toHaveLength(15)
+    expect(result.ruleOverflow.get('console-log')).toBe(5)
+  })
+
+  it('J3b: security findings are never dropped by MAX_PER_RULE', () => {
     const lines = Array.from({ length: 20 }, (_, i) => `eval(input_${i})`)
     const result = scanCode('src/bad.ts', lines.join('\n'), 'typescript')
-    const hits = issuesForRule(result.issues, 'eval-usage')
-    expect(hits.length).toBeLessThanOrEqual(15)
-    expect(result.ruleOverflow.size).toBeGreaterThanOrEqual(1)
+    expect(issuesForRule(result.issues, 'eval-usage')).toHaveLength(20)
+    expect(result.ruleOverflow.has('eval-usage')).toBe(false)
   })
 
   it('J4: differential scan — only changed file issues', () => {

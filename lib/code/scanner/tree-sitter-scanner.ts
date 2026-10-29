@@ -17,7 +17,7 @@ import {
 } from '@/lib/parsers/tree-sitter'
 import { TREE_SITTER_RULES, getRulesForLanguage, getLanguagesWithRules } from './rules-tree-sitter'
 import type { TreeSitterRule } from './rules-tree-sitter'
-import { SKIP_VENDORED } from './constants'
+import { SKIP_VENDORED, isExemptFromRuleCap } from './constants'
 
 const MAX_PER_RULE = 15
 
@@ -112,7 +112,8 @@ export async function scanWithTreeSitter(
 
 /**
  * Run a single Tree-sitter rule against a parsed syntax tree (async).
- * Returns up to MAX_PER_RULE issues.
+ * Returns up to MAX_PER_RULE issues, except for security and critical rules,
+ * which are never capped.
  */
 async function runRuleOnFileAsync(
   rule: TreeSitterRule,
@@ -134,10 +135,11 @@ async function runRuleOnFileAsync(
   }
 
   const captureName = rule.captureName
+  const capExempt = isExemptFromRuleCap(rule)
   let count = 0
 
   for (const match of matches) {
-    if (count >= MAX_PER_RULE) break
+    if (count >= MAX_PER_RULE && !capExempt) break
 
     // Find the capture node to report on
     let reportNode

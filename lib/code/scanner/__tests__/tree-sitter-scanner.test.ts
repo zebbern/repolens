@@ -17,6 +17,7 @@ vi.mock('@/lib/parsers/tree-sitter', () => ({
 }))
 
 import { scanWithTreeSitter } from '@/lib/code/scanner/tree-sitter-scanner'
+import { TREE_SITTER_RULES } from '@/lib/code/scanner/rules-tree-sitter'
 import { initTreeSitter, parseFile, queryTree, getLanguageForFile } from '@/lib/parsers/tree-sitter'
 
 const mockedInitTreeSitter = vi.mocked(initTreeSitter)
@@ -173,7 +174,7 @@ describe('scanWithTreeSitter', () => {
     expect(fakeTree.delete).toHaveBeenCalledTimes(1)
   })
 
-  it('applies MAX_PER_RULE cap (15 max per rule per file)', async () => {
+  it('caps non-security rules at 15 per file but never caps security rules', async () => {
     // Generate 20 matches for one rule
     const manyMatches = Array.from({ length: 20 }, (_, i) => ({
       captures: {
@@ -193,15 +194,22 @@ describe('scanWithTreeSitter', () => {
 
     const result = await scanWithTreeSitter(files)
 
-    // Count issues for any single rule
     const countByRule = new Map<string, number>()
     for (const issue of result) {
       countByRule.set(issue.ruleId, (countByRule.get(issue.ruleId) ?? 0) + 1)
     }
 
-    for (const [, count] of countByRule) {
-      expect(count).toBeLessThanOrEqual(15)
-    }
+    const securityCounts = TREE_SITTER_RULES
+      .filter(rule => rule.languages.includes('python') && rule.category === 'security')
+      .map(rule => [rule.id, countByRule.get(rule.id)])
+    expect(securityCounts.length).toBeGreaterThan(0)
+    expect(securityCounts).toEqual(securityCounts.map(([id]) => [id, 20]))
+
+    const otherCounts = [...countByRule]
+      .filter(([id]) => TREE_SITTER_RULES.find(rule => rule.id === id)?.category !== 'security')
+      .map(([, count]) => count)
+    expect(otherCounts.length).toBeGreaterThan(0)
+    expect(otherCounts.every(count => count === 15)).toBe(true)
   })
 
   it('deduplicates issues by id (same rule + file + line)', async () => {

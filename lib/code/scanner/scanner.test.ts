@@ -97,17 +97,48 @@ describe('scanIssues', () => {
 
   it('caps per-rule issues at 15 and tracks overflow', () => {
     let index = createEmptyIndex()
-    // Create many eval usages to exceed MAX_PER_RULE
-    const lines = Array.from({ length: 20 }, (_, i) => `const r${i} = eval("x${i}")`)
-    index = indexFile(index, 'src/many-evals.ts', lines.join('\n'), 'typescript')
+    // Create many non-security matches to exceed MAX_PER_RULE
+    const lines = Array.from({ length: 20 }, (_, i) => `console.log("x${i}")`)
+    index = indexFile(index, 'src/many-logs.ts', lines.join('\n'), 'typescript')
 
     const result = scanIssues(index, null)
-    const evalIssues = result.issues.filter(i => i.ruleId === 'eval-usage')
-    expect(evalIssues.length).toBeLessThanOrEqual(15)
-    // Overflow should be tracked
-    if (evalIssues.length === 15) {
-      expect(result.ruleOverflow.has('eval-usage')).toBe(true)
-    }
+    const logIssues = result.issues.filter(i => i.ruleId === 'console-log')
+    expect(logIssues).toHaveLength(15)
+    expect(result.ruleOverflow.get('console-log')).toBe(5)
+  })
+
+  it('never caps security findings', () => {
+    let index = createEmptyIndex()
+    const lines = Array.from({ length: 20 }, (_, i) => `const r${i} = eval("x${i}")\nel${i}.innerHTML = html${i}`)
+    index = indexFile(index, 'src/many-sinks.ts', lines.join('\n'), 'typescript')
+
+    const result = scanIssues(index, null)
+    expect(result.issues.filter(i => i.ruleId === 'eval-usage')).toHaveLength(20)
+    expect(result.issues.filter(i => i.ruleId === 'innerhtml-xss')).toHaveLength(20)
+    expect(result.ruleOverflow.has('eval-usage')).toBe(false)
+    expect(result.ruleOverflow.has('innerhtml-xss')).toBe(false)
+  })
+
+  it('never caps multi-line security findings', () => {
+    let index = createEmptyIndex()
+    const sites = Array.from({ length: 20 }, (_, i) => `db.query(\n  "SELECT * FROM users WHERE id = " + req.query.id${i}\n)`)
+    index = indexFile(index, 'src/many-queries.ts', sites.join('\n'), 'typescript')
+
+    const result = scanIssues(index, null)
+    const reportedLines = new Set(result.issues.filter(i => i.ruleId === 'sql-injection').map(i => i.line))
+    const queryLines = Array.from({ length: 20 }, (_, i) => i * 3 + 1)
+    expect(queryLines.filter(line => !reportedLines.has(line))).toEqual([])
+    expect(result.ruleOverflow.has('sql-injection')).toBe(false)
+  })
+
+  it('never caps AST-only eval findings', () => {
+    let index = createEmptyIndex()
+    const lines = Array.from({ length: 20 }, (_, i) => `Function("return ${i}")`)
+    index = indexFile(index, 'src/many-functions.ts', lines.join('\n'), 'typescript')
+
+    const result = scanIssues(index, null)
+    expect(result.issues.filter(i => i.ruleId === 'eval-usage')).toHaveLength(20)
+    expect(result.ruleOverflow.has('eval-usage')).toBe(false)
   })
 
   it('handles empty index', () => {

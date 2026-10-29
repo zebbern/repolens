@@ -32,7 +32,7 @@ const PY_TRIPLE_SINGLE = /'''/
 // Type annotation patterns
 // ---------------------------------------------------------------------------
 
-const TYPE_ANNOTATION_PATTERN = /^\s*(?:type\s+\w|interface\s+\w)|:\s*[A-Z]\w+|(?:\bas\b\s+[A-Z]\w+)|<[A-Z]\w+>|@dataclass|class\s+\w+.*:|def\s+\w+\(.*:\s*(?:str|int|bool)|(?:String|int|boolean)\s+\w+\)|type\s+\w+\s+struct/
+const TYPE_ANNOTATION_PATTERN = /^\s*(?:export\s+)?(?:declare\s+)?(?:type\s+\w|interface\s+\w)|:\s*[A-Z]\w+|(?:\bas\b\s+[A-Z]\w+)|<[A-Z]\w+>|@dataclass|class\s+\w+.*:|def\s+\w+\(.*:\s*(?:str|int|bool)|(?:String|int|boolean)\s+\w+\)|type\s+\w+\s+struct/
 
 // ---------------------------------------------------------------------------
 // String literal heuristic

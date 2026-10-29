@@ -230,16 +230,14 @@ describe('scanner integration — deduplication & sorting', () => {
 // ---------------------------------------------------------------------------
 
 describe('scanner integration — MAX_PER_RULE overflow', () => {
-  it('caps issues per rule at 15 and tracks overflow', () => {
-    const lines = Array.from({ length: 20 }, (_, i) => `const r${i} = eval("x${i}")`)
-    const index = makeCodeIndex([{ path: 'src/many-evals.ts', content: lines.join('\n') }])
+  it('caps non-security issues per rule at 15 and tracks overflow', () => {
+    const lines = Array.from({ length: 20 }, (_, i) => `console.log("x${i}")`)
+    const index = makeCodeIndex([{ path: 'src/many-logs.ts', content: lines.join('\n') }])
     const results = scanIssues(index, null)
 
-    const evalIssues = results.issues.filter(i => i.ruleId === 'eval-usage')
-    expect(evalIssues.length).toBeLessThanOrEqual(15)
-    if (evalIssues.length === 15) {
-      expect(results.ruleOverflow.has('eval-usage')).toBe(true)
-    }
+    const logIssues = results.issues.filter(i => i.ruleId === 'console-log')
+    expect(logIssues).toHaveLength(15)
+    expect(results.ruleOverflow.get('console-log')).toBe(5)
   })
 })
 

@@ -79,7 +79,8 @@ export interface ScanRule {
   patternOptions?: { caseSensitive?: boolean; regex?: boolean; wholeWord?: boolean }
   // Only apply to files matching these extensions
   fileFilter?: string[]
-  // Exclude matches where the line content matches this
+  // Exclude matches where the line content matches this (credential rules test
+  // only the matched key path and value)
   excludePattern?: RegExp
   // Exclude files whose path matches this
   excludeFiles?: RegExp

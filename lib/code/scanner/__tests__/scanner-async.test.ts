@@ -64,7 +64,7 @@ describe('scanIssuesAsync', () => {
     mockedScanCompositeRules.mockClear()
     mockedScanSupplyChain.mockClear()
     mockedScanWithTreeSitter.mockReset()
-    mockedScanWithTreeSitter.mockResolvedValue([])
+    mockedScanWithTreeSitter.mockResolvedValue({ issues: [], ruleOverflow: new Map() })
   })
 
   it('returns same results as sync scanIssues for identical input', async () => {
@@ -350,7 +350,7 @@ describe('scanIssuesAsync', () => {
     const treeSitterBatchSizes: number[] = []
     mockedScanWithTreeSitter.mockImplementation(async files => {
       treeSitterBatchSizes.push(files.size)
-      return []
+      return { issues: [], ruleOverflow: new Map() }
     })
     const entries = new Map<string, string>()
     const paths = new Set<string>()
@@ -549,7 +549,7 @@ describe('scanIssuesAsync', () => {
     index = indexFile(index, 'src/app.py', 'try:\n    pass\nexcept:\n    pass\n', 'python')
     mockedScanWithTreeSitter
       .mockRejectedValueOnce(new Error('temporary grammar failure'))
-      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce({ issues: [], ruleOverflow: new Map() })
 
     const failed = await scanIssuesAsync(index, null)
     const recovered = await scanIssuesAsync(index, null)

@@ -780,6 +780,74 @@ describe('deps API — POST handler', () => {
     consoleError.mockRestore()
   })
 
+  /**
+   * Eleven packages because the route fetches ten at a time: the eleventh starts only
+   * after an earlier package settles, so it is skipped once rate limiting has tripped.
+   * Every response except `failing` waits a tick so the failure settles first.
+   */
+  function stubRegistryWithFailure(failing: (url: string) => { ok: false; status: number } | undefined) {
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input)
+      const failure = failing(url)
+      if (failure) return failure
+      await new Promise(resolve => setTimeout(resolve, 0))
+      if (url.includes('/latest')) {
+        return { ok: true, json: () => Promise.resolve({ version: '1.0.0', maintainers: [] }) }
+      }
+      if (url.includes('api.npmjs.org/downloads')) {
+        return { ok: true, json: () => Promise.resolve({ downloads: [] }) }
+      }
+      return { ok: true, json: () => Promise.resolve({ objects: [] }) }
+    })
+    globalThis.fetch = fetchMock as unknown as typeof fetch
+    return fetchMock
+  }
+
+  it('does not treat a package name containing 429 as npm rate limiting', async () => {
+    const packages = ['http-429-codes', ...Array.from({ length: 10 }, (_, index) => `pkg-${index}`)]
+    stubRegistryWithFailure(url => (
+      url.includes('/http-429-codes/latest') ? { ok: false, status: 404 } : undefined
+    ))
+    vi.resetModules()
+    POST = (await import('../route')).POST
+
+    const res = await POST(new Request('http://localhost/api/deps', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ packages }),
+    }))
+    const data = await res.json()
+
+    expect(data.errors).toEqual(['npm registry returned 404 for http-429-codes'])
+    expect(Object.keys(data.results).sort()).toEqual(packages.slice(1).sort())
+  })
+
+  it.each([
+    ['metadata', '/latest'],
+    ['download', 'api.npmjs.org/downloads/'],
+    ['publication search', '/-/v1/search'],
+  ])('reports a genuine npm %s 429 as rate limiting and skips later packages', async (_endpoint, endpoint) => {
+    const packages = Array.from({ length: 11 }, (_, index) => `pkg-${index}`)
+    const fetchMock = stubRegistryWithFailure(url => (
+      url.includes(endpoint) && url.includes('pkg-0') ? { ok: false, status: 429 } : undefined
+    ))
+    vi.resetModules()
+    POST = (await import('../route')).POST
+
+    const res = await POST(new Request('http://localhost/api/deps', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ packages }),
+    }))
+    const data = await res.json()
+
+    expect(data.errors).toEqual(['npm registry rate limit reached — some packages were skipped'])
+    expect(data.results['pkg-0']).toBeUndefined()
+    expect(data.results['pkg-10']).toBeUndefined()
+    expect(Object.keys(data.results)).toHaveLength(9)
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes('pkg-10'))).toBe(false)
+  })
+
   it('aborts every npm metadata request when the client disconnects', async () => {
     const observedSignals: AbortSignal[] = []
     globalThis.fetch = vi.fn().mockImplementation((_url: string, init?: RequestInit) => (

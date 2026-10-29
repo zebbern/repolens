@@ -1487,8 +1487,12 @@ async function scanIssuesAsyncImpl(
         addIssues(accumulator, supplyChainIssues)
       })
       await runAsyncEngine(accumulator, 'tree-sitter', failureMode, async () => {
-        const treeSitterIssues = await scanWithTreeSitter(batchFilesToScan)
-        addIssues(accumulator, treeSitterIssues.filter(issue => filesToScan.has(issue.file)))
+        const treeSitterResult = await scanWithTreeSitter(batchFilesToScan)
+        addIssues(accumulator, treeSitterResult.issues.filter(issue => filesToScan.has(issue.file)))
+        // Tree-sitter rule ids are `ts-` prefixed, so these counts stay apart from regex rule counts
+        for (const [ruleId, count] of treeSitterResult.ruleOverflow) {
+          accumulator.ruleOverflow.set(ruleId, (accumulator.ruleOverflow.get(ruleId) || 0) + count)
+        }
       })
 
       batchFilesToScan.clear()

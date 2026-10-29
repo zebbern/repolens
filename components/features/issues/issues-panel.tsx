@@ -48,7 +48,7 @@ function RuleOverflowSummary({ ruleOverflow }: { ruleOverflow: Map<string, numbe
   return (
     <section className="mt-4 rounded-lg border border-foreground/6 bg-foreground/2 p-3" aria-labelledby="issue-result-limits-title">
       <h3 id="issue-result-limits-title" className="text-xs font-medium text-text-secondary">Result limits</h3>
-      <p className="mt-1 text-[11px] text-text-muted">Showing top 15 findings per rule; security and critical findings are never capped.</p>
+      <p className="mt-1 text-[11px] text-text-muted">Showing top 15 findings per rule (per file for Tree-sitter rules); security and critical findings are never capped.</p>
       <p className="mt-0.5 text-[11px] text-text-muted">
         Additional matches were counted but are not retained in this scan.
       </p>

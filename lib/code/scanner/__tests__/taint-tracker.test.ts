@@ -1540,6 +1540,8 @@ describe('trackTaint — NoSQL sink false positives', () => {
     ['imported lodash find with a callback', "import _ from 'lodash';\nfunction handler(req) { return _.find(list, u => u.id === req.params.id); }"],
     ['imported Ramda find with a predicate', "import * as R from 'ramda';\nfunction handler(req) { return R.find(R.propEq('id', req.params.id), list); }"],
     ['required Ramda where spec', "const R = require('ramda');\nfunction handler(req) { return R.where({ id: R.equals(req.params.id) })(item); }"],
+    ['a property read off required underscore', "const _ = require('underscore')._;\nfunction handler(req) { return _.find(list, { id: req.params.id }); }"],
+    ['a default read off required Ramda', "const R = require('ramda').default;\nfunction handler(req) { return R.find(R.propEq('id', req.params.id), list); }"],
     ['global Ramda find with a predicate', "function handler(req) { return R.find(R.propEq('id', req.params.id), list); }"],
     ['imported Rambda find with a predicate', "import * as R from 'rambda';\nfunction handler(req) { return R.find(R.propEq('id', req.params.id), list); }"],
     ['imported Remeda find with a predicate', "import * as R from 'remeda';\nfunction handler(req) { return R.find(list, R.isDeepEqual({ id: req.params.id })); }"],
@@ -1558,6 +1560,9 @@ describe('trackTaint — NoSQL sink false positives', () => {
     ['a Mongoose model', "import mongoose from 'mongoose';\nconst User = mongoose.model('User', schema);\nfunction handler(req) { return User.find(req.body); }"],
     ['an imported model', "import User from './models/user';\nfunction handler(req) { return User.find(req.body); }"],
     ['a model query with a trailing callback', "import User from './models/user';\nfunction handler(req) { return User.find({ name: req.query.name }, (err, docs) => docs); }"],
+    ['a model destructured from a required module', "const { User } = require('./models');\nfunction handler(req) { return User.find(req.body); }"],
+    ['a model read off a required module', "const User = require('./models/user').User;\nfunction handler(req) { return User.find(req.body); }"],
+    ['a model built from required mongoose', "const User = require('mongoose').model('User');\nfunction handler(req) { return User.find(req.body); }"],
   ])('still reports %s as NoSQL injection', (_name, code) => {
     expect(noSqlFlows(code)).toHaveLength(1)
   })

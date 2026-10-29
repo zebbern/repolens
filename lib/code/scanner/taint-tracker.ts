@@ -1758,6 +1758,19 @@ function isCollectionUtilityModule(specifier: t.Node | undefined): boolean {
   return t.isStringLiteral(specifier) && COLLECTION_UTILITY_MODULE.test(specifier.value)
 }
 
+function isRequireCall(node: t.Node): node is t.CallExpression {
+  return t.isCallExpression(node) && t.isIdentifier(node.callee, { name: 'require' })
+}
+
+/** `require('mongoose').model`, the inline form of `mongoose.model`. */
+function isRequiredMongooseModel(callee: t.Node): boolean {
+  return (t.isMemberExpression(callee) || t.isOptionalMemberExpression(callee))
+    && !callee.computed
+    && t.isIdentifier(callee.property, { name: 'model' })
+    && isRequireCall(callee.object)
+    && t.isStringLiteral(callee.object.arguments[0], { value: 'mongoose' })
+}
+
 function resolveNoSqlBinding(
   name: string,
   scopePath: NodePath,
@@ -1797,11 +1810,13 @@ function isNoSqlModelExpression(
   if (t.isCallExpression(node) || t.isOptionalCallExpression(node)) {
     const callee = nodeToSource(node.callee, lines)
     if (/^(?:mongoose\.model|db\.collection)$/.test(callee)) return true
+    if (isRequiredMongooseModel(node.callee)) return true
     return callee === 'require' && !isCollectionUtilityModule(node.arguments[0])
   }
   if (t.isMemberExpression(node) || t.isOptionalMemberExpression(node)) {
     if (getMemberPath(node) === 'mongoose.Model') return true
-    if (t.isCallExpression(node.object) && t.isIdentifier(node.object.callee, { name: 'require' })) return true
+    // A property read off a collection utility (`require('underscore')._`) is still that utility.
+    if (isRequireCall(node.object)) return !isCollectionUtilityModule(node.object.arguments[0])
     const root = getMemberPath(node)?.split('.')[0]
     return root ? resolveNoSqlBinding(root, scopePath, lines, seen, false) : false
   }

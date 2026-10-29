@@ -18,6 +18,10 @@ vi.mock('@/lib/parsers/tree-sitter', () => ({
 
 import { scanWithTreeSitter } from '@/lib/code/scanner/tree-sitter-scanner'
 import { TREE_SITTER_RULES } from '@/lib/code/scanner/rules-tree-sitter'
+import { clearScanCache, getAllRules, scanIssuesAsync } from '@/lib/code/scanner/scanner'
+import { isExemptFromRuleCap } from '@/lib/code/scanner/constants'
+import type { CodeIssue } from '@/lib/code/scanner/types'
+import { createEmptyIndex, indexFile } from '@/lib/code/code-index'
 import { initTreeSitter, parseFile, queryTree, getLanguageForFile } from '@/lib/parsers/tree-sitter'
 
 const mockedInitTreeSitter = vi.mocked(initTreeSitter)
@@ -39,6 +43,24 @@ function makeFakeTree() {
   return { delete: vi.fn() } as unknown as import('web-tree-sitter').Tree
 }
 
+/** One query match per row, reported on an `eval` node at column 0. */
+function matchesOnRows(rows: number[]): QueryResult {
+  return rows.map(row => ({
+    captures: { fn: [{ text: 'eval', startPosition: { row, column: 0 }, namedChildren: [] }] },
+  })) as unknown as QueryResult
+}
+
+/** Tree-sitter rules among the findings that the per-file rule cap applies to. */
+function cappedTreeSitterRuleIds(issues: CodeIssue[]): string[] {
+  return [...new Set(issues.map(issue => issue.ruleId))].filter(id => {
+    const rule = TREE_SITTER_RULES.find(candidate => candidate.id === id)
+    return rule !== undefined && !isExemptFromRuleCap(rule)
+  })
+}
+
+const TWENTY_ROWS = Array.from({ length: 20 }, (_, row) => row)
+const TWENTY_FIVE_EVAL_LINES = Array.from({ length: 25 }, () => 'eval(x)').join('\n')
+
 beforeEach(() => {
   vi.clearAllMocks()
   // Default: parseFile returns a fake tree, queryTree returns empty
@@ -47,9 +69,9 @@ beforeEach(() => {
 })
 
 describe('scanWithTreeSitter', () => {
-  it('returns empty array for empty file map', async () => {
+  it('returns no issues for empty file map', async () => {
     const result = await scanWithTreeSitter(new Map())
-    expect(result).toEqual([])
+    expect(result).toEqual({ issues: [], ruleOverflow: new Map() })
   })
 
   it('skips files with unsupported languages', async () => {
@@ -58,7 +80,7 @@ describe('scanWithTreeSitter', () => {
     files.set('data.csv', makeFile('a,b,c'))
 
     const result = await scanWithTreeSitter(files)
-    expect(result).toEqual([])
+    expect(result).toEqual({ issues: [], ruleOverflow: new Map() })
     expect(mockedInitTreeSitter).not.toHaveBeenCalled()
   })
 
@@ -69,7 +91,7 @@ describe('scanWithTreeSitter', () => {
     files.set('dist/bundle.py', makeFile('eval(x)'))
 
     const result = await scanWithTreeSitter(files)
-    expect(result).toEqual([])
+    expect(result).toEqual({ issues: [], ruleOverflow: new Map() })
     expect(mockedInitTreeSitter).not.toHaveBeenCalled()
   })
 
@@ -79,7 +101,7 @@ describe('scanWithTreeSitter', () => {
     files.set('huge.py', makeFile(bigContent))
 
     const result = await scanWithTreeSitter(files)
-    expect(result).toEqual([])
+    expect(result).toEqual({ issues: [], ruleOverflow: new Map() })
   })
 
   it('surfaces initialization failures to the orchestrator', async () => {
@@ -130,10 +152,10 @@ describe('scanWithTreeSitter', () => {
     const files = new Map<string, IndexedFile>()
     files.set('src/app.py', makeFile(pyContent))
 
-    const result = await scanWithTreeSitter(files)
+    const { issues } = await scanWithTreeSitter(files)
 
-    expect(result.length).toBeGreaterThan(0)
-    const issue = result[0]
+    expect(issues.length).toBeGreaterThan(0)
+    const issue = issues[0]
 
     // Required CodeIssue fields
     expect(issue.id).toBeTruthy()
@@ -192,10 +214,10 @@ describe('scanWithTreeSitter', () => {
     const lines = Array.from({ length: 25 }, () => 'eval(x)')
     files.set('many.py', makeFile(lines.join('\n')))
 
-    const result = await scanWithTreeSitter(files)
+    const { issues } = await scanWithTreeSitter(files)
 
     const countByRule = new Map<string, number>()
-    for (const issue of result) {
+    for (const issue of issues) {
       countByRule.set(issue.ruleId, (countByRule.get(issue.ruleId) ?? 0) + 1)
     }
 
@@ -210,6 +232,39 @@ describe('scanWithTreeSitter', () => {
       .map(([, count]) => count)
     expect(otherCounts.length).toBeGreaterThan(0)
     expect(otherCounts.every(count => count === 15)).toBe(true)
+  })
+
+  it('returns the matches each capped rule dropped as rule overflow, summed across files', async () => {
+    mockedQueryTree.mockResolvedValue(matchesOnRows(TWENTY_ROWS))
+
+    const files = new Map<string, IndexedFile>([
+      ['a.py', makeFile(TWENTY_FIVE_EVAL_LINES)],
+      ['b.py', makeFile(TWENTY_FIVE_EVAL_LINES)],
+    ])
+
+    const result = await scanWithTreeSitter(files)
+
+    const cappedRuleIds = cappedTreeSitterRuleIds(result.issues)
+    expect(cappedRuleIds.length).toBeGreaterThan(0)
+    // Each file keeps 15 of its 20 matches per capped rule; security rules never overflow.
+    expect(Object.fromEntries(result.ruleOverflow)).toEqual(
+      Object.fromEntries(cappedRuleIds.map(id => [id, 10])),
+    )
+  })
+
+  it('counts a dropped line once even when several matches land on it', async () => {
+    const firstFifteenRows = Array.from({ length: 15 }, (_, row) => row)
+    mockedQueryTree.mockResolvedValue(matchesOnRows([...firstFifteenRows, 15, 15, 15, 16]))
+
+    const files = new Map<string, IndexedFile>([['many.py', makeFile(TWENTY_FIVE_EVAL_LINES)]])
+
+    const result = await scanWithTreeSitter(files)
+
+    const cappedRuleIds = cappedTreeSitterRuleIds(result.issues)
+    expect(cappedRuleIds.length).toBeGreaterThan(0)
+    expect(Object.fromEntries(result.ruleOverflow)).toEqual(
+      Object.fromEntries(cappedRuleIds.map(id => [id, 2])),
+    )
   })
 
   it('deduplicates issues by id (same rule + file + line)', async () => {
@@ -240,11 +295,11 @@ describe('scanWithTreeSitter', () => {
     const files = new Map<string, IndexedFile>()
     files.set('dup.py', makeFile('eval(x); eval(y)'))
 
-    const result = await scanWithTreeSitter(files)
+    const { issues } = await scanWithTreeSitter(files)
 
     // Both matches produce the same issue id (same rule + file + line 1)
     // so only one should appear
-    const ruleIds = result.filter(i => i.file === 'dup.py').map(i => i.id)
+    const ruleIds = issues.filter(i => i.file === 'dup.py').map(i => i.id)
     const uniqueIds = new Set(ruleIds)
     expect(uniqueIds.size).toBe(ruleIds.length)
   })
@@ -278,10 +333,10 @@ describe('scanWithTreeSitter', () => {
     files.set('app.py', makeFile('os.system("ls")'))
     files.set('Main.java', makeFile('runtime.exec("cmd")'))
 
-    const result = await scanWithTreeSitter(files)
+    const { issues } = await scanWithTreeSitter(files)
 
-    const pyIssues = result.filter(i => i.file === 'app.py')
-    const javaIssues = result.filter(i => i.file === 'Main.java')
+    const pyIssues = issues.filter(i => i.file === 'app.py')
+    const javaIssues = issues.filter(i => i.file === 'Main.java')
     expect(pyIssues.length).toBeGreaterThan(0)
     expect(javaIssues.length).toBeGreaterThan(0)
   })
@@ -302,12 +357,40 @@ describe('scanWithTreeSitter', () => {
     const files = new Map<string, IndexedFile>()
     files.set('src/util.py', makeFile(lines.join('\n')))
 
-    const result = await scanWithTreeSitter(files)
-    expect(result.length).toBeGreaterThan(0)
+    const { issues } = await scanWithTreeSitter(files)
+    expect(issues.length).toBeGreaterThan(0)
 
-    const issue = result[0]
+    const issue = issues[0]
     expect(issue.id).toContain(issue.ruleId)
     expect(issue.id).toContain('src/util.py')
     expect(issue.id).toContain('10') // line = row 9 + 1
+  })
+})
+
+describe('scanIssuesAsync — Tree-sitter rule overflow', () => {
+  beforeEach(() => {
+    clearScanCache()
+  })
+
+  it('reports matches dropped by the Tree-sitter rule cap in the scan result ruleOverflow', async () => {
+    mockedQueryTree.mockResolvedValue(matchesOnRows(TWENTY_ROWS))
+    const index = indexFile(createEmptyIndex(), 'src/many.py', TWENTY_FIVE_EVAL_LINES, 'python')
+
+    const result = await scanIssuesAsync(index, null)
+
+    expect(result.diagnostics.engines['tree-sitter']).toBe('completed')
+    const cappedRuleIds = cappedTreeSitterRuleIds(result.issues)
+    expect(cappedRuleIds.length).toBeGreaterThan(0)
+    const treeSitterOverflow = [...result.ruleOverflow].filter(([id]) => id.startsWith('ts-'))
+    expect(Object.fromEntries(treeSitterOverflow)).toEqual(
+      Object.fromEntries(cappedRuleIds.map(id => [id, 5])),
+    )
+  })
+
+  it('keeps Tree-sitter overflow keys apart from regex rule ids', () => {
+    // Engines add their dropped counts into one ruleOverflow map keyed by rule id; Tree-sitter
+    // ids carry a `ts-` prefix, so a Tree-sitter count never merges into a regex rule's count.
+    expect(TREE_SITTER_RULES.every(rule => rule.id.startsWith('ts-'))).toBe(true)
+    expect(getAllRules().filter(rule => rule.id.startsWith('ts-'))).toEqual([])
   })
 })

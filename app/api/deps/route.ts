@@ -81,7 +81,24 @@ async function mapWithConcurrency<T, R>(
 const REGISTRY_TIMEOUT_MS = 10_000
 
 /** A failure message written by this route, safe to return to the client. */
-class RegistryError extends Error {}
+class RegistryError extends Error {
+  /** HTTP status of the npm response that failed, when the failure was a non-OK response. */
+  constructor(message: string, public readonly status?: number) {
+    super(message)
+  }
+}
+
+/** A package this route did not fetch because npm already rate limited the batch. */
+class RateLimitSkippedError extends RegistryError {}
+
+/**
+ * Decide rate limiting from the error's structure, never its message: messages embed the
+ * package name, so a 404 for a package like `http-429-codes` must not read as a 429.
+ */
+function isRateLimitError(reason: unknown): boolean {
+  return reason instanceof RateLimitSkippedError
+    || (reason instanceof RegistryError && reason.status === 429)
+}
 
 /** Client-facing message for a failed package; other failures may echo upstream or network detail. */
 function clientRegistryError(reason: unknown, name: string): string {
@@ -215,7 +232,7 @@ async function fetchPackageMeta(
 
     if (!res.ok) {
       await cancelResponseBody(res)
-      throw new RegistryError(`npm registry returned ${res.status} for ${name}`)
+      throw new RegistryError(`npm registry returned ${res.status} for ${name}`, res.status)
     }
 
     const { data } = await readBoundedJsonResponse<Record<string, unknown>>(res, MAX_NPM_METADATA_RESPONSE_BYTES)
@@ -279,7 +296,7 @@ async function fetchLatestPublication(
 
     if (!res.ok) {
       await cancelResponseBody(res)
-      throw new RegistryError(`npm publication search returned ${res.status} for ${name}`)
+      throw new RegistryError(`npm publication search returned ${res.status} for ${name}`, res.status)
     }
 
     let data: unknown
@@ -332,7 +349,7 @@ async function fetchDownloads(
 
     if (!res.ok) {
       await cancelResponseBody(res)
-      throw new RegistryError(`npm download metadata returned ${res.status} for ${name}`)
+      throw new RegistryError(`npm download metadata returned ${res.status} for ${name}`, res.status)
     }
 
     const { data } = await readBoundedJsonResponse<{
@@ -412,7 +429,7 @@ export async function POST(req: Request) {
 
   const settled = await raceCallerCancellation(mapWithConcurrency(packages, 10, async (name) => {
     if (rateLimited) {
-      throw new RegistryError(`Skipped ${name}: rate limited`)
+      throw new RateLimitSkippedError(`Skipped ${name}: rate limited`)
     }
 
     try {
@@ -428,7 +445,7 @@ export async function POST(req: Request) {
 
       return { name, meta, downloads, lastPublish }
     } catch (err) {
-      if (err instanceof Error && err.message.includes('429')) {
+      if (isRateLimitError(err)) {
         rateLimited = true
       }
       throw err
@@ -438,10 +455,8 @@ export async function POST(req: Request) {
 
   for (const [index, result] of settled.entries()) {
     if (result.status === 'rejected') {
-      const reason = result.reason instanceof Error ? result.reason.message : String(result.reason)
-
       // Detect rate limiting or skipped-due-to-rate-limit
-      if (reason.includes('429') || reason.includes('rate limited')) {
+      if (isRateLimitError(result.reason)) {
         errors.push('npm registry rate limit reached — some packages were skipped')
       } else {
         errors.push(clientRegistryError(result.reason, packages[index]))

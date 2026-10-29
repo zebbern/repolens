@@ -24,16 +24,25 @@ const MAX_PER_RULE = 15
 /** Maximum file size (bytes) to parse with Tree-sitter. */
 const MAX_FILE_SIZE = 512_000 // 512 KB
 
+export interface TreeSitterScanResult {
+  issues: CodeIssue[]
+  /** Matches dropped by the per-file rule cap, keyed by rule id. */
+  ruleOverflow: Map<string, number>
+}
+
 /**
  * Run Tree-sitter-based analysis on a set of files.
  *
  * Groups files by language, loads grammars on demand, runs applicable rules,
- * and returns CodeIssue results. Handles grammar/parse failures gracefully.
+ * and returns CodeIssue results with the counts the rule cap dropped.
+ * Handles grammar/parse failures gracefully.
  */
 export async function scanWithTreeSitter(
   files: Map<string, IndexedFile>,
-): Promise<CodeIssue[]> {
-  if (TREE_SITTER_RULES.length === 0) return []
+): Promise<TreeSitterScanResult> {
+  const issues: CodeIssue[] = []
+  const ruleOverflow = new Map<string, number>()
+  if (TREE_SITTER_RULES.length === 0) return { issues, ruleOverflow }
 
   const languagesWithRules = getLanguagesWithRules()
 
@@ -55,7 +64,7 @@ export async function scanWithTreeSitter(
     group.set(path, file)
   }
 
-  if (filesByLanguage.size === 0) return []
+  if (filesByLanguage.size === 0) return { issues, ruleOverflow }
 
   // Initialize Tree-sitter WASM runtime
   try {
@@ -66,7 +75,6 @@ export async function scanWithTreeSitter(
     })
   }
 
-  const issues: CodeIssue[] = []
   const seenIds = new Set<string>()
 
   // Process each language group
@@ -93,12 +101,15 @@ export async function scanWithTreeSitter(
       try {
         for (const rule of rules) {
           if (rule.excludeFiles && rule.excludeFiles.test(path)) continue
-          const ruleIssues = await runRuleOnFileAsync(rule, tree, language, path, file)
-          for (const issue of ruleIssues) {
+          const ruleResult = await runRuleOnFileAsync(rule, tree, language, path, file)
+          for (const issue of ruleResult.issues) {
             if (!seenIds.has(issue.id)) {
               seenIds.add(issue.id)
               issues.push(issue)
             }
+          }
+          if (ruleResult.overflow > 0) {
+            ruleOverflow.set(rule.id, (ruleOverflow.get(rule.id) || 0) + ruleResult.overflow)
           }
         }
       } finally {
@@ -107,13 +118,13 @@ export async function scanWithTreeSitter(
     }
   }
 
-  return issues
+  return { issues, ruleOverflow }
 }
 
 /**
  * Run a single Tree-sitter rule against a parsed syntax tree (async).
  * Returns up to MAX_PER_RULE issues, except for security and critical rules,
- * which are never capped.
+ * which are never capped, plus the number of further findings the cap dropped.
  */
 async function runRuleOnFileAsync(
   rule: TreeSitterRule,
@@ -121,8 +132,9 @@ async function runRuleOnFileAsync(
   language: string,
   filePath: string,
   file: IndexedFile,
-): Promise<CodeIssue[]> {
+): Promise<{ issues: CodeIssue[]; overflow: number }> {
   const issues: CodeIssue[] = []
+  const seenIds = new Set<string>()
 
   let matches
   try {
@@ -136,11 +148,9 @@ async function runRuleOnFileAsync(
 
   const captureName = rule.captureName
   const capExempt = isExemptFromRuleCap(rule)
-  let count = 0
+  let overflow = 0
 
   for (const match of matches) {
-    if (count >= MAX_PER_RULE && !capExempt) break
-
     // Find the capture node to report on
     let reportNode
     if (captureName && match.captures[captureName]) {
@@ -182,12 +192,21 @@ async function runRuleOnFileAsync(
     }
 
     const line = reportNode.startPosition.row + 1 // Tree-sitter is 0-indexed
+    const issueId = `${rule.id}-${filePath}-${line}`
+
+    // Dedup before the cap so a line reported twice neither takes a slot nor overflows twice
+    if (seenIds.has(issueId)) continue
+    seenIds.add(issueId)
+
+    // Per-rule cap: count what is dropped so the scan can report it as rule overflow
+    if (issues.length >= MAX_PER_RULE && !capExempt) {
+      overflow++
+      continue
+    }
+
     const column = reportNode.startPosition.column
     const snippet = getSnippetAtLine(file, line)
 
-    const issueId = `${rule.id}-${filePath}-${line}`
-
-    count++
     issues.push({
       id: issueId,
       ruleId: rule.id,
@@ -206,7 +225,7 @@ async function runRuleOnFileAsync(
     })
   }
 
-  return issues
+  return { issues, overflow }
 }
 
 /** Extract a trimmed snippet from the file at the given 1-based line number. */

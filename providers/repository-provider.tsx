@@ -65,12 +65,15 @@ export interface RepositoryDataContextType {
 }
 
 // Actions context — stable callbacks (never change identity)
+/** A replacement index, or an updater applied to the latest index. */
+export type CodeIndexUpdate = CodeIndex | ((current: CodeIndex) => CodeIndex)
+
 export interface RepositoryActionsContextType {
   connectRepository: (url: string) => Promise<boolean>
   disconnectRepository: () => void
   loadFileContent: (path: string, session?: RepositorySession | null) => Promise<string | null>
   getFileByPath: (path: string) => FileNode | null
-  updateCodeIndex: (index: CodeIndex) => void
+  updateCodeIndex: (next: CodeIndexUpdate) => void
   pinFile: (path: string, type?: 'file' | 'directory') => void
   unpinFile: (path: string) => void
   clearPins: () => void
@@ -81,6 +84,8 @@ export interface RepositoryActionsContextType {
   setTabCache: (key: string, value: unknown) => void
   setSearchState: Dispatch<SetStateAction<SearchState>>
   setModifiedContents: Dispatch<SetStateAction<Map<string, string>>>
+  /** Pre-edit source of each edited file, recorded on its first edit. */
+  setOriginalContents: Dispatch<SetStateAction<Map<string, string>>>
   getFileContent: (path: string, session?: RepositorySession | null) => Promise<string | null>
   getRepositorySession: () => RepositorySession | null
   isRepositorySessionCurrent: (session: RepositorySession | null) => boolean
@@ -93,6 +98,7 @@ export interface RepositoryProgressContextType {
   indexingProgress: IndexingProgress
   searchState: SearchState
   modifiedContents: Map<string, string>
+  originalContents: Map<string, string>
   loadingStage: LoadingStage
   contentAvailability: ContentAvailability
   contentLoadingStats: ContentLoadingStats
@@ -147,6 +153,7 @@ export function RepositoryProvider({ children }: { children: ReactNode }) {
   const [repositorySession, setRepositorySession] = useState<RepositorySession | null>(null)
   const [searchState, setSearchState] = useState<SearchState>(DEFAULT_SEARCH_STATE)
   const [modifiedContents, setModifiedContents] = useState<Map<string, string>>(new Map())
+  const [originalContents, setOriginalContents] = useState<Map<string, string>>(new Map())
   const [codebaseAnalysis, setCodebaseAnalysis] = useState<FullAnalysis | null>(null)
   const [failedFiles, setFailedFiles] = useState<Array<{ path: string; error: string }>>([])
   const [coverage, setCoverage] = useState<RepositoryCoverage | null>(null)
@@ -184,6 +191,7 @@ export function RepositoryProvider({ children }: { children: ReactNode }) {
     setIndexingProgress(DEFAULT_INDEXING_PROGRESS)
     setSearchState(DEFAULT_SEARCH_STATE)
     setModifiedContents(new Map())
+    setOriginalContents(new Map())
     setCodebaseAnalysis(null)
     setFailedFiles([])
     setCoverage(null)
@@ -418,7 +426,9 @@ export function RepositoryProvider({ children }: { children: ReactNode }) {
     }
   }, [disconnectRepository])
   
-  const updateCodeIndex = useCallback((index: CodeIndex) => {
+  const updateCodeIndex = useCallback((next: CodeIndexUpdate) => {
+    // Updaters run against the latest index, so async callers cannot overwrite newer edits.
+    const index = typeof next === 'function' ? next(codeIndexRef.current) : next
     const residentIndex = makeContentResident(index)
     codeIndexRef.current = residentIndex
     setCodeIndex(residentIndex)
@@ -625,6 +635,7 @@ export function RepositoryProvider({ children }: { children: ReactNode }) {
       return next
     }
     setModifiedContents(rekeyExact)
+    setOriginalContents(rekeyExact)
     setParsedFiles(rekeyExact)
     setPinnedFiles(prev => {
       if (prev.size === 0) return prev
@@ -786,20 +797,20 @@ export function RepositoryProvider({ children }: { children: ReactNode }) {
   const actionsValue = useMemo<RepositoryActionsContextType>(() => ({
     connectRepository, disconnectRepository, loadFileContent, getFileByPath,
     updateCodeIndex, pinFile, unpinFile, clearPins, renameFiles, getPinnedContents,
-    getTabCache, setTabCache, setSearchState, setModifiedContents, getFileContent,
+    getTabCache, setTabCache, setSearchState, setModifiedContents, setOriginalContents, getFileContent,
     getRepositorySession, isRepositorySessionCurrent,
   }), [
     connectRepository, disconnectRepository, loadFileContent, getFileByPath,
     updateCodeIndex, pinFile, unpinFile, clearPins, renameFiles, getPinnedContents,
-    getTabCache, setTabCache, setSearchState, setModifiedContents, getFileContent,
+    getTabCache, setTabCache, setSearchState, setModifiedContents, setOriginalContents, getFileContent,
     getRepositorySession, isRepositorySessionCurrent,
   ])
 
   const progressValue = useMemo<RepositoryProgressContextType>(() => ({
-    isLoading, error, indexingProgress, searchState, modifiedContents,
+    isLoading, error, indexingProgress, searchState, modifiedContents, originalContents,
     loadingStage, contentAvailability, contentLoadingStats, pinnedFiles, isPinned,
   }), [
-    isLoading, error, indexingProgress, searchState, modifiedContents,
+    isLoading, error, indexingProgress, searchState, modifiedContents, originalContents,
     loadingStage, contentAvailability, contentLoadingStats, pinnedFiles, isPinned,
   ])
 

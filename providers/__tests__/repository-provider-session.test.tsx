@@ -435,6 +435,75 @@ describe('RepositoryProvider connection isolation', () => {
     expect(await shared.get('renamed.ts')).toBeNull()
   })
 
+  it('applies a code index updater to the latest index, including one set in the same batch', () => {
+    const { result } = renderHook(() => useRepository(), { wrapper })
+    const withX = batchIndexFiles(createEmptyIndex(), [{ path: 'x.ts', content: 'x' }])
+
+    act(() => {
+      result.current.updateCodeIndex(withX)
+      result.current.updateCodeIndex(current => batchIndexFiles(current, [{ path: 'y.ts', content: 'y' }]))
+    })
+
+    expect([...result.current.codeIndex.files.keys()]).toEqual(['x.ts', 'y.ts'])
+  })
+
+  describe('edit baselines', () => {
+    async function connectCachedRepositoryA() {
+      globalThis.indexedDB = new IDBFactory()
+      globalThis.IDBKeyRange = IDBKeyRange
+      vi.mocked(fetchRepoViaProxy).mockImplementation(async (_owner, name) => ({ ...repo(name), size: 60_000 }))
+      vi.mocked(fetchTreeViaProxy).mockImplementation(async (_owner, name) => tree(name))
+      const shared = new IDBContentStore('acme/a@a-sha')
+      shared.put('a.ts', 'published')
+      await shared.flush()
+      vi.mocked(getCachedRepo).mockImplementation(async (_owner, name) => (name === 'a' ? {
+        schemaVersion: 5, complete: true,
+        coverage: {
+          treeStatus: 'complete' as const,
+          supportedFiles: { discovered: 1, loaded: 1 },
+          failures: { count: 0, samples: [] },
+          failedSubtrees: { count: 0, samples: [] },
+          mode: 'full' as const,
+        },
+        key: 'acme/a', owner: 'acme', repo: 'a', sha: 'a-sha', timestamp: 1,
+        content: { kind: 'idb', storeKey: 'acme/a@a-sha', files: [{ path: 'a.ts', lineCount: 1 }] },
+        tree: [{ name: 'a.ts', path: 'a.ts', type: 'file' }],
+      } : null))
+
+      const rendered = renderHook(() => useRepository(), { wrapper })
+      await act(async () => {
+        await rendered.result.current.connectRepository('https://github.com/acme/a')
+      })
+      act(() => {
+        rendered.result.current.setModifiedContents(new Map([['a.ts', 'edited']]))
+        rendered.result.current.setOriginalContents(new Map([['a.ts', 'published']]))
+      })
+      return rendered
+    }
+
+    it('follow a renamed file', async () => {
+      const { result } = await connectCachedRepositoryA()
+
+      await act(async () => {
+        await result.current.renameFiles([{ from: 'a.ts', to: 'renamed.ts' }])
+      })
+
+      expect(result.current.modifiedContents).toEqual(new Map([['renamed.ts', 'edited']]))
+      expect(result.current.originalContents).toEqual(new Map([['renamed.ts', 'published']]))
+    })
+
+    it('are cleared when another repository is connected', async () => {
+      const { result } = await connectCachedRepositoryA()
+
+      await act(async () => {
+        await result.current.connectRepository('https://github.com/acme/b')
+      })
+
+      expect(result.current.repo?.fullName).toBe('acme/b')
+      expect(result.current.originalContents.size).toBe(0)
+    })
+  })
+
   it('does not commit a pending IDB rename after switching repositories', async () => {
     globalThis.indexedDB = new IDBFactory()
     globalThis.IDBKeyRange = IDBKeyRange

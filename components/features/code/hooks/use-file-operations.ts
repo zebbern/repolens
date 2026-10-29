@@ -12,6 +12,8 @@ interface UseFileOperationsOptions {
   files: FileNode[]
   codeIndex: CodeIndex
   modifiedContents: Map<string, string>
+  /** Pre-edit source per edited file. */
+  originalContents: Map<string, string>
   navigateToFile?: string | null
   onNavigateComplete?: () => void
   /** On-demand content loader for lazy repos. */
@@ -31,6 +33,7 @@ export function useFileOperations({
   files,
   codeIndex,
   modifiedContents,
+  originalContents,
   navigateToFile,
   onNavigateComplete,
   loadFileContent,
@@ -76,7 +79,8 @@ export function useFileOperations({
       try {
         const modified = modifiedContents.get(file.path)
         const indexed = codeIndex.files.get(file.path)
-        const originalContent = indexed?.content ?? null
+        // Edits are written into the index, so only the recorded baseline is pre-edit source.
+        const originalContent = originalContents.get(file.path) ?? null
 
         if (modified !== undefined) {
           setOpenTabs(prev => prev.map(t =>
@@ -119,7 +123,7 @@ export function useFileOperations({
         ))
       }
     }
-  }, [repo, codeIndex, modifiedContents, loadFileContent, repositorySession, isRepositorySessionCurrent])
+  }, [repo, codeIndex, modifiedContents, originalContents, loadFileContent, repositorySession, isRepositorySessionCurrent])
 
   useEffect(() => {
     let cancelled = false

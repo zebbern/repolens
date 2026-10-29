@@ -63,6 +63,22 @@ async function readCachedContentKind(page: Page, repositoryKey: string): Promise
   }), repositoryKey)
 }
 
+const IDB_NEEDLE_LINE = 'export const idbWorkerNeedle = "stored in IndexedDB"'
+const IDB_EDITED_NEEDLE_LINE = 'export const idbEditedWorkerNeedle = "stored in IndexedDB"'
+
+/**
+ * A search result line. Unlike the result count it cannot be left over from the previous
+ * query; close the replace panel first, since its previews render the replaced line too.
+ */
+function searchMatch(page: Page, line: string) {
+  return page.getByText(line, { exact: true }).first()
+}
+
+async function closeReplace(page: Page): Promise<void> {
+  await page.getByRole('button', { name: 'Toggle replace' }).click()
+  await expect(page.getByPlaceholder('Replace')).toHaveCount(0)
+}
+
 async function readDurableSource(page: Page, contentKey: string): Promise<string | null> {
   return page.evaluate(async (key) => new Promise<string | null>((resolve, reject) => {
     const request = indexedDB.open('repolens-content')
@@ -260,20 +276,21 @@ test.describe('deterministic trustworthy-analysis flows', () => {
     // the immutable shared IndexedDB snapshot.
     await page.reload()
     await expect(page.getByText(repositoryKey).first()).toBeVisible()
-    await expect(page.getByRole('status').filter({ hasText: '3 supported files indexed.' })).toBeVisible()
+    await expect(page.getByRole('status').filter({ hasText: '4 supported files indexed.' })).toBeVisible()
 
     await openTab(page, 'Code')
     await page.getByRole('button', { name: 'Open search sidebar' }).click()
     const search = page.getByPlaceholder('Search (Ctrl+Shift+F)')
     await search.fill('idbWorkerNeedle')
-    await expect(page.getByText('1 results in 1 files', { exact: true })).toBeVisible()
+    await expect(searchMatch(page, IDB_NEEDLE_LINE)).toBeVisible()
 
     await page.getByRole('button', { name: 'Toggle replace' }).click()
     await page.getByPlaceholder('Replace').fill('idbEditedWorkerNeedle')
     await page.getByRole('button', { name: 'Replace all matches in index.ts' }).click()
+    await closeReplace(page)
 
     await search.fill('idbEditedWorkerNeedle')
-    await expect(page.getByText('1 results in 1 files', { exact: true })).toBeVisible()
+    await expect(searchMatch(page, IDB_EDITED_NEEDLE_LINE)).toBeVisible()
     await expect.poll(() => readDurableSource(
       page,
       `${fixture.contentStoreKey}:src/index.ts`,
@@ -283,6 +300,50 @@ test.describe('deterministic trustworthy-analysis flows', () => {
     await openIssuesView(page, 'Issues')
     await expect(page.getByRole('button', { name: /Missing Lockfile/ })).toBeVisible()
     await expect(page.getByText('Automated findings are heuristic. Review them before acting.')).toBeVisible()
+  })
+
+  test('searches and reverts an edit to a freshly indexed medium repository through IndexedDB workers', async ({ page }, testInfo) => {
+    test.setTimeout(120_000)
+    const fixture = await connectFixture(page, testInfo, 'mediumIdb')
+    const repositoryKey = `${fixture.owner}/${fixture.repo}`
+
+    // No reload: edits go to the content store the indexing pipeline just published.
+    await expect.poll(() => readCachedContentKind(page, repositoryKey)).toBe('idb')
+    await expect(page.getByRole('status').filter({ hasText: '4 supported files indexed.' })).toBeVisible()
+
+    await openTab(page, 'Code')
+    await page.getByRole('button', { name: 'Open search sidebar' }).click()
+    const search = page.getByPlaceholder('Search (Ctrl+Shift+F)')
+    await search.fill('idbWorkerNeedle')
+    await expect(searchMatch(page, IDB_NEEDLE_LINE)).toBeVisible()
+
+    await page.getByRole('button', { name: 'Toggle replace' }).click()
+    await page.getByPlaceholder('Replace').fill('idbEditedWorkerNeedle')
+    await page.getByRole('button', { name: 'Replace all matches in index.ts' }).click()
+    await closeReplace(page)
+
+    // The search worker reads the edit, while the shared IndexedDB snapshot keeps the original.
+    await search.fill('idbEditedWorkerNeedle')
+    await expect(searchMatch(page, IDB_EDITED_NEEDLE_LINE)).toBeVisible()
+    await expect.poll(() => readDurableSource(
+      page,
+      `${fixture.contentStoreKey}:src/index.ts`,
+    )).toContain('idbWorkerNeedle')
+
+    await page.getByRole('button', { name: 'Open explorer sidebar' }).click()
+    await page.getByRole('button', { name: 'Revert index.ts to original' }).click()
+    await expect(page.getByRole('button', { name: 'Revert index.ts to original' })).toHaveCount(0)
+
+    await page.getByRole('treeitem', { name: /src/i }).click()
+    await page.getByRole('treeitem', { name: /index\.ts/i }).click()
+    await expect.poll(async () => (await page.locator('tr[data-line] td:last-child').allTextContents()).join('\n'))
+      .toContain(IDB_NEEDLE_LINE)
+
+    await page.getByRole('button', { name: 'Open search sidebar' }).click()
+    await search.fill('idbEditedWorkerNeedle')
+    await expect(page.getByText('No results found', { exact: true })).toBeVisible()
+    await search.fill('idbWorkerNeedle')
+    await expect(searchMatch(page, IDB_NEEDLE_LINE)).toBeVisible()
   })
 
   test('returns focus to Explorer after closing the only code tab', async ({ page }, testInfo) => {

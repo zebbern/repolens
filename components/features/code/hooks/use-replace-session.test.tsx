@@ -1,6 +1,5 @@
 import { act, renderHook } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
-import { createEmptyIndex } from '@/lib/code/code-index'
 import { useReplace } from './use-replace'
 
 describe('useReplace repository session isolation', () => {
@@ -11,19 +10,19 @@ describe('useReplace repository session isolation', () => {
     const getFileContent = vi.fn(() => new Promise<string>(done => { resolve = done }))
     const updateCodeIndex = vi.fn()
     const setModifiedContents = vi.fn()
+    const setOriginalContents = vi.fn()
     const setOpenTabs = vi.fn()
-    const codeIndex = createEmptyIndex()
 
     const { result } = renderHook(() => useReplace({
-      codeIndex,
       updateCodeIndex,
       setModifiedContents,
+      originalContents: new Map(),
+      setOriginalContents,
       getFileContent,
       debouncedSearchQuery: 'old',
       searchOptions: { caseSensitive: false, wholeWord: false, regex: false },
       replaceQuery: 'new',
       searchResults: [],
-      modifiedContents: new Map(),
       setOpenTabs,
       repositorySession: a,
       isRepositorySessionCurrent: session => session === current,
@@ -37,6 +36,7 @@ describe('useReplace repository session isolation', () => {
 
     expect(updateCodeIndex).not.toHaveBeenCalled()
     expect(setModifiedContents).not.toHaveBeenCalled()
+    expect(setOriginalContents).not.toHaveBeenCalled()
     expect(setOpenTabs).not.toHaveBeenCalled()
   })
 })

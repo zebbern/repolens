@@ -13,6 +13,7 @@ describe('useFileOperations repository session isolation', () => {
       files: [],
       codeIndex: createEmptyIndex(),
       modifiedContents: new Map(),
+      originalContents: new Map(),
       repositorySession: sessionA,
       isRepositorySessionCurrent: session => session === current,
     }))
@@ -37,6 +38,7 @@ describe('useFileOperations repository session isolation', () => {
       files: [file],
       codeIndex: index,
       modifiedContents: new Map(),
+      originalContents: new Map(),
       loadFileContent,
       contentAvailability: 'full',
       repositorySession: session,

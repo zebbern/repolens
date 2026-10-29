@@ -120,6 +120,8 @@ function filesForScenario(scenario: GitHubFixtureScenario): Record<string, strin
       'README.md': BASE_FILES['README.md'],
       'package.json': BASE_FILES['package.json'],
       'src/index.ts': MEDIUM_IDB_SOURCE,
+      // Never opened or hydrated, so the repository keeps its IndexedDB-backed store after edits.
+      'src/untouched.ts': 'export const untouched = true\n',
     }
   }
   return {

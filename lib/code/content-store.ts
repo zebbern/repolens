@@ -441,14 +441,15 @@ export class IDBContentStore implements ContentStore {
 
   put(path: string, content: string): void {
     if (this.signal?.aborted) return
-    if (this.writeAccess.kind === 'disabled') {
+    // Without durable write access (disabled, or the publication lease has
+    // expired) edits stay session-local instead of being dropped.
+    if (!this.canWrite()) {
       this.applySessionOverlay({
         entries: [{ path, content }],
         deletedPaths: [],
       })
       return
     }
-    if (!this.canWrite()) return
     this.sessionContent.delete(path)
     this.sessionDeletedPaths.delete(path)
     this.paths.add(path)
@@ -457,11 +458,10 @@ export class IDBContentStore implements ContentStore {
 
   putBatch(entries: Array<{ path: string; content: string }>): void {
     if (this.signal?.aborted) return
-    if (this.writeAccess.kind === 'disabled') {
+    if (!this.canWrite()) {
       this.applySessionOverlay({ entries, deletedPaths: [] })
       return
     }
-    if (!this.canWrite()) return
     for (const { path } of entries) {
       this.sessionContent.delete(path)
       this.sessionDeletedPaths.delete(path)
@@ -480,11 +480,10 @@ export class IDBContentStore implements ContentStore {
 
   delete(path: string): void {
     if (this.signal?.aborted) return
-    if (this.writeAccess.kind === 'disabled') {
+    if (!this.canWrite()) {
       this.applySessionOverlay({ entries: [], deletedPaths: [path] })
       return
     }
-    if (!this.canWrite()) return
     this.sessionContent.delete(path)
     this.sessionDeletedPaths.delete(path)
     this.paths.delete(path)

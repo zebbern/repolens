@@ -30,8 +30,8 @@ import { useIsMobile } from "@/hooks/use-mobile"
 
 export function CodeBrowser({ navigateToFile, navigateToLine, onNavigateComplete }: CodeBrowserProps) {
   const { repo, files, codeIndex, codebaseAnalysis, repositorySession } = useRepositoryData()
-  const { updateCodeIndex, setModifiedContents, getFileContent, loadFileContent, setSearchState, isRepositorySessionCurrent } = useRepositoryActions()
-  const { indexingProgress: sharedIndexingProgress, modifiedContents, contentAvailability, contentLoadingStats, searchState } = useRepositoryProgress()
+  const { updateCodeIndex, setModifiedContents, setOriginalContents, getFileContent, loadFileContent, setSearchState, isRepositorySessionCurrent } = useRepositoryActions()
+  const { indexingProgress: sharedIndexingProgress, modifiedContents, originalContents, contentAvailability, contentLoadingStats, searchState } = useRepositoryProgress()
 
   // Tours
   const {
@@ -141,6 +141,7 @@ export function CodeBrowser({ navigateToFile, navigateToLine, onNavigateComplete
     files,
     codeIndex,
     modifiedContents,
+    originalContents,
     navigateToFile,
     onNavigateComplete,
     loadFileContent,
@@ -207,15 +208,15 @@ export function CodeBrowser({ navigateToFile, navigateToLine, onNavigateComplete
     replaceAllInAllFiles,
     revertFile,
   } = useReplace({
-    codeIndex,
     updateCodeIndex,
     setModifiedContents,
+    originalContents,
+    setOriginalContents,
     getFileContent,
     debouncedSearchQuery,
     searchOptions,
     replaceQuery,
     searchResults,
-    modifiedContents,
     setOpenTabs,
     repositorySession,
     isRepositorySessionCurrent,

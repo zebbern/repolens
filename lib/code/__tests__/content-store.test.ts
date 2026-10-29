@@ -322,7 +322,68 @@ describe('IDBContentStore', () => {
 
     store.put('file.ts', 'virtual edit')
     await store.flush()
-    expect(await store.get('file.ts')).toBe('published')
+    const durable = new IDBContentStore('owner/repo', undefined, { kind: 'disabled' })
+    expect(await durable.get('file.ts')).toBe('published')
+  })
+
+  describe('after its scoped publication lease expires', () => {
+    async function publishThenExpire(entries: Array<{ path: string; content: string }>): Promise<IDBContentStore> {
+      const coordinator = createCacheMutationCoordinator(() => new FakeWebLockManager())
+      let store!: IDBContentStore
+      await withCacheMutationLock(undefined, async lease => {
+        store = new IDBContentStore('owner/repo', undefined, { kind: 'coordinated', lease })
+        store.putBatch(entries)
+        await store.flush()
+      }, coordinator)
+      return store
+    }
+
+    it('keeps a put() edit visible to the session and to workers', async () => {
+      const store = await publishThenExpire([{ path: 'file.ts', content: 'published' }])
+
+      store.put('file.ts', 'session edit')
+
+      expect(await store.get('file.ts')).toBe('session edit')
+      expect(await store.getBatch(['file.ts'])).toEqual(new Map([['file.ts', 'session edit']]))
+      expect(store.getSessionOverlay()).toEqual({
+        entries: [{ path: 'file.ts', content: 'session edit' }],
+        deletedPaths: [],
+      })
+    })
+
+    it('keeps putBatch() edits session-local', async () => {
+      const store = await publishThenExpire([
+        { path: 'a.ts', content: 'published a' },
+        { path: 'b.ts', content: 'published b' },
+      ])
+
+      store.putBatch([
+        { path: 'a.ts', content: 'edited a' },
+        { path: 'b.ts', content: 'edited b' },
+      ])
+
+      expect(await store.getBatch(['a.ts', 'b.ts'])).toEqual(new Map([
+        ['a.ts', 'edited a'],
+        ['b.ts', 'edited b'],
+      ]))
+      const durable = new IDBContentStore('owner/repo', undefined, { kind: 'disabled' })
+      expect(await durable.getBatch(['a.ts', 'b.ts'])).toEqual(new Map([
+        ['a.ts', 'published a'],
+        ['b.ts', 'published b'],
+      ]))
+    })
+
+    it('keeps a delete() session-local', async () => {
+      const store = await publishThenExpire([{ path: 'gone.ts', content: 'published' }])
+
+      store.delete('gone.ts')
+
+      expect(await store.get('gone.ts')).toBeNull()
+      expect(store.has('gone.ts')).toBe(false)
+      expect(store.getSessionOverlay()).toEqual({ entries: [], deletedPaths: ['gone.ts'] })
+      const durable = new IDBContentStore('owner/repo', undefined, { kind: 'disabled' })
+      expect(await durable.get('gone.ts')).toBe('published')
+    })
   })
 
   it('keeps mutations session-local when durable writes are disabled', async () => {

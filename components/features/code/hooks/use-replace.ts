@@ -1,22 +1,30 @@
 import { useState, useCallback, type Dispatch, type SetStateAction } from "react"
-import type { CodeIndex, SearchResult } from "@/lib/code/code-index"
+import type { SearchResult } from "@/lib/code/code-index"
 import { buildSearchRegex, indexFile, batchIndexFiles } from "@/lib/code/code-index"
 import type { OpenTab, SearchOptions } from "../types"
-import type { RepositorySession } from '@/providers/repository-provider'
+import type { CodeIndexUpdate, RepositorySession } from '@/providers/repository-provider'
 
 interface UseReplaceOptions {
-  codeIndex: CodeIndex
-  updateCodeIndex: (index: CodeIndex) => void
+  updateCodeIndex: (next: CodeIndexUpdate) => void
   setModifiedContents: Dispatch<SetStateAction<Map<string, string>>>
+  /** Pre-edit source per edited file; revert restores it. */
+  originalContents: Map<string, string>
+  setOriginalContents: Dispatch<SetStateAction<Map<string, string>>>
   getFileContent: (path: string, session?: RepositorySession | null) => Promise<string | null>
   debouncedSearchQuery: string
   searchOptions: SearchOptions
   replaceQuery: string
   searchResults: SearchResult[]
-  modifiedContents: Map<string, string>
   setOpenTabs: Dispatch<SetStateAction<OpenTab[]>>
   repositorySession: RepositorySession | null
   isRepositorySessionCurrent: (session: RepositorySession | null) => boolean
+}
+
+interface ReplaceEdit {
+  path: string
+  content: string
+  /** Source the replacement was computed from; the revert baseline on a file's first edit. */
+  previousContent: string
 }
 
 /**
@@ -24,40 +32,52 @@ interface UseReplaceOptions {
  * all-in-all-files, and revert-to-original.
  */
 export function useReplace({
-  codeIndex,
   updateCodeIndex,
   setModifiedContents,
+  originalContents,
+  setOriginalContents,
   getFileContent,
   debouncedSearchQuery,
   searchOptions,
   replaceQuery,
   searchResults,
-  modifiedContents,
   setOpenTabs,
   repositorySession,
   isRepositorySessionCurrent,
 }: UseReplaceOptions) {
   const [confirmReplaceAll, setConfirmReplaceAll] = useState(false)
 
-  // Helper: apply replacement and sync state
-  const applyReplace = useCallback((filePath: string, newContent: string) => {
-    const indexed = codeIndex.files.get(filePath)
-    const originalContent = indexed?.content ?? null
+  // Commit edits after an async read. Every write merges into the latest state so an
+  // edit or revert committed while the read was pending is never overwritten.
+  const applyEdits = useCallback((edits: ReplaceEdit[]) => {
+    if (edits.length === 0) return
 
-    setModifiedContents(prev => {
+    setOriginalContents(prev => {
+      const missing = edits.filter(edit => !prev.has(edit.path))
+      if (missing.length === 0) return prev
       const next = new Map(prev)
-      next.set(filePath, newContent)
+      for (const edit of missing) next.set(edit.path, edit.previousContent)
       return next
     })
+    setModifiedContents(prev => {
+      const next = new Map(prev)
+      for (const edit of edits) next.set(edit.path, edit.content)
+      return next
+    })
+    updateCodeIndex(current => batchIndexFiles(current, edits.map(edit => ({
+      path: edit.path,
+      content: edit.content,
+      language: current.files.get(edit.path)?.language,
+    }))))
 
-    const lang = indexed?.language
-    updateCodeIndex(indexFile(codeIndex, filePath, newContent, lang))
-
+    const editsByPath = new Map(edits.map(edit => [edit.path, edit]))
     setOpenTabs(prev => prev.map(tab => {
-      if (tab.path !== filePath) return tab
-      return { ...tab, content: newContent, isModified: newContent !== (originalContent ?? tab.originalContent) }
+      const edit = editsByPath.get(tab.path)
+      if (!edit) return tab
+      const baseline = originalContents.get(tab.path) ?? edit.previousContent
+      return { ...tab, content: edit.content, isModified: edit.content !== baseline }
     }))
-  }, [codeIndex, updateCodeIndex, setModifiedContents, setOpenTabs])
+  }, [originalContents, updateCodeIndex, setModifiedContents, setOriginalContents, setOpenTabs])
 
   // Replace single match on a specific line
   const replaceInFile = useCallback(async (filePath: string, matchLine: number) => {
@@ -75,8 +95,8 @@ export function useReplace({
       searchPattern.lastIndex = 0
       lines[lineIndex] = lines[lineIndex].replace(searchPattern, replaceQuery)
     }
-    applyReplace(filePath, lines.join('\n'))
-  }, [debouncedSearchQuery, searchOptions, replaceQuery, getFileContent, applyReplace, repositorySession, isRepositorySessionCurrent])
+    applyEdits([{ path: filePath, content: lines.join('\n'), previousContent: content }])
+  }, [debouncedSearchQuery, searchOptions, replaceQuery, getFileContent, applyEdits, repositorySession, isRepositorySessionCurrent])
 
   // Replace all matches in one file
   const replaceAllInFile = useCallback(async (filePath: string) => {
@@ -89,8 +109,8 @@ export function useReplace({
     if (!content) return
 
     searchPattern.lastIndex = 0
-    applyReplace(filePath, content.replace(searchPattern, replaceQuery))
-  }, [debouncedSearchQuery, searchOptions, replaceQuery, getFileContent, applyReplace, repositorySession, isRepositorySessionCurrent])
+    applyEdits([{ path: filePath, content: content.replace(searchPattern, replaceQuery), previousContent: content }])
+  }, [debouncedSearchQuery, searchOptions, replaceQuery, getFileContent, applyEdits, repositorySession, isRepositorySessionCurrent])
 
   // Replace all matches across ALL files
   const replaceAllInAllFiles = useCallback(async () => {
@@ -98,9 +118,6 @@ export function useReplace({
     setConfirmReplaceAll(false)
     const searchPattern = buildSearchRegex(debouncedSearchQuery, searchOptions)
     if (!searchPattern) return
-
-    const updates: Array<{ path: string; content: string; language?: string }> = []
-    const newModified = new Map(modifiedContents)
 
     // Pre-fetch all file contents in parallel
     const uniquePaths = [...new Set(searchResults.map(r => r.file))]
@@ -111,54 +128,51 @@ export function useReplace({
     }))
     if (!isRepositorySessionCurrent(session)) return
 
-    for (const result of searchResults) {
-      const content = prefetched.get(result.file)
+    const edits: ReplaceEdit[] = []
+    for (const path of uniquePaths) {
+      const content = prefetched.get(path)
       if (!content) continue
 
       searchPattern.lastIndex = 0
       const newContent = content.replace(searchPattern, replaceQuery)
-      if (newContent !== content) {
-        newModified.set(result.file, newContent)
-        const lang = codeIndex.files.get(result.file)?.language
-        updates.push({ path: result.file, content: newContent, language: lang })
-      }
+      if (newContent !== content) edits.push({ path, content: newContent, previousContent: content })
     }
+    applyEdits(edits)
+  }, [searchResults, debouncedSearchQuery, searchOptions, replaceQuery, getFileContent, applyEdits, repositorySession, isRepositorySessionCurrent])
 
-    setModifiedContents(newModified)
-
-    if (updates.length > 0) {
-      updateCodeIndex(batchIndexFiles(codeIndex, updates))
-    }
-
-    const affectedPaths = new Set(updates.map(u => u.path))
-    setOpenTabs(prev => prev.map(tab => {
-      if (!affectedPaths.has(tab.path)) return tab
-      const newContent = newModified.get(tab.path) ?? tab.content
-      return { ...tab, content: newContent, isModified: newContent !== tab.originalContent }
-    }))
-  }, [searchResults, debouncedSearchQuery, searchOptions, replaceQuery, getFileContent, modifiedContents, codeIndex, updateCodeIndex, setModifiedContents, setOpenTabs, repositorySession, isRepositorySessionCurrent])
-
-  // Revert a file to its original content
+  // Revert a file to the source recorded before its first edit
   const revertFile = useCallback(async (filePath: string) => {
-    const session = repositorySession
-    const indexed = codeIndex.files.get(filePath)
+    if (!isRepositorySessionCurrent(repositorySession)) return
+    const originalContent = originalContents.get(filePath)
+    if (originalContent === undefined) {
+      // No edit is tracked at this path (e.g. a tab left behind by a virtual rename):
+      // there is nothing to restore, so only clear the tab's modified marker.
+      setOpenTabs(prev => prev.map(tab => (
+        tab.path === filePath ? { ...tab, content: tab.originalContent ?? tab.content, isModified: false } : tab
+      )))
+      return
+    }
 
-    const originalContent = indexed?.content ?? await codeIndex.contentStore.get(filePath)
-    if (!isRepositorySessionCurrent(session)) return
     setModifiedContents(prev => {
       const next = new Map(prev)
       next.delete(filePath)
       return next
     })
-    if (indexed && originalContent) {
-      updateCodeIndex(indexFile(codeIndex, filePath, originalContent, indexed.language))
-    }
+    setOriginalContents(prev => {
+      const next = new Map(prev)
+      next.delete(filePath)
+      return next
+    })
+    updateCodeIndex(current => {
+      const indexed = current.files.get(filePath)
+      return indexed ? indexFile(current, filePath, originalContent, indexed.language) : current
+    })
 
     setOpenTabs(prev => prev.map(tab => {
       if (tab.path !== filePath) return tab
-      return { ...tab, content: originalContent ?? tab.originalContent, isModified: false }
+      return { ...tab, content: originalContent, originalContent, isModified: false }
     }))
-  }, [codeIndex, updateCodeIndex, setModifiedContents, setOpenTabs, repositorySession, isRepositorySessionCurrent])
+  }, [originalContents, updateCodeIndex, setModifiedContents, setOriginalContents, setOpenTabs, repositorySession, isRepositorySessionCurrent])
 
   return {
     confirmReplaceAll,

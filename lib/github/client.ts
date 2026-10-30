@@ -18,6 +18,7 @@ import {
   GITHUB_LIST_PAGE_SIZE,
   type PaginatedList,
 } from '@/lib/github/pagination'
+import { GITHUB_REQUEST_TIMEOUT_MS } from '@/lib/github/request-signal'
 
 // ---------------------------------------------------------------------------
 // TTL constants (milliseconds)
@@ -140,11 +141,13 @@ function buildProxyHeaders(): HeadersInit {
 const GITHUB_API_BASE = 'https://api.github.com'
 const GITHUB_GRAPHQL_ENDPOINT = 'https://api.github.com/graphql'
 
-/** Endpoint type identifier for URL mapping and response normalization. */
+/**
+ * Endpoint type identifier for URL mapping and response normalization.
+ * Tree requests use their own direct branch in fetchTreeViaProxy, and file
+ * requests always use the proxy, so neither is mapped here.
+ */
 type ProxyEndpoint =
   | 'repo'
-  | 'tree'
-  | 'file'
   | 'tags'
   | 'branches'
   | 'commits'
@@ -171,23 +174,6 @@ function mapProxyUrlToGitHubApi(proxyUrl: string): DirectUrlMapping | null {
 
   if (pathname === '/api/github/repo') {
     return { url: `${GITHUB_API_BASE}/repos/${e(owner)}/${e(name)}`, endpoint: 'repo' }
-  }
-
-  if (pathname === '/api/github/tree') {
-    const sha = params.get('sha') ?? 'HEAD'
-    return {
-      url: `${GITHUB_API_BASE}/repos/${e(owner)}/${e(name)}/git/trees/${e(sha)}?recursive=1`,
-      endpoint: 'tree',
-    }
-  }
-
-  if (pathname === '/api/github/file') {
-    const branch = params.get('branch') ?? ''
-    const path = params.get('path') ?? ''
-    return {
-      url: `https://raw.githubusercontent.com/${e(owner)}/${e(name)}/${e(branch)}/${path.split('/').map(e).join('/')}`,
-      endpoint: 'file',
-    }
   }
 
   if (pathname === '/api/github/tags') {
@@ -272,7 +258,33 @@ function getRequestSignal(options: ProxyRequestOptions): AbortSignal | undefined
 
   if (signals.length === 0) return undefined
   if (signals.length === 1) return signals[0]
-  return AbortSignal.any(signals)
+  return anyAbortSignal(signals)
+}
+
+/**
+ * Abort when any input signal aborts. Falls back to listeners where
+ * AbortSignal.any is missing (Safari < 17.4, Chrome < 116, Firefox < 124).
+ */
+function anyAbortSignal(signals: AbortSignal[]): AbortSignal {
+  if (typeof AbortSignal.any === 'function') return AbortSignal.any(signals)
+
+  const controller = new AbortController()
+  for (const signal of signals) {
+    if (signal.aborted) {
+      controller.abort(signal.reason)
+      break
+    }
+    signal.addEventListener('abort', () => controller.abort(signal.reason), { once: true })
+  }
+  return controller.signal
+}
+
+/**
+ * Signal for a request sent straight to GitHub: the caller's signal plus the
+ * server's per-request deadline, unless the caller passes its own timeoutMs.
+ */
+function getDirectRequestSignal(options: ProxyRequestOptions): AbortSignal | undefined {
+  return getRequestSignal({ ...options, timeoutMs: options.timeoutMs ?? GITHUB_REQUEST_TIMEOUT_MS })
 }
 
 async function directFetch<T>(
@@ -329,7 +341,7 @@ async function directFetchResponse(
       'Authorization': `Bearer ${pat}`,
     },
     redirect: 'error',
-    signal: getRequestSignal(options),
+    signal: getDirectRequestSignal(options),
   }
   const response = await fetch(url, fetchOptions)
 
@@ -359,31 +371,6 @@ async function directFetchResponse(
   }
 
   return response
-}
-
-/**
- * Fetch file content from raw.githubusercontent.com with PAT auth.
- * Returns { content: string } to match the proxy response shape.
- */
-async function directFetchRawFile(url: string, pat: string, timeoutMs?: number): Promise<{ content: string }> {
-  const fetchOptions: RequestInit = {
-    headers: { 'Authorization': `Bearer ${pat}` },
-    redirect: 'error',
-  }
-  if (timeoutMs) {
-    fetchOptions.signal = AbortSignal.timeout(timeoutMs)
-  }
-  const response = await fetch(url, fetchOptions)
-
-  if (!response.ok) {
-    if (response.status === 404) {
-      throw new Error('File not found.')
-    }
-    throw new Error(`Failed to fetch file: ${response.statusText}`)
-  }
-
-  const content = await response.text()
-  return { content }
 }
 
 // ---------------------------------------------------------------------------
@@ -604,7 +591,6 @@ function normalizeRateLimit(data: GitHubApiRateLimitResponse): { limit: number; 
 function normalizeDirectResponse<T>(data: unknown, endpoint: ProxyEndpoint): T {
   switch (endpoint) {
     case 'repo':        return normalizeRepo(data as GitHubApiRepoResponse) as T
-    case 'tree':        return data as T
     case 'tags': {
       const list = data as PaginatedList<GitHubApiTagResponse>
       return { tags: normalizeTags(list.items), truncated: list.truncated } as T
@@ -691,13 +677,13 @@ async function proxyFetch<T>(url: string, options: ProxyRequestOptions = {}): Pr
     throw new Error('proxyFetch only accepts relative URLs')
   }
 
-  // Direct mode: PAT is available — call GitHub API directly
-  // Skip direct mode for file fetches: raw.githubusercontent.com rejects
-  // browser preflight requests triggered by the Authorization header (CORS).
+  // Direct mode: PAT is available — call GitHub API directly.
+  // File fetches have no mapping and stay on the proxy: raw.githubusercontent.com
+  // rejects browser preflight requests triggered by the Authorization header (CORS).
   const pat = getGitHubPAT()
   if (pat) {
     const mapping = mapProxyUrlToGitHubApi(url)
-    if (mapping && mapping.endpoint !== 'file') {
+    if (mapping) {
       // List endpoints walk Link pages so both modes return identical lists.
       const raw = mapping.endpoint === 'tags' || mapping.endpoint === 'branches'
         ? await directFetchAllPages(mapping.url, pat, options)
@@ -1052,7 +1038,7 @@ async function fetchBlameFromApi(
         query: BLAME_QUERY,
         variables: { owner, name, expression },
       }),
-      signal: getRequestSignal(options),
+      signal: getDirectRequestSignal(options),
     })
 
     if (response.status === 401) {

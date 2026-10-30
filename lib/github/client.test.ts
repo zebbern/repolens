@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -33,7 +33,9 @@ import {
   fetchRateLimitViaProxy,
   fetchBlameViaProxy,
   clearGitHubCache,
+  _testInternals,
 } from './client'
+import { GITHUB_REQUEST_TIMEOUT_MS } from './request-signal'
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -183,16 +185,19 @@ describe('Direct GitHub API calls (PAT mode)', () => {
       expect(mockFetch).toHaveBeenCalledWith('https://api.github.com/repos/facebook/react', expect.any(Object))
     })
 
-    it('maps tree endpoint to GitHub API', async () => {
+    it('fetches the tree directly from GitHub through the tree resolver', async () => {
       mockFetch.mockResolvedValueOnce(jsonResponse({ sha: 'abc', tree: [], truncated: false }))
       await fetchTreeViaProxy('X', 'Y', 'abc123')
+      expect(mockFetch).toHaveBeenCalledOnce()
       expect(mockFetch).toHaveBeenCalledWith('https://api.github.com/repos/X/Y/git/trees/abc123?recursive=1', expect.any(Object))
     })
 
     it('routes file endpoint through proxy (not raw.githubusercontent.com) to avoid CORS', async () => {
       mockFetch.mockResolvedValueOnce(jsonResponse({ content: 'console.log("hi")' }))
       await fetchFileViaProxy('X', 'Y', 'main', 'src/index.ts')
+      expect(mockFetch).toHaveBeenCalledOnce()
       expect((mockFetch.mock.calls[0][0] as string)).toMatch(/^\/api\/github\/file/)
+      expect(mockFetch.mock.calls[0][1]?.headers).toEqual({ 'X-GitHub-Token': 'ghp_test' })
     })
 
     it('maps tags endpoint with per_page', async () => {
@@ -501,6 +506,82 @@ describe('Direct GitHub API calls (PAT mode)', () => {
     it('throws for 404 on file fetch via proxy', async () => {
       mockFetch.mockResolvedValueOnce({ ok: false, status: 404, statusText: 'Not Found', json: () => Promise.resolve({ error: 'File not found' }) } as unknown as Response)
       await expect(fetchFileViaProxy('X', 'Y', 'main', 'missing.ts')).rejects.toThrow('File not found')
+    })
+  })
+
+  describe('Request deadline (direct mode)', () => {
+    const deadlines: Array<{ ms: number; controller: AbortController }> = []
+
+    beforeEach(() => {
+      deadlines.length = 0
+      vi.spyOn(AbortSignal, 'timeout').mockImplementation((ms: number) => {
+        const controller = new AbortController()
+        deadlines.push({ ms, controller })
+        return controller.signal
+      })
+      // GitHub never answers; the request settles only when its signal aborts.
+      mockFetch.mockImplementation((_url: string, init: RequestInit = {}) => new Promise<Response>((_, reject) => {
+        init.signal?.addEventListener('abort', () => reject(init.signal?.reason), { once: true })
+      }))
+      setGitHubPAT('ghp_deadline')
+    })
+
+    afterEach(() => {
+      mockFetch.mockReset()
+    })
+
+    function fireDeadline(ms: number): void {
+      const deadline = deadlines.find(entry => entry.ms === ms)
+      expect(deadline, `a ${ms} ms deadline on the direct request`).toBeDefined()
+      deadline?.controller.abort(new DOMException('signal timed out', 'TimeoutError'))
+    }
+
+    it.each([
+      ['repo', () => fetchRepoViaProxy('X', 'Y')],
+      ['tags', () => fetchTagsViaProxy('X', 'Y')],
+      ['commit detail', () => fetchCommitDetailViaProxy('X', 'Y', 'abc123')],
+      ['blame', () => fetchBlameViaProxy('X', 'Y', 'main', 'src/index.ts')],
+    ])('aborts a hung direct %s request after the server request deadline', async (_endpoint, call) => {
+      const pending = call()
+      pending.catch(() => {})
+      await vi.waitFor(() => expect(mockFetch).toHaveBeenCalled())
+
+      fireDeadline(GITHUB_REQUEST_TIMEOUT_MS)
+
+      await expect(pending).rejects.toHaveProperty('name', 'TimeoutError')
+    })
+
+    it('bounds each direct tree request with the server request deadline', async () => {
+      const pending = fetchTreeViaProxy('X', 'Y', 'main')
+      await vi.waitFor(() => expect(mockFetch).toHaveBeenCalled())
+
+      fireDeadline(GITHUB_REQUEST_TIMEOUT_MS)
+
+      await expect(pending).resolves.toMatchObject({ status: 'partial', reasons: ['fetch-failed'] })
+    })
+
+    it('keeps the caller signal working alongside the default deadline', async () => {
+      const caller = new AbortController()
+      const pending = fetchRepoViaProxy('X', 'Y', { signal: caller.signal })
+      pending.catch(() => {})
+      await vi.waitFor(() => expect(mockFetch).toHaveBeenCalled())
+      expect(deadlines.map(entry => entry.ms)).toEqual([GITHUB_REQUEST_TIMEOUT_MS])
+
+      const reason = new DOMException('navigated away', 'AbortError')
+      caller.abort(reason)
+
+      await expect(pending).rejects.toBe(reason)
+    })
+
+    it('uses a deadline the caller passes instead of the default', async () => {
+      const pending = _testInternals.proxyFetch('/api/github/repo?owner=X&name=Y', { timeoutMs: 5_000 })
+      pending.catch(() => {})
+      await vi.waitFor(() => expect(mockFetch).toHaveBeenCalled())
+      expect(deadlines.map(entry => entry.ms)).toEqual([5_000])
+
+      fireDeadline(5_000)
+
+      await expect(pending).rejects.toHaveProperty('name', 'TimeoutError')
     })
   })
 

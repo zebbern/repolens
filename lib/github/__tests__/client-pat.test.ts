@@ -89,6 +89,51 @@ describe('PAT management', () => {
     })
   })
 
+  describe('direct mode without AbortSignal.any (Safari < 17.4, Chrome < 116, Firefox < 124)', () => {
+    const repoData = {
+      owner: { login: 'test' }, name: 'repo', full_name: 'test/repo',
+      description: null, default_branch: 'main', stargazers_count: 0,
+      forks_count: 0, language: null, topics: [], private: false,
+      html_url: '', size: 0, open_issues_count: 0, pushed_at: '', license: null,
+    }
+
+    function withoutAbortSignalAny<T>(run: () => Promise<T>): Promise<T> {
+      const original = AbortSignal.any
+      // @ts-expect-error simulating a browser that lacks AbortSignal.any
+      delete AbortSignal.any
+      return run().finally(() => { AbortSignal.any = original })
+    }
+
+    it('loads a repository when the caller passes a signal', async () => {
+      setGitHubPAT('ghp_test_token')
+      mockFetch.mockResolvedValueOnce(mockOkResponse(repoData))
+
+      const repo = await withoutAbortSignalAny(() => (
+        fetchRepoViaProxy('test', 'repo', { signal: new AbortController().signal })
+      ))
+
+      expect(repo.fullName).toBe('test/repo')
+    })
+
+    it('still aborts the request when the caller aborts', async () => {
+      setGitHubPAT('ghp_test_token')
+      const controller = new AbortController()
+      let requestSignal: AbortSignal | undefined
+      mockFetch.mockImplementationOnce((_url: string, init: RequestInit) => {
+        requestSignal = init.signal ?? undefined
+        return new Promise(() => {})
+      })
+
+      await withoutAbortSignalAny(async () => {
+        void fetchRepoViaProxy('test', 'repo', { signal: controller.signal }).catch(() => {})
+        await Promise.resolve()
+        controller.abort(new DOMException('navigated away', 'AbortError'))
+      })
+
+      expect(requestSignal?.aborted).toBe(true)
+    })
+  })
+
   describe('fetchBlameViaProxy header attachment', () => {
     it('uses Authorization Bearer for GraphQL blame when PAT is set', async () => {
       setGitHubPAT('ghp_blame_test')

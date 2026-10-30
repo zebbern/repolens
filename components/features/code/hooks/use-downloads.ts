@@ -3,7 +3,18 @@ import type { GitHubRepo, FileNode } from "@/types/repository"
 import type { CodeIndex } from "@/lib/code/code-index"
 import { flattenFiles } from "@/lib/code/code-index"
 import { fetchFileContent } from "@/lib/github/fetcher"
+import { fetchFileViaProxy } from "@/lib/github/client"
 import type { OpenTab } from "../types"
+
+/**
+ * Fetch a file the index does not hold. Public files come straight from GitHub,
+ * outside the app's rate limits; private files need the token the proxy forwards.
+ */
+function fetchMissingFile(repo: GitHubRepo, path: string): Promise<string> {
+  return repo.isPrivate
+    ? fetchFileViaProxy(repo.owner, repo.name, repo.defaultBranch, path)
+    : fetchFileContent(repo.owner, repo.name, repo.defaultBranch, path)
+}
 
 interface UseDownloadsOptions {
   modifiedContents: Map<string, string>
@@ -89,7 +100,7 @@ export function useDownloads({
     let content = await getFileContent(node.path)
     if (content === null && repo) {
       try {
-        content = await fetchFileContent(repo.owner, repo.name, repo.defaultBranch, node.path)
+        content = await fetchMissingFile(repo, node.path)
       } catch {
         return
       }
@@ -122,7 +133,7 @@ export function useDownloads({
       fileNodes.map(async (f) => {
         let content = await getFileContent(f.path)
         if (content === null && repo) {
-          content = await fetchFileContent(repo.owner, repo.name, repo.defaultBranch, f.path)
+          content = await fetchMissingFile(repo, f.path)
         }
         return { path: f.path, content }
       })
@@ -163,7 +174,7 @@ export function useDownloads({
       allFiles.map(async (f) => {
         let content = await getFileContent(f.path)
         if (content === null && repo) {
-          content = await fetchFileContent(repo.owner, repo.name, repo.defaultBranch, f.path)
+          content = await fetchMissingFile(repo, f.path)
         }
         return { path: f.path, content }
       })

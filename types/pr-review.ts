@@ -35,17 +35,4 @@ export interface PRFile {
   contentsUrl: string
 }
 
-export interface PRComment {
-  id: number
-  body: string
-  author: string
-  authorAvatarUrl: string | null
-  createdAt: string
-  updatedAt: string
-  path?: string
-  line?: number
-  side?: 'LEFT' | 'RIGHT'
-  inReplyToId?: number
-}
-
 export type PRReviewStatus = 'idle' | 'loading-list' | 'loading-pr' | 'loading-files' | 'error'

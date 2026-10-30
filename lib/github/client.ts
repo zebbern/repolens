@@ -1,6 +1,6 @@
 import type { GitHubRepo, RepoTree, ResolvedRepoTree, GitHubTag, GitHubBranch, GitHubCommit, GitHubComparison } from "@/types/repository"
 import type { BlameData, CommitDetail, CommitFile } from "@/types/git-history"
-import type { PRMetadata, PRFile, PRComment } from "@/types/pr-review"
+import type { PRMetadata, PRFile } from "@/types/pr-review"
 import {
   getCached,
   getStale,
@@ -32,7 +32,6 @@ import {
 // TTL constants (milliseconds)
 // ---------------------------------------------------------------------------
 
-const CACHE_TTL_RATE_LIMIT  = 30_000   // 30 seconds
 const CACHE_TTL_REPO_META  = 300_000  // 5 minutes
 const CACHE_TTL_TREE       = 600_000  // 10 minutes
 const CACHE_TTL_FILE       = 600_000  // 10 minutes
@@ -43,7 +42,6 @@ const CACHE_TTL_COMPARE    = 600_000  // 10 minutes
 const CACHE_TTL_BLAME         = 600_000  // 10 minutes
 const CACHE_TTL_COMMIT_DETAIL = 600_000  // 10 minutes
 const CACHE_TTL_PULLS         = 60_000   // 1 minute
-const CACHE_TTL_LANGUAGES     = 600_000  // 10 minutes
 
 // ---------------------------------------------------------------------------
 // PAT management — allows the React provider to inject a token
@@ -150,6 +148,35 @@ const GITHUB_API_BASE = 'https://api.github.com'
 const GITHUB_GRAPHQL_ENDPOINT = 'https://api.github.com/graphql'
 
 /**
+ * Direct requests follow redirects so renamed or transferred repositories
+ * work: GitHub answers them with a 301 that stays on api.github.com (for
+ * example /repos/old/name to /repositories/<id>), and the server path already
+ * follows it. Following is safe because fetch drops the Authorization header
+ * on a cross-origin redirect, so the PAT only ever goes to api.github.com, and
+ * a response that ended anywhere else is rejected as an upstream failure
+ * without reading its body.
+ */
+const DIRECT_REDIRECT_MODE: RequestRedirect = 'follow'
+const GITHUB_API_ORIGIN = new URL(GITHUB_API_BASE).origin
+
+/** Reject a followed redirect that left api.github.com (see DIRECT_REDIRECT_MODE). */
+function assertGitHubApiResponse(response: Response, target: GitHubErrorTarget): void {
+  if (!response.redirected) return
+  let origin: string | null = null
+  try {
+    origin = new URL(response.url).origin
+  } catch {
+    // An unparsable final URL is treated like a foreign origin.
+  }
+  if (origin === GITHUB_API_ORIGIN) return
+  response.body?.cancel().catch(() => {})
+  throw new GitHubError('upstream', {
+    ...target,
+    upstreamMessage: `Redirected away from ${GITHUB_API_ORIGIN} to ${origin ?? 'an invalid URL'}`,
+  })
+}
+
+/**
  * Endpoint type identifier for URL mapping and response normalization.
  * Tree requests use their own direct branch in fetchTreeViaProxy, and file
  * requests always use the proxy, so neither is mapped here.
@@ -161,7 +188,6 @@ type ProxyEndpoint =
   | 'commits'
   | 'compare'
   | 'commit'
-  | 'rate-limit'
 
 interface DirectUrlMapping {
   url: string
@@ -242,10 +268,6 @@ function mapProxyUrlToGitHubApi(proxyUrl: string): DirectUrlMapping | null {
     }
   }
 
-  if (pathname === '/api/github/rate-limit') {
-    return { url: `${GITHUB_API_BASE}/rate_limit`, endpoint: 'rate-limit' }
-  }
-
   return null
 }
 
@@ -255,12 +277,9 @@ const PROXY_PATH_RESOURCES: Record<string, GitHubErrorTarget['resource']> = {
   '/api/github/file': 'file',
   '/api/github/tags': 'tags',
   '/api/github/branches': 'branches',
-  '/api/github/refs': 'refs',
   '/api/github/commits': 'commits',
   '/api/github/compare': 'comparison',
-  '/api/github/languages': 'languages',
   '/api/github/pulls': 'pulls',
-  '/api/github/rate-limit': 'rate_limit',
 }
 
 /**
@@ -275,11 +294,8 @@ function proxyErrorTarget(proxyUrl: string): GitHubErrorTarget {
 
   const commit = pathname.match(/^\/api\/github\/commit\/([^/]+)$/)
   if (commit) return { resource: 'commit', subject: decodeURIComponent(commit[1]) }
-  const pull = pathname.match(/^\/api\/github\/pulls\/(\d+)(?:\/(files|comments))?$/)
-  if (pull) {
-    const resource = pull[2] === 'files' ? 'pull_request_files' : pull[2] === 'comments' ? 'pull_request_comments' : 'pull_request'
-    return { resource, subject: pull[1] }
-  }
+  const pull = pathname.match(/^\/api\/github\/pulls\/(\d+)(\/files)?$/)
+  if (pull) return { resource: pull[2] ? 'pull_request_files' : 'pull_request', subject: pull[1] }
   return { resource: 'github' }
 }
 
@@ -390,7 +406,7 @@ async function directFetchResponse(
       'Accept': 'application/vnd.github.v3+json',
       'Authorization': `Bearer ${pat}`,
     },
-    redirect: 'error',
+    redirect: DIRECT_REDIRECT_MODE,
     signal: getDirectRequestSignal(options),
   }
   let response: Response
@@ -400,6 +416,7 @@ async function directFetchResponse(
     throw gitHubTransportError(error, target, options.signal)
   }
 
+  assertGitHubApiResponse(response, target)
   if (!response.ok) throw await gitHubErrorFromResponse(response, target)
 
   return response
@@ -485,11 +502,6 @@ interface GitHubApiCompareResponse {
 interface GitHubApiCommitDetailResponse extends GitHubApiCommitResponse {
   stats?: { additions: number; deletions: number; total: number }
   files?: GitHubApiFileEntry[]
-}
-
-interface GitHubApiRateLimitResponse {
-  rate?: { limit: number; remaining: number; reset: number }
-  resources?: { core?: { limit: number; remaining: number; reset: number } }
 }
 
 // --- Normalizer functions ---
@@ -609,16 +621,6 @@ function normalizeCommitDetail(data: GitHubApiCommitDetailResponse): CommitDetai
   }
 }
 
-function normalizeRateLimit(data: GitHubApiRateLimitResponse): { limit: number; remaining: number; reset: number; authenticated: boolean } {
-  const core = data.rate ?? data.resources?.core
-  return {
-    limit: core?.limit ?? 0,
-    remaining: core?.remaining ?? 0,
-    reset: core?.reset ?? 0,
-    authenticated: true,
-  }
-}
-
 /** Apply the appropriate normalization for a given endpoint. */
 function normalizeDirectResponse<T>(data: unknown, endpoint: ProxyEndpoint): T {
   switch (endpoint) {
@@ -634,7 +636,6 @@ function normalizeDirectResponse<T>(data: unknown, endpoint: ProxyEndpoint): T {
     case 'commits':     return normalizeCommits(data as GitHubApiCommitResponse[]) as T
     case 'compare':     return normalizeCompare(data as GitHubApiCompareResponse) as T
     case 'commit':      return normalizeCommitDetail(data as GitHubApiCommitDetailResponse) as T
-    case 'rate-limit':  return normalizeRateLimit(data as GitHubApiRateLimitResponse) as T
     default:            return data as T
   }
 }
@@ -877,33 +878,6 @@ export async function fetchFileViaProxy(
   return data.content
 }
 
-/**
- * Fetch rate limit status through the proxy
- */
-export async function fetchRateLimitViaProxy(): Promise<{
-  limit: number
-  remaining: number
-  reset: number
-  authenticated: boolean
-}> {
-  const key = 'rate-limit'
-  const url = '/api/github/rate-limit'
-  return cachedProxyFetch(key, url, CACHE_TTL_RATE_LIMIT)
-}
-
-/**
- * Fetch repository language breakdown through the proxy.
- * Returns an object mapping language names to byte counts.
- */
-export async function fetchLanguagesViaProxy(
-  owner: string,
-  name: string,
-): Promise<Record<string, number>> {
-  const key = `languages:${owner}/${name}`
-  const url = `/api/github/languages?owner=${encodeURIComponent(owner)}&name=${encodeURIComponent(name)}`
-  return cachedProxyFetch<Record<string, number>>(key, url, CACHE_TTL_LANGUAGES)
-}
-
 // ---------------------------------------------------------------------------
 // Tags, branches, commits, compare — proxy fetch functions
 // ---------------------------------------------------------------------------
@@ -964,20 +938,6 @@ export async function fetchCommitsViaProxy(
   const key = `commits:${owner}/${name}:${params.toString()}`
   const url = `/api/github/commits?${params.toString()}`
   return cachedProxyFetch<GitHubCommit[]>(key, url, CACHE_TTL_COMMITS, { signal: opts?.signal })
-}
-
-/**
- * Fetch both tags and branches in a single request through the combined refs proxy.
- */
-export async function fetchRefsViaProxy(
-  owner: string,
-  name: string,
-  perPage: number = GITHUB_LIST_PAGE_SIZE,
-): Promise<{ tags: GitHubTag[]; branches: GitHubBranch[]; tagsTruncated: boolean; branchesTruncated: boolean }> {
-  const key = `refs:${owner}/${name}:${perPage}`
-  const params = new URLSearchParams({ owner, name, per_page: String(perPage) })
-  const url = `/api/github/refs?${params.toString()}`
-  return cachedProxyFetch<{ tags: GitHubTag[]; branches: GitHubBranch[]; tagsTruncated: boolean; branchesTruncated: boolean }>(key, url, CACHE_TTL_TAGS)
 }
 
 /**
@@ -1060,7 +1020,7 @@ async function fetchBlameFromApi(
     try {
       response = await fetch(GITHUB_GRAPHQL_ENDPOINT, {
         method: 'POST',
-        redirect: 'error',
+        redirect: DIRECT_REDIRECT_MODE,
         headers: {
           'Authorization': `Bearer ${pat}`,
           'Content-Type': 'application/json',
@@ -1075,6 +1035,7 @@ async function fetchBlameFromApi(
       throw gitHubTransportError(error, { resource: 'blame' }, options.signal)
     }
 
+    assertGitHubApiResponse(response, { resource: 'blame' })
     if (!response.ok) {
       throw await gitHubErrorFromResponse(response, { resource: 'blame' })
     }
@@ -1207,26 +1168,6 @@ export async function fetchPullRequestFilesViaProxy(
   return cachedProxyFetch<PRFile[]>(key, url, CACHE_TTL_PULLS, { signal: opts?.signal })
 }
 
-/**
- * Fetch pull request review comments through the proxy.
- */
-export async function fetchPullRequestCommentsViaProxy(
-  owner: string,
-  name: string,
-  number: number,
-  opts?: { perPage?: number; page?: number; signal?: AbortSignal },
-): Promise<PRComment[]> {
-  const params = new URLSearchParams()
-  params.set('owner', owner)
-  params.set('name', name)
-  if (opts?.perPage !== undefined) params.set('per_page', String(opts.perPage))
-  if (opts?.page !== undefined) params.set('page', String(opts.page))
-
-  const key = `pr-comments:${owner}/${name}:${number}:${params.toString()}`
-  const url = `/api/github/pulls/${number}/comments?${params.toString()}`
-  return cachedProxyFetch<PRComment[]>(key, url, CACHE_TTL_PULLS, { signal: opts?.signal })
-}
-
 // ---------------------------------------------------------------------------
 // Cache management — exported for manual invalidation
 // ---------------------------------------------------------------------------
@@ -1253,7 +1194,6 @@ export function invalidateRepoCache(owner: string, repo: string): void {
   invalidatePattern(`pulls:${owner}/${repo}`)
   invalidatePattern(`pr:${owner}/${repo}`)
   invalidatePattern(`pr-files:${owner}/${repo}`)
-  invalidatePattern(`pr-comments:${owner}/${repo}`)
 }
 
 // Exposed for unit tests only — not part of the public API.

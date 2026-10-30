@@ -2,9 +2,7 @@
  * Mode-parity contract for GitHub access.
  *
  * Every endpoint that PAT direct mode sends straight from the browser to
- * GitHub (except `rate-limit`, which has no production caller and may be
- * deleted; see docs/improvements/refactor-options.md, refactor 4) runs twice
- * against one fake GitHub: once through the real
+ * GitHub runs twice against one fake GitHub: once through the real
  * `/api/github/*` route handlers (proxy mode, as a signed-in OAuth user) and
  * once direct with a PAT. Success payloads must be identical in both modes.
  *
@@ -313,14 +311,34 @@ function respond(url: URL, init: RequestInit): Response {
   return restSuccess(url)
 }
 
-/** Serve a GitHub URL, applying fetch's redirect mode the way a browser does. */
+/**
+ * Serve a GitHub URL, applying fetch's redirect mode the way a browser does:
+ * 'error' rejects with a network error; 'follow' (the default) re-requests the
+ * Location, drops Authorization when the redirect crosses origins, turns a
+ * 301/302 POST (and any 303) into a bodiless GET, and returns the final
+ * response with `redirected` and `url` set.
+ */
 function fakeGitHub(input: string, init: RequestInit): Response {
   let url = new URL(input)
+  let request: RequestInit = { ...init, headers: new Headers(init.headers) }
   for (let hops = 0; hops < 5; hops++) {
-    const response = respond(url, init)
-    if (response.status < 300 || response.status >= 400) return response
+    const response = respond(url, request)
+    if (response.status < 300 || response.status >= 400) {
+      Object.defineProperty(response, 'url', { value: url.href })
+      Object.defineProperty(response, 'redirected', { value: hops > 0 })
+      return response
+    }
     if (init.redirect === 'error') throw new TypeError('Failed to fetch')
-    url = new URL(response.headers.get('Location') ?? '', url)
+    if (init.redirect === 'manual') throw new Error('The fake GitHub does not model redirect: manual')
+    const next = new URL(response.headers.get('Location') ?? '', url)
+    const headers = new Headers(request.headers)
+    if (next.origin !== url.origin) headers.delete('Authorization')
+    const method = (request.method ?? 'GET').toUpperCase()
+    const toGet = response.status === 303
+      ? method !== 'GET' && method !== 'HEAD'
+      : (response.status === 301 || response.status === 302) && method === 'POST'
+    request = toGet ? { ...request, method: 'GET', body: undefined, headers } : { ...request, headers }
+    url = next
   }
   throw new TypeError('Too many redirects')
 }
@@ -436,47 +454,11 @@ function failed(error: string, kind?: GitHubErrorKind): Outcome {
   return { ok: false, error, kind }
 }
 
-/** Tree resolution does not reject: a failed root fetch yields a partial tree. */
-function treeFailure(message: string): Outcome {
-  return {
-    ok: true,
-    value: {
-      status: 'partial',
-      sha: 'HEAD',
-      tree: [],
-      truncated: true,
-      reasons: ['fetch-failed'],
-      failureDetails: [{ path: '.', reason: 'fetch-failed', message }],
-      failedSubtrees: ['.'],
-      requestCount: 1,
-    },
-  }
-}
-
 function succeeded(partial: Record<string, unknown>): Outcome {
   return { ok: true, value: expect.objectContaining(partial) }
 }
 
-/**
- * Redirects: the server follows GitHub's 301 for a renamed or transferred
- * repository, while direct requests use `redirect: 'error'` (commit 9f58af3),
- * so the browser's network failure surfaces as an upstream GitHubError.
- * GraphQL is not redirected, so blame has no redirect row.
- */
-function redirectDivergence(failure: string, toOutcome: (message: string) => Outcome = message => failed(message, 'upstream')): Divergence {
-  return { proxy: 'success', direct: toOutcome(failure) }
-}
-
 const KNOWN_DIVERGENCES: Record<string, Divergence> = {
-  'repo / redirect': redirectDivergence('Failed to fetch repository'),
-  'tree / redirect': redirectDivergence('Failed to fetch repository tree', treeFailure),
-  'tags / redirect': redirectDivergence('Failed to fetch tags'),
-  'branches / redirect': redirectDivergence('Failed to fetch branches'),
-  'commits / redirect': redirectDivergence('Failed to fetch commits'),
-  'file commits / redirect': redirectDivergence('Failed to fetch commits'),
-  'compare / redirect': redirectDivergence('Failed to fetch comparison'),
-  'commit detail / redirect': redirectDivergence('Failed to fetch commit detail'),
-
   // Unusual success data: the server fetcher throws a TypeError (reported as
   // a generic 500) where direct mode defaults the missing stats to zeros.
   'commit detail (no stats) / ok': {
@@ -513,6 +495,8 @@ describe('GitHub access parity: proxy mode vs PAT direct mode', () => {
 
     if (!known) {
       if (upstream === 'ok') expect(proxy.ok, `${key}: fixture must succeed`).toBe(!FAILING_VARIANTS.has(key))
+      // A renamed or transferred repository loads as if it had not moved.
+      if (upstream === 'redirect') expect(proxy, `${key}: redirect must be followed`).toEqual(await run('proxy', 'ok', call))
       expect(direct, `${key}: new divergence; fix it or list it in KNOWN_DIVERGENCES`).toEqual(proxy)
       return
     }

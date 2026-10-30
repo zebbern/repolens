@@ -12,7 +12,6 @@ const github = vi.hoisted(() => ({
   fetchPullsViaProxy: vi.fn(),
   fetchPullRequestViaProxy: vi.fn(),
   fetchPullRequestFilesViaProxy: vi.fn(),
-  fetchPullRequestCommentsViaProxy: vi.fn(),
 }))
 
 vi.mock('@/lib/github/client', () => github)
@@ -37,7 +36,7 @@ describe('PRReviewProvider', () => {
     expect(result.current.state.availablePRs).toEqual([])
   })
 
-  it('loads pull-request metadata and files without fetching unused comments', async () => {
+  it('loads pull-request metadata and files', async () => {
     github.fetchPullRequestViaProxy.mockResolvedValue({ number: 42, changedFiles: 1 })
     github.fetchPullRequestFilesViaProxy.mockResolvedValue([{ filename: 'src/index.ts' }])
     const { result } = renderHook(() => ({ state: usePRReviewState(), actions: usePRReviewActions() }), { wrapper })
@@ -46,7 +45,6 @@ describe('PRReviewProvider', () => {
 
     expect(result.current.state.status).toBe('idle')
     expect(result.current.state.files).toHaveLength(1)
-    expect(github.fetchPullRequestCommentsViaProxy).not.toHaveBeenCalled()
     expect(github.fetchPullRequestViaProxy.mock.calls[0][3]?.signal).toBeInstanceOf(AbortSignal)
     expect(github.fetchPullRequestFilesViaProxy.mock.calls[0][3]?.signal).toBeInstanceOf(AbortSignal)
   })

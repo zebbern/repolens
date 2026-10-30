@@ -22,17 +22,13 @@ export type GitHubResource =
   | 'file'
   | 'tags'
   | 'branches'
-  | 'refs'
   | 'commits'
   | 'comparison'
   | 'commit'
   | 'blame'
-  | 'languages'
   | 'pulls'
   | 'pull_request'
   | 'pull_request_files'
-  | 'pull_request_comments'
-  | 'rate_limit'
   | 'github'
 
 export interface GitHubErrorTarget {
@@ -69,7 +65,6 @@ const RESOURCE_MESSAGES: Record<GitHubResource, ResourceMessages> = {
   file: { label: 'file', notFound: subject => subject ? `File not found: ${subject}` : 'File not found.' },
   tags: { label: 'tags', notFound: () => 'Tags not found.' },
   branches: { label: 'branches', notFound: () => 'Branches not found.' },
-  refs: { label: 'refs', notFound: () => 'Refs not found.' },
   commits: { label: 'commits', notFound: () => 'Commits not found.' },
   comparison: { label: 'comparison', notFound: () => 'Comparison not found.' },
   commit: { label: 'commit detail', notFound: subject => subject ? `Commit not found: ${subject}` : 'Commit not found.' },
@@ -79,12 +74,9 @@ const RESOURCE_MESSAGES: Record<GitHubResource, ResourceMessages> = {
     notFound: () => REPOSITORY_NOT_FOUND,
     unauthorized: 'Authentication required to fetch blame data',
   },
-  languages: { label: 'languages', notFound: () => 'Languages not found.' },
   pulls: { label: 'pull requests', notFound: () => 'Pull requests not found.' },
   pull_request: { label: 'pull request', notFound: pullRequestNotFound },
   pull_request_files: { label: 'pull request files', notFound: pullRequestNotFound },
-  pull_request_comments: { label: 'pull request comments', notFound: pullRequestNotFound },
-  rate_limit: { label: 'rate limit', notFound: () => 'Rate limit status not found.' },
   github: { label: 'GitHub data', notFound: () => 'Not found on GitHub.' },
 }
 

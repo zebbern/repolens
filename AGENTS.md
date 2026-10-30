@@ -50,8 +50,7 @@ workproject/                    # Next.js application root
 │       ├── deps/               # Dependency health endpoint
 │       │   └── cve/            # CVE proxy for OSV API
 │       ├── docs/               # AI documentation generation endpoint
-│       ├── github/             # GitHub API proxy routes (repo, tree, file, blame, commits, commit/[sha], tags, branches, compare, languages, pulls, rate-limit, validate-token, zipball)
-│       │   └── refs/           # Combined tags+branches endpoint
+│       ├── github/             # GitHub API proxy routes (repo, tree, file, blame, commits, commit/[sha], tags, branches, compare, pulls, pulls/[number], pulls/[number]/files, validate-token, zipball)
 │       ├── inline-actions/     # Inline code action AI endpoint
 │       ├── issues/             # Issues-related API routes
 │       ├── skills/             # Skills discovery API endpoint

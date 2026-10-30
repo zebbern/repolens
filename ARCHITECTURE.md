@@ -591,7 +591,6 @@ graph TD
     R7["/api/changelog/generate"]
     R8["/api/github/blame"]
     R9["/api/github/commit/[sha]"]
-    R10["/api/github/refs"]
     R11["/api/deps/cve"]
   end
 
@@ -655,7 +654,6 @@ graph TD
   R3 --> G1
   R8 --> G1
   R9 --> G1
-  R10 --> G1
   R11 --> EXT1
 ```
 
@@ -911,7 +909,7 @@ The `prepareStep` callback inspects the message history for `<skill-instructions
 
 All AI API routes apply rate limiting via `lib/api/rate-limit.ts` using `applyRateLimit()`. The function returns `null` if allowed, or a `429` response with `Retry-After` and `X-RateLimit-*` headers if the limit is exceeded. Error responses use the standardized `apiError()` helper from `lib/api/error.ts`.
 
-GitHub list routes that walk pages (`/api/github/tags`, `/branches`, `/refs`) are admitted at their worst-case page cost (`cost` in the policy); after a completed walk, `refundRateLimit()` returns the pages it did not use, while an aborted or failed walk keeps the full charge. GitHub routes return a generic message for 5xx failures and log the upstream detail server-side.
+GitHub list routes that walk pages (`/api/github/tags`, `/branches`) are admitted at their worst-case page cost (`cost` in the policy); after a completed walk, `refundRateLimit()` returns the pages it did not use, while an aborted or failed walk keeps the full charge. GitHub routes return a generic message for 5xx failures and log the upstream detail server-side.
 
 ## API Proxy Caching
 
@@ -923,7 +921,5 @@ GitHub API proxy routes wrapped in `withGitHubCachePolicy()` (`lib/api/github-ca
 | Tree | 600 s |
 | Tags | 600 s |
 | Branches | 300 s |
-| Refs | 300 s |
 | Commits | 300 s |
-| Languages | 600 s |
-| Pull requests (list, detail, comments, files) | 60 s |
+| Pull requests (list, detail, files) | 60 s |

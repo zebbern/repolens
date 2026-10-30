@@ -30,7 +30,6 @@ import {
   fetchCommitsViaProxy,
   fetchCompareViaProxy,
   fetchCommitDetailViaProxy,
-  fetchRateLimitViaProxy,
   fetchBlameViaProxy,
   clearGitHubCache,
   _testInternals,
@@ -137,10 +136,6 @@ const RAW_COMMIT_DETAIL = {
   files: [{ filename: 'src/app.ts', status: 'modified', additions: 5, deletions: 1, changes: 6, patch: '@@ -1 +1,5 @@' }],
 }
 
-const RAW_RATE_LIMIT = {
-  rate: { limit: 5000, remaining: 4999, reset: 1700000000 },
-}
-
 const RAW_BLAME_GRAPHQL = {
   data: {
     repository: {
@@ -233,12 +228,6 @@ describe('Direct GitHub API calls (PAT mode)', () => {
       mockFetch.mockResolvedValueOnce(jsonResponse(RAW_COMMIT_DETAIL))
       await fetchCommitDetailViaProxy('X', 'Y', 'abc123')
       expect(mockFetch).toHaveBeenCalledWith('https://api.github.com/repos/X/Y/commits/abc123', expect.any(Object))
-    })
-
-    it('maps rate-limit endpoint', async () => {
-      mockFetch.mockResolvedValueOnce(jsonResponse(RAW_RATE_LIMIT))
-      await fetchRateLimitViaProxy()
-      expect(mockFetch).toHaveBeenCalledWith('https://api.github.com/rate_limit', expect.any(Object))
     })
   })
 
@@ -736,12 +725,6 @@ describe('Direct GitHub API calls (PAT mode)', () => {
       mockFetch.mockResolvedValueOnce(jsonResponse({ content: 'export const x = 1' }))
       const result = await fetchFileViaProxy('X', 'Y', 'main', 'src/index.ts')
       expect(result).toBe('export const x = 1')
-    })
-
-    it('normalizes rate-limit with authenticated: true', async () => {
-      mockFetch.mockResolvedValueOnce(jsonResponse(RAW_RATE_LIMIT))
-      const result = await fetchRateLimitViaProxy()
-      expect(result).toEqual({ limit: 5000, remaining: 4999, reset: 1700000000, authenticated: true })
     })
 
     it('normalizes compare response', async () => {

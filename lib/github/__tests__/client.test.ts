@@ -23,7 +23,6 @@ import {
   fetchRepoViaProxy,
   fetchTreeViaProxy,
   fetchFileViaProxy,
-  fetchRateLimitViaProxy,
   clearGitHubCache,
   invalidateRepoCache,
 } from '../client'
@@ -177,18 +176,6 @@ describe('GitHub client — caching integration', () => {
         600_000,
       )
     })
-
-    it('fetchRateLimitViaProxy uses 30-second (30,000ms) TTL', async () => {
-      mockFetch.mockResolvedValueOnce(
-        mockOkResponse({ limit: 60, remaining: 59, reset: 0, authenticated: false }),
-      )
-      await fetchRateLimitViaProxy()
-      expect(cacheMock.setCache).toHaveBeenCalledWith(
-        expect.any(String),
-        expect.anything(),
-        30_000,
-      )
-    })
   })
 
   // -----------------------------------------------------------------------
@@ -212,14 +199,6 @@ describe('GitHub client — caching integration', () => {
       mockFetch.mockResolvedValueOnce(mockOkResponse({ content: '' }))
       await fetchFileViaProxy('owner', 'repo', 'main', 'src/index.ts')
       expect(cacheMock.getCached).toHaveBeenCalledWith(expect.stringMatching(/^file:owner\/repo:main:src\/index\.ts:principal:(?:anonymous|pat:\d+|oauth:[^:]+):epoch:\d+$/))
-    })
-
-    it('rate-limit key is a constant string', async () => {
-      mockFetch.mockResolvedValueOnce(
-        mockOkResponse({ limit: 60, remaining: 59, reset: 0, authenticated: false }),
-      )
-      await fetchRateLimitViaProxy()
-      expect(cacheMock.getCached).toHaveBeenCalledWith(expect.stringMatching(/^rate-limit:principal:(?:anonymous|pat:\d+|oauth:[^:]+):epoch:\d+$/))
     })
   })
 
@@ -251,8 +230,7 @@ describe('GitHub client — caching integration', () => {
       expect(cacheMock.invalidatePattern).toHaveBeenCalledWith('pulls:facebook/react')
       expect(cacheMock.invalidatePattern).toHaveBeenCalledWith('pr:facebook/react')
       expect(cacheMock.invalidatePattern).toHaveBeenCalledWith('pr-files:facebook/react')
-      expect(cacheMock.invalidatePattern).toHaveBeenCalledWith('pr-comments:facebook/react')
-      expect(cacheMock.invalidatePattern).toHaveBeenCalledTimes(14)
+      expect(cacheMock.invalidatePattern).toHaveBeenCalledTimes(13)
     })
   })
 

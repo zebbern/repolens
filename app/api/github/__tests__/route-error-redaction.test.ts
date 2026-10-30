@@ -26,7 +26,6 @@ vi.mock('@/lib/github/fetcher', () => ({
   fetchRepoMetadata: rejectWithSecret,
   fetchRepoTree: rejectWithSecret,
   fetchFileContent: rejectWithSecret,
-  fetchRepoLanguages: rejectWithSecret,
   fetchTags: rejectWithSecret,
   fetchBranches: rejectWithSecret,
   fetchCommits: rejectWithSecret,
@@ -36,7 +35,6 @@ vi.mock('@/lib/github/fetcher', () => ({
   fetchPulls: rejectWithSecret,
   fetchPullRequest: rejectWithSecret,
   fetchPullRequestFiles: rejectWithSecret,
-  fetchPullRequestComments: rejectWithSecret,
 }))
 
 type RouteHandler = (request: NextRequest, context?: unknown) => Promise<Response>
@@ -66,10 +64,8 @@ const ROUTES: RouteCase[] = [
   { name: 'repo', load: async () => (await import('../repo/route')).GET, request: get('/repo?owner=o&name=r') },
   { name: 'tree', load: async () => (await import('../tree/route')).GET, request: get('/tree?owner=o&name=r') },
   { name: 'file', load: async () => (await import('../file/route')).GET, request: get('/file?owner=o&name=r&branch=main&path=a.ts') },
-  { name: 'languages', load: async () => (await import('../languages/route')).GET, request: get('/languages?owner=o&name=r') },
   { name: 'tags', load: async () => (await import('../tags/route')).GET, request: get('/tags?owner=o&name=r') },
   { name: 'branches', load: async () => (await import('../branches/route')).GET, request: get('/branches?owner=o&name=r') },
-  { name: 'refs', load: async () => (await import('../refs/route')).GET, request: get('/refs?owner=o&name=r') },
   { name: 'commits', load: async () => (await import('../commits/route')).GET, request: get('/commits?owner=o&name=r') },
   { name: 'compare', load: async () => (await import('../compare/route')).GET, request: get('/compare?owner=o&name=r&base=v1&head=v2') },
   {
@@ -92,13 +88,6 @@ const ROUTES: RouteCase[] = [
     context: { params: Promise.resolve({ number: '1' }) },
   },
   {
-    name: 'pulls/[number]/comments',
-    load: async () => (await import('../pulls/[number]/comments/route')).GET as RouteHandler,
-    request: get('/pulls/1/comments?owner=o&name=r'),
-    context: { params: Promise.resolve({ number: '1' }) },
-  },
-  { name: 'rate-limit', load: async () => (await import('../rate-limit/route')).GET, request: get('/rate-limit') },
-  {
     name: 'validate-token',
     load: async () => (await import('../validate-token/route')).POST,
     request: post('/validate-token', {}, { 'X-GitHub-Token': 'ghp_abc123' }),
@@ -119,7 +108,7 @@ describe('GitHub proxy routes do not leak raw exception text', () => {
   let consoleError: ReturnType<typeof vi.spyOn>
 
   beforeEach(() => {
-    // Routes that call GitHub directly (rate-limit, validate-token, zipball) hit fetch.
+    // Routes that call GitHub directly (validate-token, zipball) hit fetch.
     vi.stubGlobal('fetch', vi.fn(rejectWithSecret))
     consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
   })
@@ -147,7 +136,7 @@ describe('GitHub proxy routes do not leak raw exception text', () => {
 
 describe('GitHub proxy routes keep upstream text of a GitHubError server-side', () => {
   /** Routes whose GitHub failures come from lib/github/fetcher.ts. */
-  const FETCHER_ROUTES = ROUTES.filter(route => !['rate-limit', 'validate-token', 'zipball'].includes(route.name))
+  const FETCHER_ROUTES = ROUTES.filter(route => !['validate-token', 'zipball'].includes(route.name))
   const createSecretError = () => new Error(SECRET)
   let consoleWarn: ReturnType<typeof vi.spyOn>
   let consoleError: ReturnType<typeof vi.spyOn>

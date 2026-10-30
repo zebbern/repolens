@@ -159,6 +159,7 @@ Option A (delete the sync path and migrate the tests). The sync path has zero pr
 ### Decisions for the owner
 
 - scanOnDemand and mergeScanResults were built for incremental scanning on the lazy tier (a metadata-only base plus per-file scans merged in). Production has no lazy-tier scanning today: scanner-client.ts has no LazyContentStore branch. Is lazy-tier incremental scanning on the roadmap? If yes, keep mergeScanResults (pure and cheap) and rebuild on scanIssuesAsync({ changedFiles }). If no, delete both.
+  - **Decided (2026-10-30):** no lazy-tier incremental scanning is planned, so `mergeScanResults` was deleted with its tests; git history keeps it if that feature is ever built on `scanIssuesAsync({ changedFiles })`.
 
 ## (3) Decompose components/features/preview/global-search-overlay.tsx
 
@@ -304,7 +305,7 @@ Stale claims in the reports, now fixed:
 - The direct commits mapping now passes page (client.ts:221).
 FOLLOWUP row 19 and the matching core-correctness items are therefore out of date.
 
-Status: (5) closed every error divergence below and the null-repository blame case; both modes now throw the same GitHubError kind and message. mode-parity.test.ts KNOWN_DIVERGENCES lists only the redirect policy and the commit-detail stats default.
+Status: (5) closed every error divergence below and the null-repository blame case; both modes now throw the same GitHubError kind and message. PAT direct mode now follows GitHub's redirects within https://api.github.com (decided below), so mode-parity.test.ts KNOWN_DIVERGENCES lists only the commit-detail stats default. The routes and client functions without a production consumer have been deleted (decided below).
 
 Remaining divergences, measured with a probe that sent each upstream response through both modes:
 - 404: the proxy says 'Repository not found. Make sure the repository exists. If it's private, add a GitHub token in Settings.' Direct mode says 'Not Found'.
@@ -401,7 +402,9 @@ Do Option A now: about 1 day, low risk, and it is the safety net for both this r
 
 - Keep PAT direct mode as a feature (browser to GitHub, no server hop), or send all PAT traffic through the RepoLens server (Option C), accepting more server invocations and app-side rate limits for PAT users?
 - Should PAT direct requests follow GitHub's 301 redirects so renamed or transferred repositories work? This reverses the redirect:'error' hardening from commit 9f58af3; browsers drop the Authorization header on cross-origin redirects, and the server path already follows redirects with the forwarded PAT.
+  - Decided: yes. Direct REST and GraphQL requests in lib/github/client.ts use redirect:'follow'; a response whose redirect ended outside https://api.github.com is rejected as an upstream GitHubError without reading its body. The 8 redirect rows are gone from mode-parity.test.ts KNOWN_DIVERGENCES, and lib/github/__tests__/client-pat.test.ts pins both the same-origin and the foreign-origin cases.
 - Delete the routes and client functions that have no production consumer (/api/github/rate-limit, /api/github/refs, /api/github/languages, fetchPullRequestCommentsViaProxy), or keep them as public API?
+  - Decided: delete. Removed the four routes (/api/github/rate-limit, /api/github/refs, /api/github/languages, /api/github/pulls/[number]/comments) with their tests; fetchRateLimitViaProxy, fetchRefsViaProxy, fetchLanguagesViaProxy and fetchPullRequestCommentsViaProxy from lib/github/client.ts and lib/github/index.ts; the 'rate-limit' direct mapping and normalizeRateLimit; the server fetchers fetchRepoLanguages and fetchPullRequestComments; the PRComment type; and the refs, languages, pull_request_comments and rate_limit GitHubError resources.
 
 ## (5) Typed GitHub error contract instead of HTTP status from error-message substrings
 

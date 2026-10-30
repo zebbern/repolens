@@ -1,14 +1,13 @@
 // Tests for lazy content loading scanner features:
 // - scanIssuesAsync with { metadataOnly: true }
 // - on-demand single-file scans (scanIssuesAsync with { changedFiles })
-// - mergeScanResults
 // - unscannedFileCount / isMetadataOnly fields
 
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 
 vi.mock('@/lib/parsers/tree-sitter', () => import('@/lib/code/scanner/__tests__/tree-sitter-mock'))
 
-import { scanIssuesAsync, mergeScanResults, clearScanCache } from './scanner'
+import { scanIssuesAsync, clearScanCache } from './scanner'
 import { scan } from './__tests__/scan-test-helpers'
 import { createEmptyIndex, indexFile, batchIndexMetadataOnly } from '../code-index'
 import type { CodeIndex } from '../code-index'
@@ -242,180 +241,6 @@ describe('on-demand single-file scans', () => {
     expect(onDemand1.isPartialScan).toBe(true)
     expect(onDemand2).not.toBe(onDemand1)
     expect(await scanIssuesAsync(index, null)).toBe(fullResult)
-  })
-})
-
-// ===========================================================================
-// mergeScanResults
-// ===========================================================================
-
-describe('mergeScanResults', () => {
-  it('keeps the newest repository coverage when merging on-demand scans', async () => {
-    let index = createEmptyIndex()
-    index = indexFile(index, 'src/a.ts', 'eval(x)', 'typescript')
-    index.coverage = {
-      treeStatus: 'complete',
-      supportedFiles: { discovered: 2, loaded: 1 },
-      failures: { count: 0, samples: [] },
-      failedSubtrees: { count: 0, samples: [] },
-      mode: 'on-demand',
-    }
-    const base = await scanIssuesAsync(index, null, { changedFiles: ['src/a.ts'] })
-    index.coverage = {
-      ...index.coverage,
-      supportedFiles: { discovered: 2, loaded: 2 },
-    }
-    const addition = await scanIssuesAsync(index, null, { changedFiles: ['src/a.ts'] })
-
-    expect(mergeScanResults(base, addition).repositoryCoverage?.supportedFiles.loaded).toBe(2)
-  })
-
-  it('combines issues from two results without duplicates', async () => {
-    let index = createEmptyIndex()
-    index = indexFile(index, 'src/a.ts', 'eval(x)', 'typescript')
-    index = indexFile(index, 'src/b.ts', 'console.log("debug")', 'typescript')
-
-    const resultA = await scanIssuesAsync(index, null, { changedFiles: ['src/a.ts'] })
-    const resultB = await scanIssuesAsync(index, null, { changedFiles: ['src/b.ts'] })
-    const merged = mergeScanResults(resultA, resultB)
-
-    // Should have issues from both files
-    const files = new Set(merged.issues.map(i => i.file))
-    expect(files.has('src/a.ts')).toBe(true)
-    expect(files.has('src/b.ts')).toBe(true)
-
-    // No duplicate ids
-    const ids = merged.issues.map(i => i.id)
-    expect(new Set(ids).size).toBe(ids.length)
-  })
-
-  it('deduplicates identical issues', async () => {
-    let index = createEmptyIndex()
-    index = indexFile(index, 'src/a.ts', 'eval(x)', 'typescript')
-
-    const result1 = await scanIssuesAsync(index, null, { changedFiles: ['src/a.ts'] })
-    const result2 = await scanIssuesAsync(index, null, { changedFiles: ['src/a.ts'] })
-    const merged = mergeScanResults(result1, result2)
-
-    // Should have same issues as a single scan (no duplicates)
-    expect(merged.issues.length).toBe(result1.issues.length)
-  })
-
-  it('recomputes summary from merged issues', async () => {
-    let index = createEmptyIndex()
-    index = indexFile(index, 'src/a.ts', 'eval(x)', 'typescript')
-    index = indexFile(index, 'src/b.ts', 'console.log("debug")', 'typescript')
-
-    const resultA = await scanIssuesAsync(index, null, { changedFiles: ['src/a.ts'] })
-    const resultB = await scanIssuesAsync(index, null, { changedFiles: ['src/b.ts'] })
-    const merged = mergeScanResults(resultA, resultB)
-
-    expect(merged.summary.total).toBe(merged.issues.length)
-    expect(merged.summary.critical + merged.summary.warning + merged.summary.info)
-      .toBe(merged.summary.total)
-  })
-
-  it('maintains sorted order (critical first)', async () => {
-    let index = createEmptyIndex()
-    index = indexFile(index, 'src/a.ts', 'eval(x)', 'typescript')
-    index = indexFile(index, 'src/b.ts', 'console.log("debug")', 'typescript')
-
-    const resultA = await scanIssuesAsync(index, null, { changedFiles: ['src/a.ts'] })
-    const resultB = await scanIssuesAsync(index, null, { changedFiles: ['src/b.ts'] })
-    const merged = mergeScanResults(resultA, resultB)
-
-    if (merged.issues.length >= 2) {
-      const severityOrder = { critical: 0, warning: 1, info: 2 } as const
-      for (let i = 1; i < merged.issues.length; i++) {
-        const prev = severityOrder[merged.issues[i - 1].severity]
-        const curr = severityOrder[merged.issues[i].severity]
-        expect(prev).toBeLessThanOrEqual(curr)
-      }
-    }
-  })
-
-  it('sets isMetadataOnly: false and isPartialScan: false', async () => {
-    let index = createEmptyIndex()
-    index = indexFile(index, 'src/a.ts', 'eval(x)', 'typescript')
-
-    const metadataResult = await scan(
-      buildMetadataOnlyIndex([{ path: 'src/huge.ts', lineCount: 900 }]),
-      null,
-      { metadataOnly: true },
-    )
-    const contentResult = await scanIssuesAsync(index, null, { changedFiles: ['src/a.ts'] })
-    const merged = mergeScanResults(metadataResult, contentResult)
-
-    expect(merged.isMetadataOnly).toBe(false)
-    expect(merged.isPartialScan).toBe(false)
-  })
-
-  it('combines scannedFiles count', async () => {
-    let index = createEmptyIndex()
-    index = indexFile(index, 'src/a.ts', 'eval(x)', 'typescript')
-    index = indexFile(index, 'src/b.ts', 'console.log("debug")', 'typescript')
-
-    const resultA = await scanIssuesAsync(index, null, { changedFiles: ['src/a.ts'] })
-    const resultB = await scanIssuesAsync(index, null, { changedFiles: ['src/b.ts'] })
-    const merged = mergeScanResults(resultA, resultB)
-
-    expect(merged.scannedFiles).toBe(resultA.scannedFiles + resultB.scannedFiles)
-  })
-
-  it('reduces unscannedFileCount from base', async () => {
-    // Simulate: metadata-only scan reports 5 unscanned, then we scan 1 file
-    const metaIndex = buildMetadataOnlyIndex([
-      { path: 'a.ts', lineCount: 10 },
-      { path: 'b.ts', lineCount: 20 },
-      { path: 'c.ts', lineCount: 30 },
-      { path: 'd.ts', lineCount: 40 },
-      { path: 'e.ts', lineCount: 50 },
-    ])
-    const metaResult = await scan(metaIndex, null, { metadataOnly: true })
-    expect(metaResult.unscannedFileCount).toBe(5)
-
-    // Now scan one file on-demand
-    let fullIndex = createEmptyIndex()
-    fullIndex = indexFile(fullIndex, 'a.ts', 'console.log("hi")', 'typescript')
-    const onDemand = await scanIssuesAsync(fullIndex, null, { changedFiles: ['a.ts'] })
-
-    const merged = mergeScanResults(metaResult, onDemand)
-    expect(merged.unscannedFileCount).toBe(4)
-  })
-
-  it('merges rule overflow maps', async () => {
-    let index = createEmptyIndex()
-    index = indexFile(index, 'src/a.ts', 'eval(x)', 'typescript')
-
-    const result1 = await scanIssuesAsync(index, null, { changedFiles: ['src/a.ts'] })
-    const result2 = await scanIssuesAsync(index, null, { changedFiles: ['src/a.ts'] })
-
-    // Manually set overflow for testing
-    result1.ruleOverflow.set('test-rule', 3)
-    result2.ruleOverflow.set('test-rule', 5)
-    result2.ruleOverflow.set('other-rule', 2)
-
-    const merged = mergeScanResults(result1, result2)
-    expect(merged.ruleOverflow.get('test-rule')).toBe(8) // 3 + 5
-    expect(merged.ruleOverflow.get('other-rule')).toBe(2)
-  })
-
-  it('merges languagesDetected without duplicates', async () => {
-    let index = createEmptyIndex()
-    index = indexFile(index, 'a.ts', 'const x = 1', 'typescript')
-    index = indexFile(index, 'b.py', 'x = 1', 'python')
-
-    const result1 = await scanIssuesAsync(index, null, { changedFiles: ['a.ts'] })
-    const result2 = await scanIssuesAsync(index, null, { changedFiles: ['b.py'] })
-
-    result1.languagesDetected = ['typescript']
-    result2.languagesDetected = ['typescript', 'python']
-
-    const merged = mergeScanResults(result1, result2)
-    const unique = new Set(merged.languagesDetected)
-    expect(unique.size).toBe(merged.languagesDetected.length)
-    expect(unique.has('typescript')).toBe(true)
-    expect(unique.has('python')).toBe(true)
   })
 })
 

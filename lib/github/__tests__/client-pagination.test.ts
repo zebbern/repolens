@@ -18,7 +18,6 @@ import {
   fetchBranchesViaProxy,
   fetchCommitsViaProxy,
   fetchFileCommitsViaProxy,
-  fetchRefsViaProxy,
   fetchTagsViaProxy,
   setGitHubPAT,
 } from '../client'
@@ -136,16 +135,6 @@ describe('tags and branches pagination', () => {
     expect(viaProxy.truncated).toBe(true)
     expect(viaProxy.branches).toHaveLength(GITHUB_LIST_MAX_PAGES)
     expect(direct).toEqual(viaProxy)
-  })
-
-  it('requests refs with an explicit per_page', async () => {
-    mockFetch.mockImplementationOnce(async () => Response.json({ tags: [], branches: [], tagsTruncated: false, branchesTruncated: false }))
-
-    const result = await fetchRefsViaProxy('X', 'Y')
-
-    expect(proxyCalls()[0].pathname).toBe('/api/github/refs')
-    expect(proxyCalls()[0].searchParams.get('per_page')).toBe('100')
-    expect(result).toEqual({ tags: [], branches: [], tagsTruncated: false, branchesTruncated: false })
   })
 })
 

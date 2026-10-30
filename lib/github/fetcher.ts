@@ -2,7 +2,7 @@
 
 import type { GitHubRepo, RepoTree, ResolvedRepoTree, FileNode, GitHubTag, GitHubBranch, GitHubCommit, GitHubComparison } from '@/types/repository'
 import type { BlameData, CommitDetail, CommitFile } from '@/types/git-history'
-import type { PRMetadata, PRFile, PRComment, PRFileStatus } from '@/types/pr-review'
+import type { PRMetadata, PRFile, PRFileStatus } from '@/types/pr-review'
 import { buildRepoApiUrl, buildTreeApiUrl, buildRawContentUrl } from './parser'
 import { githubGraphQL } from './graphql'
 import { resolveRepoTree, TREE_RESOLUTION_MAX_RESPONSE_BYTES } from './tree-resolver'
@@ -225,22 +225,6 @@ export async function fetchTags(
     tarballUrl: (tag.tarball_url as string) ?? '',
     zipballUrl: (tag.zipball_url as string) ?? '',
   }))
-}
-
-/**
- * Fetch repository language breakdown.
- * Returns an object mapping language names to byte counts.
- */
-export async function fetchRepoLanguages(
-  owner: string,
-  name: string,
-  options: FetchOptions = {},
-): Promise<Record<string, number>> {
-  const headers = buildHeaders(options.token)
-  const url = `${GITHUB_API_BASE}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/languages`
-  const response = await requestGitHub(url, { headers, signal: options.signal }, { resource: 'languages' })
-
-  return response.json()
 }
 
 /**
@@ -705,42 +689,6 @@ export async function fetchPullRequestFiles(
     previousFilename: file.previous_filename as string | undefined,
     contentsUrl: file.contents_url as string,
   }))
-}
-
-/**
- * Fetch review comments on a pull request.
- */
-export async function fetchPullRequestComments(
-  owner: string,
-  name: string,
-  number: number,
-  options: FetchOptions & { perPage?: number; page?: number } = {},
-): Promise<PRComment[]> {
-  const headers = buildHeaders(options.token)
-  const params = new URLSearchParams()
-  if (options.perPage) params.set('per_page', String(options.perPage))
-  if (options.page) params.set('page', String(options.page))
-
-  const qs = params.toString()
-  const url = `${GITHUB_API_BASE}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/pulls/${number}/comments${qs ? `?${qs}` : ''}`
-  const response = await requestGitHub(url, { headers, signal: options.signal }, { resource: 'pull_request_comments', subject: String(number) })
-
-  const raw = (await response.json()) as Array<Record<string, unknown>>
-  return raw.map((comment): PRComment => {
-    const user = comment.user as Record<string, string> | null
-    return {
-      id: comment.id as number,
-      body: comment.body as string,
-      author: user?.login ?? 'unknown',
-      authorAvatarUrl: user?.avatar_url ?? null,
-      createdAt: comment.created_at as string,
-      updatedAt: comment.updated_at as string,
-      path: comment.path as string | undefined,
-      line: comment.line as number | undefined,
-      side: comment.side as PRComment['side'] | undefined,
-      inReplyToId: comment.in_reply_to_id as number | undefined,
-    }
-  })
 }
 
 /**

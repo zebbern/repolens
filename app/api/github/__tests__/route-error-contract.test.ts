@@ -25,17 +25,14 @@ vi.stubGlobal('fetch', mockFetch)
 import { GET as repoRoute } from '../repo/route'
 import { GET as treeRoute } from '../tree/route'
 import { GET as fileRoute } from '../file/route'
-import { GET as languagesRoute } from '../languages/route'
 import { GET as tagsRoute } from '../tags/route'
 import { GET as branchesRoute } from '../branches/route'
-import { GET as refsRoute } from '../refs/route'
 import { GET as commitsRoute } from '../commits/route'
 import { GET as compareRoute } from '../compare/route'
 import { GET as commitRoute } from '../commit/[sha]/route'
 import { GET as pullsRoute } from '../pulls/route'
 import { GET as pullRoute } from '../pulls/[number]/route'
 import { GET as pullFilesRoute } from '../pulls/[number]/files/route'
-import { GET as pullCommentsRoute } from '../pulls/[number]/comments/route'
 import { POST as blameRoute } from '../blame/route'
 
 // ---------------------------------------------------------------------------
@@ -135,17 +132,14 @@ const ROUTES = {
   repo: { handler: repoRoute as Handler, path: '/repo?owner=o&name=r' },
   tree: { handler: treeRoute as Handler, path: '/tree?owner=o&name=r' },
   file: { handler: fileRoute as Handler, path: '/file?owner=o&name=r&branch=main&path=src/a.ts' },
-  languages: { handler: languagesRoute as Handler, path: '/languages?owner=o&name=r' },
   tags: { handler: tagsRoute as Handler, path: '/tags?owner=o&name=r' },
   branches: { handler: branchesRoute as Handler, path: '/branches?owner=o&name=r' },
-  refs: { handler: refsRoute as Handler, path: '/refs?owner=o&name=r' },
   commits: { handler: commitsRoute as Handler, path: '/commits?owner=o&name=r' },
   compare: { handler: compareRoute as Handler, path: '/compare?owner=o&name=r&base=v1&head=v2' },
   'commit/[sha]': { handler: commitRoute as Handler, path: '/commit/abc1234?owner=o&name=r', context: params({ sha: 'abc1234' }) },
   pulls: { handler: pullsRoute as Handler, path: '/pulls?owner=o&name=r' },
   'pulls/[number]': { handler: pullRoute as Handler, path: '/pulls/7?owner=o&name=r', context: params({ number: '7' }) },
   'pulls/[number]/files': { handler: pullFilesRoute as Handler, path: '/pulls/7/files?owner=o&name=r', context: params({ number: '7' }) },
-  'pulls/[number]/comments': { handler: pullCommentsRoute as Handler, path: '/pulls/7/comments?owner=o&name=r', context: params({ number: '7' }) },
   blame: { handler: blameRoute as Handler, path: '/blame', body: { owner: 'o', name: 'r', ref: 'main', path: 'src/a.ts' } },
 } satisfies Record<string, RouteCase>
 type RouteName = keyof typeof ROUTES
@@ -242,18 +236,14 @@ const EXPECTED: Record<RouteName, Record<Failure, Observed>> = {
     abort: 'abort',
   },
   file: contract('file', ['NOT_FOUND', 'File not found: src/a.ts']),
-  languages: contract('languages', ['REPO_NOT_FOUND', 'Languages not found.']),
   tags: contract('tags', ['REPO_NOT_FOUND', 'Tags not found.']),
   branches: contract('branches', ['REPO_NOT_FOUND', 'Branches not found.']),
-  // Both lists fail; the tags request is the first to reject.
-  refs: contract('tags', ['REPO_NOT_FOUND', 'Tags not found.']),
   commits: contract('commits', ['REPO_NOT_FOUND', 'Commits not found.']),
   compare: contract('comparison', ['REPO_NOT_FOUND', 'Comparison not found.']),
   'commit/[sha]': contract('commit detail', ['NOT_FOUND', 'Commit not found: abc1234']),
   pulls: contract('pull requests', ['REPO_NOT_FOUND', 'Pull requests not found.']),
   'pulls/[number]': contract('pull request', ['NOT_FOUND', 'Pull request #7 not found']),
   'pulls/[number]/files': contract('pull request files', ['NOT_FOUND', 'Pull request #7 not found']),
-  'pulls/[number]/comments': contract('pull request comments', ['NOT_FOUND', 'Pull request #7 not found']),
   // GraphQL: a missing repository and the primary rate limit arrive as typed errors.
   blame: contract('blame data', ['NOT_FOUND', REPO_NOT_FOUND], {
     '401': [401, 'AUTH_REQUIRED', 'Authentication required to fetch blame data'],

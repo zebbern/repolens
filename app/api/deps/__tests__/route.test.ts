@@ -780,17 +780,25 @@ describe('deps API — POST handler', () => {
     consoleError.mockRestore()
   })
 
+  type RegistryFailure = { ok: false; status: number }
+
   /**
    * Eleven packages because the route fetches ten at a time: the eleventh starts only
    * after an earlier package settles, so it is skipped once rate limiting has tripped.
-   * Every response except `failing` waits a tick so the failure settles first.
+   * Every response except `failing` waits a tick so the failure settles first;
+   * `lateFailing` fails after that tick, alongside the successful responses.
    */
-  function stubRegistryWithFailure(failing: (url: string) => { ok: false; status: number } | undefined) {
+  function stubRegistryWithFailure(
+    failing: (url: string) => RegistryFailure | undefined,
+    lateFailing: (url: string) => RegistryFailure | undefined = () => undefined,
+  ) {
     const fetchMock = vi.fn(async (input: string | URL | Request) => {
       const url = String(input)
       const failure = failing(url)
       if (failure) return failure
       await new Promise(resolve => setTimeout(resolve, 0))
+      const lateFailure = lateFailing(url)
+      if (lateFailure) return lateFailure
       if (url.includes('/latest')) {
         return { ok: true, json: () => Promise.resolve({ version: '1.0.0', maintainers: [] }) }
       }
@@ -846,6 +854,93 @@ describe('deps API — POST handler', () => {
     expect(data.results['pkg-10']).toBeUndefined()
     expect(Object.keys(data.results)).toHaveLength(9)
     expect(fetchMock.mock.calls.some(([url]) => String(url).includes('pkg-10'))).toBe(false)
+  })
+
+  const pkg0MetadataNotFound = (url: string): RegistryFailure | undefined => (
+    url.endsWith('/pkg-0/latest') ? { ok: false, status: 404 } : undefined
+  )
+  const pkg0DownloadsRateLimited = (url: string): RegistryFailure | undefined => (
+    url.endsWith('/last-month/pkg-0') ? { ok: false, status: 429 } : undefined
+  )
+
+  it('stops scheduling packages as soon as a 429 arrives, before its sibling endpoints settle', async () => {
+    const packages = Array.from({ length: 11 }, (_, index) => `pkg-${index}`)
+    // pkg-9 is the last of the first ten workers; its other endpoints settle a tick later,
+    // alongside every other package, so pkg-10 would start if the flag waited for them.
+    const fetchMock = stubRegistryWithFailure(url => (
+      url.endsWith('/last-month/pkg-9') ? { ok: false, status: 429 } : undefined
+    ))
+    vi.resetModules()
+    POST = (await import('../route')).POST
+
+    const res = await POST(new Request('http://localhost/api/deps', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ packages }),
+    }))
+    const data = await res.json()
+
+    expect(data.errors).toEqual(['npm registry rate limit reached — some packages were skipped'])
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes('pkg-10'))).toBe(false)
+  })
+
+  it.each([
+    ['after', pkg0MetadataNotFound, pkg0DownloadsRateLimited],
+    ['before', pkg0DownloadsRateLimited, pkg0MetadataNotFound],
+  ])('reports the package\'s own failure and still trips rate limiting when an npm 429 settles %s it', async (_order, failing, lateFailing) => {
+    const packages = Array.from({ length: 11 }, (_, index) => `pkg-${index}`)
+    const fetchMock = stubRegistryWithFailure(failing, lateFailing)
+    vi.resetModules()
+    POST = (await import('../route')).POST
+
+    const res = await POST(new Request('http://localhost/api/deps', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ packages }),
+    }))
+    const data = await res.json()
+
+    // The 404 is what happened to pkg-0 and a retry would not change it; the rate limit is
+    // reported for the packages it caused to be skipped.
+    expect(data.errors).toEqual([
+      'npm registry returned 404 for pkg-0',
+      'npm registry rate limit reached — some packages were skipped',
+    ])
+    expect(data.results['pkg-10']).toBeUndefined()
+    expect(Object.keys(data.results)).toHaveLength(9)
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes('pkg-10'))).toBe(false)
+  })
+
+  it('rejects on caller abort without waiting for the endpoints of an already failed package', async () => {
+    const controller = new AbortController()
+    let releaseSearch = () => {}
+    globalThis.fetch = vi.fn().mockImplementation((url: string, init?: RequestInit) => {
+      if (url.includes('/latest')) return Promise.resolve({ ok: false, status: 404 })
+      if (url.includes('/-/v1/search')) {
+        return new Promise((resolve) => {
+          releaseSearch = () => resolve({ ok: false, status: 503 })
+        })
+      }
+      const signal = init?.signal as AbortSignal
+      return new Promise((_resolve, reject) => {
+        signal.addEventListener('abort', () => reject(signal.reason), { once: true })
+      })
+    })
+    vi.resetModules()
+    POST = (await import('../route')).POST
+
+    const response = POST(new Request('http://localhost/api/deps', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ packages: ['react'] }),
+      signal: controller.signal,
+    }))
+    await vi.waitFor(() => expect(globalThis.fetch).toHaveBeenCalledTimes(3))
+    controller.abort(new DOMException('Client disconnected', 'AbortError'))
+
+    // The publication search ignores the abort and is still pending when the route rejects.
+    await expect(response).rejects.toMatchObject({ name: 'AbortError' })
+    releaseSearch()
   })
 
   it('aborts every npm metadata request when the client disconnects', async () => {

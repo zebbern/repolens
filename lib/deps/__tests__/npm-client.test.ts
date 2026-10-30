@@ -277,4 +277,24 @@ describe('fetchDependencyMeta', () => {
       message: 'npm registry returned 404 for foobar',
     }])
   })
+
+  it('does not attribute a batch-wide error to a package that has its own error', async () => {
+    globalThis.fetch = mockFetchSuccess(
+      { react: makeMeta('react') },
+      [
+        'npm registry rate limit reached — some packages were skipped',
+        'npm registry returned 404 for left-pad',
+      ],
+    )
+    const errors: Array<{ packageName: string; message: string }> = []
+
+    await fetchDependencyMeta(['react', 'left-pad', 'vue'], {
+      onError: (packageName, message) => errors.push({ packageName, message }),
+    })
+
+    expect(errors).toEqual([
+      { packageName: 'left-pad', message: 'npm registry returned 404 for left-pad' },
+      { packageName: 'vue', message: 'npm registry rate limit reached — some packages were skipped' },
+    ])
+  })
 })

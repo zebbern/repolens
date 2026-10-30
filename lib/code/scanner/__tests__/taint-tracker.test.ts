@@ -1542,6 +1542,9 @@ describe('trackTaint — NoSQL sink false positives', () => {
     ['required Ramda where spec', "const R = require('ramda');\nfunction handler(req) { return R.where({ id: R.equals(req.params.id) })(item); }"],
     ['a property read off required underscore', "const _ = require('underscore')._;\nfunction handler(req) { return _.find(list, { id: req.params.id }); }"],
     ['a default read off required Ramda', "const R = require('ramda').default;\nfunction handler(req) { return R.find(R.propEq('id', req.params.id), list); }"],
+    ['a chained read off required lodash', "const fp = require('lodash').default.fp;\nfunction handler(req) { return fp.find({ id: req.params.id })(list); }"],
+    ['an inline chained read off required lodash', "function handler(req) { return require('lodash').fp.find(list, { id: req.params.id }); }"],
+    ['an inline default read off required Ramda', "function handler(req) { return require('ramda').default.find(R.propEq('id', req.params.id), list); }"],
     ['global Ramda find with a predicate', "function handler(req) { return R.find(R.propEq('id', req.params.id), list); }"],
     ['imported Rambda find with a predicate', "import * as R from 'rambda';\nfunction handler(req) { return R.find(R.propEq('id', req.params.id), list); }"],
     ['imported Remeda find with a predicate', "import * as R from 'remeda';\nfunction handler(req) { return R.find(list, R.isDeepEqual({ id: req.params.id })); }"],
@@ -1563,6 +1566,11 @@ describe('trackTaint — NoSQL sink false positives', () => {
     ['a model destructured from a required module', "const { User } = require('./models');\nfunction handler(req) { return User.find(req.body); }"],
     ['a model read off a required module', "const User = require('./models/user').User;\nfunction handler(req) { return User.find(req.body); }"],
     ['a model built from required mongoose', "const User = require('mongoose').model('User');\nfunction handler(req) { return User.find(req.body); }"],
+    ['a model read off a chained required module', "const User = require('./db').models.User;\nfunction handler(req) { return User.find(req.body); }"],
+    ['a model read inline off a required module', "function handler(req) { return require('./models').User.find(req.body); }"],
+    ['a model built inline from required mongoose', "function handler(req) { return require('mongoose').model('User').find(req.body); }"],
+    ['a model built from a computed read of required mongoose', "const User = require('mongoose')['model']('User');\nfunction handler(req) { return User.find(req.body); }"],
+    ['a model built inline from a computed read of required mongoose', "function handler(req) { return require('mongoose')['model']('User').find(req.body); }"],
   ])('still reports %s as NoSQL injection', (_name, code) => {
     expect(noSqlFlows(code)).toHaveLength(1)
   })

@@ -432,24 +432,31 @@ export async function POST(req: Request) {
       throw new RateLimitSkippedError(`Skipped ${name}: rate limited`)
     }
 
-    try {
-      // Fetch metadata and downloads in parallel
-      const [meta, downloads, latestPublication] = await Promise.all([
-        fetchPackageMeta(name, req.signal),
-        fetchDownloads(name, req.signal),
-        fetchLatestPublication(name, req.signal),
-      ])
-      const lastPublish = latestPublication?.version === meta.version
-        ? latestPublication.publishedAt
+    // Fetch metadata and downloads in parallel. A 429 stops the batch the moment it arrives,
+    // even if another endpoint for this package failed first or is still pending.
+    const noteRateLimit = <T,>(request: Promise<T>): Promise<T> => request.catch((error: unknown) => {
+      if (isRateLimitError(error)) rateLimited = true
+      throw error
+    })
+    const [meta, downloads, latestPublication] = await Promise.allSettled([
+      noteRateLimit(fetchPackageMeta(name, req.signal)),
+      noteRateLimit(fetchDownloads(name, req.signal)),
+      noteRateLimit(fetchLatestPublication(name, req.signal)),
+    ])
+    if (meta.status === 'fulfilled' && downloads.status === 'fulfilled' && latestPublication.status === 'fulfilled') {
+      const lastPublish = latestPublication.value?.version === meta.value.version
+        ? latestPublication.value.publishedAt
         : null
 
-      return { name, meta, downloads, lastPublish }
-    } catch (err) {
-      if (isRateLimitError(err)) {
-        rateLimited = true
-      }
-      throw err
+      return { name, meta: meta.value, downloads: downloads.value, lastPublish }
     }
+
+    const failures = [meta, downloads, latestPublication].flatMap(result => (
+      result.status === 'rejected' ? [result.reason] : []
+    ))
+    // Report the package's own failure (a 404 is not fixed by retrying) over the rate limit;
+    // every later package the rate limit skips reports it.
+    throw failures.find(reason => !isRateLimitError(reason)) ?? failures[0]
   }, () => !req.signal.aborted), req.signal)
   throwIfCallerAborted(req.signal)
 

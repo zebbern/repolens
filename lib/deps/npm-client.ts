@@ -93,14 +93,28 @@ export async function fetchDependencyMeta(
 
       if (data.errors.length > 0) {
         console.warn('[npm-client] Partial fetch errors:', data.errors)
+        // Package-specific messages first; a batch-wide message (e.g. the rate limit) then goes
+        // only to missing packages without their own error, so it cannot overwrite one.
+        const reported = new Set<string>()
+        const batchWide: string[] = []
         for (const message of data.errors) {
           const matched = batch.filter(name => (
             message.endsWith(`for ${name}`) || message.includes(`Skipped ${name}:`)
           ))
-          const targets = matched.length > 0
-            ? matched
-            : batch.filter(name => !Object.prototype.hasOwnProperty.call(data.results, name))
-          for (const name of targets) options.onError?.(name, message)
+          if (matched.length === 0) {
+            batchWide.push(message)
+            continue
+          }
+          for (const name of matched) {
+            reported.add(name)
+            options.onError?.(name, message)
+          }
+        }
+        for (const message of batchWide) {
+          for (const name of batch) {
+            if (reported.has(name) || Object.prototype.hasOwnProperty.call(data.results, name)) continue
+            options.onError?.(name, message)
+          }
         }
       }
     } catch (error) {

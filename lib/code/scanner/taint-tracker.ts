@@ -166,7 +166,7 @@ export const DEFAULT_SINKS: readonly TaintSink[] = [
   { type: 'code-injection', name: 'vm.runInThisContext()', pattern: /\bvm\.runInThisContext\s*\(/, cwe: 'CWE-94', severity: 'critical', description: 'Executes code in current V8 context' },
   { type: 'code-injection', name: 'new vm.Script()', pattern: /\bnew\s+vm\.Script\s*\(/, cwe: 'CWE-94', severity: 'critical', description: 'Compiles code as V8 Script' },
   // NoSQL injection
-  { type: 'nosql-injection', name: 'Model.find()', pattern: /(?:\b[A-Za-z_$][\w$]*|\b(?:db\.collection|mongoose\.model)\s*\([^)]*\))\.(?:find|findOne|findById|findOneAndUpdate|aggregate|where)\s*\(/, cwe: 'CWE-943', severity: 'warning', description: 'MongoDB/Mongoose query with potential operator injection' },
+  { type: 'nosql-injection', name: 'Model.find()', pattern: /(?:\b[A-Za-z_$][\w$]*|\b(?:db\.collection|mongoose\.model|require\(\s*['"]mongoose['"]\s*\)(?:\.model|\[\s*['"]model['"]\s*\]))\s*\([^)]*\))\.(?:find|findOne|findById|findOneAndUpdate|aggregate|where)\s*\(/, cwe: 'CWE-943', severity: 'warning', description: 'MongoDB/Mongoose query with potential operator injection' },
   // Template injection
   { type: 'code-injection', name: 'template literal eval', pattern: /\bnew\s+Function\s*\(\s*`/, cwe: 'CWE-94', severity: 'critical', description: 'Template literal passed to Function constructor' },
 ]
@@ -1746,7 +1746,8 @@ function hasNoSqlReceiverEvidence(
   const receiverStatePath = getStatePath(node.callee.object, state)
   if (receiverStatePath && state.noSqlReceivers.has(receiverStatePath)) return true
   const root = getMemberPath(node.callee.object)?.split('.')[0]
-  if (!root) return false
+  // A receiver rooted in a call (`require('./models').User`) has no binding to resolve.
+  if (!root) return isNoSqlModelExpression(node.callee.object, invocationPath, lines, new Set())
   return resolveNoSqlBinding(root, invocationPath, lines, new Set(), true)
 }
 
@@ -1762,13 +1763,21 @@ function isRequireCall(node: t.Node): node is t.CallExpression {
   return t.isCallExpression(node) && t.isIdentifier(node.callee, { name: 'require' })
 }
 
-/** `require('mongoose').model`, the inline form of `mongoose.model`. */
+/** `require('mongoose').model` or `require('mongoose')['model']`, the inline forms of `mongoose.model`. */
 function isRequiredMongooseModel(callee: t.Node): boolean {
   return (t.isMemberExpression(callee) || t.isOptionalMemberExpression(callee))
-    && !callee.computed
-    && t.isIdentifier(callee.property, { name: 'model' })
+    && (callee.computed
+      ? t.isStringLiteral(callee.property, { value: 'model' })
+      : t.isIdentifier(callee.property, { name: 'model' }))
     && isRequireCall(callee.object)
     && t.isStringLiteral(callee.object.arguments[0], { value: 'mongoose' })
+}
+
+/** The object a member chain reads from: `require('./db')` in `require('./db').models.User`. */
+function memberChainRoot(node: t.MemberExpression | t.OptionalMemberExpression): t.Node {
+  let object: t.Node = node.object
+  while (t.isMemberExpression(object) || t.isOptionalMemberExpression(object)) object = object.object
+  return object
 }
 
 function resolveNoSqlBinding(
@@ -1815,8 +1824,10 @@ function isNoSqlModelExpression(
   }
   if (t.isMemberExpression(node) || t.isOptionalMemberExpression(node)) {
     if (getMemberPath(node) === 'mongoose.Model') return true
-    // A property read off a collection utility (`require('underscore')._`) is still that utility.
-    if (isRequireCall(node.object)) return !isCollectionUtilityModule(node.object.arguments[0])
+    // A property read off a collection utility (`require('underscore')._`, `require('lodash').fp`)
+    // is still that utility, however deep the chain.
+    const object = memberChainRoot(node)
+    if (isRequireCall(object)) return !isCollectionUtilityModule(object.arguments[0])
     const root = getMemberPath(node)?.split('.')[0]
     return root ? resolveNoSqlBinding(root, scopePath, lines, seen, false) : false
   }

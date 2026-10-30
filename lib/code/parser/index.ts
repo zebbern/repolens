@@ -1,7 +1,7 @@
 // Barrel re-exports for the parser module.
 
 export * from './types'
-export { analyzeCodebase, analyzeCodebaseAsync } from './analyzer'
+export { analyzeCodebase, analyzeCodebaseAsync, resetAnalysisMemo, type AnalyzeOptions } from './analyzer'
 export { computeTopology } from './topology'
 export { detectCircularDeps } from './graph'
 export { extractExports } from './extract-exports'

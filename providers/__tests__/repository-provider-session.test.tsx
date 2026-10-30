@@ -1,6 +1,6 @@
 import React, { type ReactNode } from 'react'
 import { act, renderHook } from '@testing-library/react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { GitHubRepo, CompleteRepoTree, ResolvedRepoTree } from '@/types/repository'
 import { IDBFactory, IDBKeyRange } from 'fake-indexeddb'
 
@@ -27,6 +27,7 @@ vi.mock('@/lib/cache/repo-cache', () => ({
 
 vi.mock('@/lib/code/import-parser', () => ({
   analyzeCodebase: vi.fn().mockResolvedValue(null),
+  resetAnalysisMemo: vi.fn(),
 }))
 
 vi.mock('@/lib/github/indexing-pipeline', () => ({
@@ -46,6 +47,7 @@ import { batchIndexFiles, batchIndexMetadataOnly, createEmptyIndex, createEmptyI
 import { IDBContentStore } from '@/lib/code/content-store'
 import { fetchFileViaProxy, fetchRepoViaProxy, fetchTreeViaProxy } from '@/lib/github/client'
 import { startIndexing } from '@/lib/github/indexing-pipeline'
+import { analyzeCodebase, resetAnalysisMemo, type FullAnalysis } from '@/lib/code/import-parser'
 import { RepositoryProvider, useRepository } from '../repository-provider'
 import { PRIVATE_REPOSITORY_ACCESS_REVOKED_EVENT } from '@/lib/auth/credential-events'
 
@@ -236,11 +238,14 @@ describe('RepositoryProvider connection isolation', () => {
       await result.current.connectRepository('https://github.com/acme/private')
     })
     expect(result.current.repo?.isPrivate).toBe(true)
+    vi.mocked(resetAnalysisMemo).mockClear()
 
     act(() => window.dispatchEvent(new Event(PRIVATE_REPOSITORY_ACCESS_REVOKED_EVENT)))
 
     expect(result.current.repo).toBeNull()
     expect(result.current.files).toEqual([])
+    // The private repository's per-file analyses and path names are dropped too.
+    expect(resetAnalysisMemo).toHaveBeenCalled()
   })
 
   it('keeps an established public repository when credentials are revoked', async () => {
@@ -682,5 +687,59 @@ describe('RepositoryProvider connection isolation', () => {
     expect(result.current.error).toBe('Index service unavailable')
     expect(result.current.loadingStage).toBe('tree-ready')
     expect(result.current.indexingProgress.isComplete).toBe(false)
+  })
+})
+
+describe('RepositoryProvider B5 analysis scheduling', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.mocked(getCachedRepo).mockResolvedValue(null)
+    vi.mocked(withHydratedCachedRepo).mockResolvedValue(false)
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+    vi.mocked(analyzeCodebase).mockResolvedValue(null as unknown as FullAnalysis)
+  })
+
+  it('aborts the superseded analysis when codeIndex changes and publishes only the latest', async () => {
+    vi.useFakeTimers()
+    const runs: Array<{ signal: AbortSignal; result: Deferred<FullAnalysis> }> = []
+    vi.mocked(analyzeCodebase).mockImplementation((_index, options) => {
+      const result = deferred<FullAnalysis>()
+      runs.push({ signal: options!.signal!, result })
+      return result.promise
+    })
+    vi.mocked(fetchRepoViaProxy).mockResolvedValue(repo('a'))
+    vi.mocked(fetchTreeViaProxy).mockResolvedValue(tree('a'))
+    vi.mocked(startIndexing).mockImplementation(async (_repo, _files, _sha, _signal, callbacks) => {
+      callbacks.setCodeIndex(batchIndexFiles(createEmptyIndex(), [{ path: 'a.ts', content: 'export const a = 1' }]))
+      callbacks.setIndexingProgress({ current: 1, total: 1, isComplete: true })
+    })
+
+    const { result } = renderHook(() => useRepository(), { wrapper })
+    await act(async () => {
+      await result.current.connectRepository('https://github.com/acme/a')
+    })
+    await act(async () => { await vi.advanceTimersByTimeAsync(50) })
+    expect(runs).toHaveLength(1)
+    expect(runs[0].signal.aborted).toBe(false)
+
+    await act(async () => {
+      result.current.updateCodeIndex(current => batchIndexFiles(current, [{ path: 'a.ts', content: 'export const a = 2' }]))
+    })
+    expect(runs[0].signal.aborted).toBe(true)
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(50) })
+    expect(runs).toHaveLength(2)
+    expect(runs[1].signal.aborted).toBe(false)
+
+    const latest = { primaryLanguage: 'latest' } as FullAnalysis
+    await act(async () => {
+      runs[1].result.resolve(latest)
+      runs[0].result.reject(new DOMException('The operation was aborted', 'AbortError'))
+      await flush()
+    })
+    expect(result.current.codebaseAnalysis).toBe(latest)
   })
 })

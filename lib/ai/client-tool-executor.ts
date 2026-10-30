@@ -1,5 +1,6 @@
 import type { CodeIndex, IndexedFile } from '@/lib/code/code-index'
-import { buildSearchRegex, createEmptyIndex, indexFile, searchIndexAsync, getFileContent, getFileContentSync, resolveFileContents, validateSearchRegex } from '@/lib/code/code-index'
+import { buildSearchRegex, createEmptyIndex, indexFile, searchIndexAsync, getFileContent, getFileContentSync, resolveFileContentBatches, resolveFileContents, validateSearchRegex } from '@/lib/code/code-index'
+import { yieldToEventLoop } from '@/lib/code/yield'
 import { LANG_EXTENSIONS } from '@/lib/code/scanner/constants'
 import { SYMBOL_PATTERNS } from '@/lib/ai/structural-index'
 import {
@@ -518,25 +519,36 @@ async function executeFindSymbol(
   }))
   const nameL = input.name.toLowerCase()
   const paths = Array.from(codeIndex.files.keys())
-  const resolved = await resolveFileContents(codeIndex, paths)
+  let resolvedCount = 0
+  let missingCount = 0
 
-  for (const [filePath] of codeIndex.files) {
-    const source = resolved.contents.get(filePath)
-    if (typeof source !== 'string') continue
-    const lines = source.split('\n')
-    for (let i = 0; i < lines.length; i++) {
-      for (const pat of patterns) {
-        if (input.kind && input.kind !== 'any' && pat.kind !== input.kind) continue
-        pat.regex.lastIndex = 0
-        let m
-        while ((m = pat.regex.exec(lines[i])) !== null) {
-          if (m[1].toLowerCase() === nameL) {
-            results.push({ path: filePath, line: i + 1, kind: pat.kind, match: lines[i].trim() })
+  // One bounded batch per task. Batches after the result cap are still resolved
+  // so the coverage report counts the same paths as a full resolution.
+  for await (const batch of resolveFileContentBatches(codeIndex, paths)) {
+    resolvedCount += batch.contents.size
+    missingCount += batch.missingPaths.length
+    for (const filePath of batch.paths) {
+      if (results.length >= 20) break
+      const source = batch.contents.get(filePath)
+      if (typeof source !== 'string') continue
+      // Captured names are ASCII \w, so any match means the lowercased source
+      // contains the lowercased name: skip files that cannot match.
+      if (!source.toLowerCase().includes(nameL)) continue
+      const lines = source.split('\n')
+      for (let i = 0; i < lines.length; i++) {
+        for (const pat of patterns) {
+          if (input.kind && input.kind !== 'any' && pat.kind !== input.kind) continue
+          pat.regex.lastIndex = 0
+          let m
+          while ((m = pat.regex.exec(lines[i])) !== null) {
+            if (m[1].toLowerCase() === nameL) {
+              results.push({ path: filePath, line: i + 1, kind: pat.kind, match: lines[i].trim() })
+            }
           }
         }
       }
     }
-    if (results.length >= 20) break
+    await yieldToEventLoop()
   }
 
   const output: Record<string, unknown> = { symbolName: input.name, matchCount: results.length, results: results.slice(0, 20) }
@@ -555,8 +567,8 @@ async function executeFindSymbol(
       note: `Symbol search covered ${codeIndex.files.size}/${metaSize} files with loaded content.`,
     }
   }
-  if (resolved.missingPaths.length > 0) {
-    output.contentCoverage = contentCoverage(paths.length, resolved.contents.size)
+  if (missingCount > 0) {
+    output.contentCoverage = contentCoverage(paths.length, resolvedCount)
   }
 
   return output
@@ -695,6 +707,64 @@ function resolveImportToFilePath(
   return null
 }
 
+// JS/TS import & re-export patterns (cloned per use to avoid shared lastIndex state)
+const JS_IMPORT_RE = /import\s+.*?from\s+['"]([^'"]+)['"]/g
+const RE_EXPORT_RE = /export\s+(?:\{[^}]*\}|\*(?:\s+as\s+\w+)?)\s+from\s+['"]([^'"]+)['"]/g
+const REQUIRE_RE = /require\s*\(\s*['"]([^'"]+)['"]\s*\)/g
+// Python import patterns
+const PY_IMPORT_RE = /(?:from\s+(\S+)\s+import|import\s+(\S+))/g
+
+/** Whether `content` (a file at `filePath`) imports `targetPath`. */
+function importsTarget(filePath: string, content: string, targetPath: string, lookup: PathLookup): boolean {
+  let isImporter = false
+  const ext = filePath.split('.').pop()?.toLowerCase() || ''
+
+  if (['ts', 'tsx', 'js', 'jsx', 'mts', 'mjs'].includes(ext)) {
+    // JS/TS: check import statements, re-exports, and require() calls
+    const regexes = [JS_IMPORT_RE, RE_EXPORT_RE, REQUIRE_RE]
+    for (const baseRe of regexes) {
+      if (isImporter) break
+      // Create fresh instance to avoid shared lastIndex state
+      const re = new RegExp(baseRe.source, baseRe.flags)
+      let match: RegExpExecArray | null
+      while ((match = re.exec(content)) !== null) {
+        if (resolveImportToFilePath(match[1], filePath, lookup) === targetPath) {
+          isImporter = true
+          break
+        }
+      }
+    }
+  } else if (ext === 'py') {
+    // Python: convert dot-separated module path to file path
+    const re = new RegExp(PY_IMPORT_RE.source, PY_IMPORT_RE.flags)
+    let match: RegExpExecArray | null
+    while ((match = re.exec(content)) !== null) {
+      const rawSource = match[1] || match[2]
+      let importPath: string
+
+      // Handle Python relative imports (.foo, ..foo)
+      const relativeMatch = rawSource.match(/^(\.+)(.*)$/)
+      if (relativeMatch) {
+        const level = relativeMatch[1].length
+        const rest = relativeMatch[2] ? relativeMatch[2].replace(/\./g, '/') : ''
+        const prefix = level === 1 ? './' : '../'.repeat(level - 1)
+        importPath = prefix + rest
+      } else {
+        // Absolute Python import: foo.bar.baz -> foo/bar/baz
+        importPath = rawSource.replace(/\./g, '/')
+      }
+
+      if (resolveImportToFilePath(importPath, filePath, lookup) === targetPath) {
+        isImporter = true
+        break
+      }
+    }
+  }
+  // Rust/Go/Java: import paths are package-level and don't map cleanly
+  // to file paths without language-specific resolution. Skipped for now.
+  return isImporter
+}
+
 // ---------------------------------------------------------------------------
 // executeAnalyzeImports
 // ---------------------------------------------------------------------------
@@ -721,85 +791,32 @@ async function executeAnalyzeImports(
   const paths = allPaths(codeIndex)
   const lookup = buildPathLookup(paths)
 
-  // JS/TS import & re-export patterns
-  const JS_IMPORT_RE = /import\s+.*?from\s+['"]([^'"]+)['"]/g
-  const RE_EXPORT_RE = /export\s+(?:\{[^}]*\}|\*(?:\s+as\s+\w+)?)\s+from\s+['"]([^'"]+)['"]/g
-  const REQUIRE_RE = /require\s*\(\s*['"]([^'"]+)['"]\s*\)/g
-  // Python import patterns
-  const PY_IMPORT_RE = /(?:from\s+(\S+)\s+import|import\s+(\S+))/g
-
   // F6: The reverse-lookup loop below is O(N) per call where N = total files in the index.
   // For repeated calls, caching the full reverse-import map per execution context would help.
   const importedBy: string[] = []
 
-  // Batch-fetch content for all files to avoid N+1 async calls in the loop
+  // Resolve content in bounded batches, one per task, instead of holding the
+  // whole repository in one Map.
   const otherPaths = [...codeIndex.files.keys()].filter(p => p !== resolvedPath)
-  const resolvedOthers = await resolveFileContents(codeIndex, otherPaths)
-
-  for (const [filePath] of codeIndex.files) {
-    if (filePath === resolvedPath) continue
-
-    const otherContent = resolvedOthers.contents.get(filePath)
-    if (typeof otherContent !== 'string') continue
-
-    let isImporter = false
-    const ext = filePath.split('.').pop()?.toLowerCase() || ''
-
-    if (['ts', 'tsx', 'js', 'jsx', 'mts', 'mjs'].includes(ext)) {
-      // JS/TS: check import statements, re-exports, and require() calls
-      const regexes = [JS_IMPORT_RE, RE_EXPORT_RE, REQUIRE_RE]
-      for (const baseRe of regexes) {
-        if (isImporter) break
-        // Create fresh instance to avoid shared lastIndex state
-        const re = new RegExp(baseRe.source, baseRe.flags)
-        let match: RegExpExecArray | null
-        while ((match = re.exec(otherContent)) !== null) {
-          if (resolveImportToFilePath(match[1], filePath, lookup) === resolvedPath) {
-            isImporter = true
-            break
-          }
-        }
-      }
-    } else if (ext === 'py') {
-      // Python: convert dot-separated module path to file path
-      const re = new RegExp(PY_IMPORT_RE.source, PY_IMPORT_RE.flags)
-      let match: RegExpExecArray | null
-      while ((match = re.exec(otherContent)) !== null) {
-        const rawSource = match[1] || match[2]
-        let importPath: string
-
-        // Handle Python relative imports (.foo, ..foo)
-        const relativeMatch = rawSource.match(/^(\.+)(.*)$/)
-        if (relativeMatch) {
-          const level = relativeMatch[1].length
-          const rest = relativeMatch[2] ? relativeMatch[2].replace(/\./g, '/') : ''
-          const prefix = level === 1 ? './' : '../'.repeat(level - 1)
-          importPath = prefix + rest
-        } else {
-          // Absolute Python import: foo.bar.baz -> foo/bar/baz
-          importPath = rawSource.replace(/\./g, '/')
-        }
-
-        if (resolveImportToFilePath(importPath, filePath, lookup) === resolvedPath) {
-          isImporter = true
-          break
-        }
-      }
+  let resolvedOtherCount = 0
+  let missingOtherCount = 0
+  for await (const batch of resolveFileContentBatches(codeIndex, otherPaths)) {
+    resolvedOtherCount += batch.contents.size
+    missingOtherCount += batch.missingPaths.length
+    for (const filePath of batch.paths) {
+      const otherContent = batch.contents.get(filePath)
+      if (typeof otherContent !== 'string') continue
+      if (importsTarget(filePath, otherContent, resolvedPath, lookup)) importedBy.push(filePath)
     }
-    // Rust/Go/Java: import paths are package-level and don't map cleanly
-    // to file paths without language-specific resolution. Skipped for now.
-
-    if (isImporter) {
-      importedBy.push(filePath)
-    }
+    await yieldToEventLoop()
   }
 
   return {
     path: resolvedPath,
     imports,
     importedBy: importedBy.slice(0, 30),
-    ...(resolvedOthers.missingPaths.length > 0
-      ? { contentCoverage: contentCoverage(otherPaths.length, resolvedOthers.contents.size) }
+    ...(missingOtherCount > 0
+      ? { contentCoverage: contentCoverage(otherPaths.length, resolvedOtherCount) }
       : {}),
   }
 }
@@ -874,31 +891,38 @@ async function executeGenerateDiagram(
     const nodes = new Set<string>()
     const edges: Array<{ from: string; to: string }> = []
 
-    // Batch-fetch content for all files
+    // Resolve content in bounded batches, one per task. Any unavailable file
+    // fails the whole diagram, so the partial graph is discarded in that case.
     const filePaths = [...codeIndex.files.keys()]
-    const resolved = await resolveFileContents(codeIndex, filePaths)
-    if (resolved.missingPaths.length > 0) {
-      return {
-        error: `Content unavailable for ${resolved.missingPaths.length} indexed files`,
-        contentCoverage: contentCoverage(filePaths.length, resolved.contents.size),
-      }
-    }
-
-    for (const [filePath] of codeIndex.files) {
-      const dir = filePath.split('/').slice(0, -1).join('/') || '(root)'
-      nodes.add(dir)
-      const content = resolved.contents.get(filePath)
-      if (typeof content !== 'string') continue
-      const importRegex = /import\s+.*from\s+['"](@\/[^'"]+|\.\.?\/[^'"]+)['"]/g
-      let m
-      while ((m = importRegex.exec(content)) !== null) {
-        const importPath = m[1].replace(/\.\w+$/, '')
-        const parts = importPath.split('/')
-        const targetDir = parts.slice(0, -1).join('/') || '(root)'
-        if (targetDir !== dir) {
-          nodes.add(targetDir)
-          edges.push({ from: dir, to: targetDir })
+    let resolvedCount = 0
+    let missingCount = 0
+    for await (const batch of resolveFileContentBatches(codeIndex, filePaths)) {
+      resolvedCount += batch.contents.size
+      missingCount += batch.missingPaths.length
+      if (missingCount > 0) continue
+      for (const filePath of batch.paths) {
+        const dir = filePath.split('/').slice(0, -1).join('/') || '(root)'
+        nodes.add(dir)
+        const content = batch.contents.get(filePath)
+        if (typeof content !== 'string') continue
+        const importRegex = /import\s+.*from\s+['"](@\/[^'"]+|\.\.?\/[^'"]+)['"]/g
+        let m
+        while ((m = importRegex.exec(content)) !== null) {
+          const importPath = m[1].replace(/\.\w+$/, '')
+          const parts = importPath.split('/')
+          const targetDir = parts.slice(0, -1).join('/') || '(root)'
+          if (targetDir !== dir) {
+            nodes.add(targetDir)
+            edges.push({ from: dir, to: targetDir })
+          }
         }
+      }
+      await yieldToEventLoop()
+    }
+    if (missingCount > 0) {
+      return {
+        error: `Content unavailable for ${missingCount} indexed files`,
+        contentCoverage: contentCoverage(filePaths.length, resolvedCount),
       }
     }
 
@@ -1147,15 +1171,13 @@ async function executeGenerateTour(
     return true
   })
 
-  // Score and sort candidates
-  candidateFiles.sort((a, b) => {
-    const scoreA = significanceScore(a.path, a.file)
-    const scoreB = significanceScore(b.path, b.file)
-    return scoreB - scoreA
-  })
-
-  // Take top candidates
-  const selected = candidateFiles.slice(0, maxStops)
+  // Score each candidate once (the score runs a full-content regex), then sort.
+  // Array.prototype.sort is stable, so ties keep candidate order as before.
+  const selected = candidateFiles
+    .map(candidate => ({ candidate, score: significanceScore(candidate.path, candidate.file) }))
+    .sort((a, b) => b.score - a.score)
+    .slice(0, maxStops)
+    .map(({ candidate }) => candidate)
 
   // Build tour stops
   const stops: TourStop[] = selected.map(({ path, file }) => {

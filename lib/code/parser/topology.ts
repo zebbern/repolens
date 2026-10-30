@@ -21,7 +21,8 @@ export function computeTopology(graph: DependencyGraph, allPaths: string[]): Top
   }
 
   // Entry points: high outgoing, low incoming (top files by out/in ratio)
-  const nonOrphan = allPaths.filter(n => !orphans.includes(n))
+  const orphanSet = new Set(orphans)
+  const nonOrphan = allPaths.filter(n => !orphanSet.has(n))
   const entryPoints = nonOrphan
     .filter(n => (outDegree.get(n) || 0) > 0 && (inDegree.get(n) || 0) === 0)
     .sort((a, b) => (outDegree.get(b) || 0) - (outDegree.get(a) || 0))
@@ -117,8 +118,9 @@ export function computeTopology(graph: DependencyGraph, allPaths: string[]): Top
   for (const entry of entryPoints) {
     const queue: [string, number][] = [[entry, 0]]
     const visited = new Set<string>([entry])
-    while (queue.length > 0) {
-      const [node, depth] = queue.shift()!
+    // Index pointer instead of shift(): shift is O(n) per call on large queues.
+    for (let head = 0; head < queue.length; head++) {
+      const [node, depth] = queue[head]
       const current = depthMap.get(node) || 0
       if (depth > current) depthMap.set(node, depth)
       if (depth > maxDepth) maxDepth = depth

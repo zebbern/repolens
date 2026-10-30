@@ -124,4 +124,99 @@ describe('computeTopology', () => {
     const result = computeTopology(graph, ['solo.ts'])
     expect(result.orphans).toContain('solo.ts')
   })
+
+  it('keeps allPaths order among ties and interleaved orphans', () => {
+    const graph = makeGraph([
+      ['e1.ts', ['h1.ts', 'h2.ts']],
+      ['e2.ts', ['h2.ts', 'h1.ts']],
+      ['e3.ts', ['h3.ts']],
+      ['e4.ts', ['h3.ts', 'h1.ts']],
+      ['h1.ts', ['l1.ts']],
+      ['h2.ts', ['l1.ts', 'deep/a.ts']],
+      ['h3.ts', ['l1.ts']],
+      ['deep/a.ts', ['deep/b.ts']],
+      ['deep/b.ts', ['deep/c.ts']],
+    ])
+    const allPaths = [
+      'o1.ts', 'e2.ts', 'h3.ts', 'o2.ts', 'e1.ts', 'l1.ts', 'h2.ts', 'e4.ts',
+      'o3.ts', 'deep/c.ts', 'h1.ts', 'e3.ts', 'deep/b.ts', 'o4.ts', 'deep/a.ts',
+    ]
+    const result = computeTopology(graph, allPaths)
+    expect({ ...result, depthMap: [...result.depthMap] }).toMatchInlineSnapshot(`
+      {
+        "clusters": [
+          [
+            "e2.ts",
+            "h3.ts",
+            "e1.ts",
+            "l1.ts",
+            "h2.ts",
+            "e4.ts",
+            "deep/c.ts",
+            "h1.ts",
+            "e3.ts",
+            "deep/b.ts",
+            "deep/a.ts",
+          ],
+        ],
+        "connectors": [
+          "h3.ts",
+          "deep/b.ts",
+          "deep/a.ts",
+          "h2.ts",
+        ],
+        "depthMap": [
+          [
+            "h2.ts",
+            1,
+          ],
+          [
+            "h1.ts",
+            1,
+          ],
+          [
+            "l1.ts",
+            2,
+          ],
+          [
+            "deep/a.ts",
+            2,
+          ],
+          [
+            "deep/b.ts",
+            3,
+          ],
+          [
+            "deep/c.ts",
+            4,
+          ],
+          [
+            "h3.ts",
+            1,
+          ],
+        ],
+        "entryPoints": [
+          "e2.ts",
+          "e1.ts",
+          "e4.ts",
+          "e3.ts",
+        ],
+        "hubs": [
+          "l1.ts",
+          "h1.ts",
+        ],
+        "leafNodes": [
+          "l1.ts",
+          "deep/c.ts",
+        ],
+        "maxDepth": 4,
+        "orphans": [
+          "o1.ts",
+          "o2.ts",
+          "o3.ts",
+          "o4.ts",
+        ],
+      }
+    `)
+  })
 })

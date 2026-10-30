@@ -14,7 +14,7 @@ import { IDBContentStore, InMemoryContentStore, LazyContentStore } from '@/lib/c
 import type { FetchQueue } from '@/lib/code/fetch-queue'
 import { withHydratedCachedRepo } from "@/lib/cache/repo-cache"
 import { toast } from 'sonner'
-import { analyzeCodebase, type FullAnalysis } from "@/lib/code/import-parser"
+import { analyzeCodebase, resetAnalysisMemo, type FullAnalysis } from "@/lib/code/import-parser"
 import { startIndexing as runIndexingPipeline } from "@/lib/github/indexing-pipeline"
 import { useGitHubToken } from "@/providers/github-token-provider"
 import { PRIVATE_REPOSITORY_ACCESS_REVOKED_EVENT, isPrivateRepositoryRevocation } from '@/lib/auth/credential-events'
@@ -179,6 +179,8 @@ export function RepositoryProvider({ children }: { children: ReactNode }) {
   }) => {
     fetchQueueRef.current = null
     tabCacheRef.current = {}
+    // Drop the previous repository's per-file analyses and path names.
+    resetAnalysisMemo()
 
     const emptyIndex = createEmptyIndex()
     codeIndexRef.current = emptyIndex
@@ -764,9 +766,12 @@ export function RepositoryProvider({ children }: { children: ReactNode }) {
     }
     const epoch = connectionEpochRef.current
     const controller = connectionAbortRef.current
+    // Each edit publishes a new codeIndex; abort the superseded run instead of
+    // letting it finish. Unchanged files are reused from the analyzer's memo.
+    const analysisController = new AbortController()
     let cancelled = false
     const timer = setTimeout(() => {
-      void analyzeCodebase(codeIndex).then(analysis => {
+      void analyzeCodebase(codeIndex, { signal: analysisController.signal }).then(analysis => {
         if (
           !cancelled
           && controller !== null
@@ -787,6 +792,7 @@ export function RepositoryProvider({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true
       clearTimeout(timer)
+      analysisController.abort()
     }
   }, [codeIndex, indexingProgress.isComplete, isCurrentConnection])
 

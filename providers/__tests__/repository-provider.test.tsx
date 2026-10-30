@@ -37,6 +37,7 @@ vi.mock('@/lib/cache/repo-cache', () => ({
 // Mock the import-parser module
 vi.mock('@/lib/code/import-parser', () => ({
   analyzeCodebase: vi.fn(() => ({})),
+  resetAnalysisMemo: vi.fn(),
 }))
 
 // Mock sonner toast

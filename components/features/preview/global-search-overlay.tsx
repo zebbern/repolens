@@ -10,12 +10,13 @@ import {
 import { cn } from "@/lib/utils"
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog"
 import type { CodeIndex, SearchMatch } from "@/lib/code/code-index"
-import { buildSearchRegex, resolveFileContents } from "@/lib/code/code-index"
+import { buildSearchRegex } from "@/lib/code/code-index"
 import { matchesSearchPathFilter, type SearchPathFilter } from "@/lib/code/search-path-filter"
 import { searchInWorker } from "@/lib/code/search-worker-client"
 import { fuzzyMatch } from "@/lib/code/fuzzy-match"
 import { computeFileRenames, type FileRename } from "@/lib/code/rename-files"
-import { extractSymbols, type ExtractedSymbol } from "@/components/features/code/hooks/use-symbol-extraction"
+import type { ExtractedSymbol } from "@/components/features/code/hooks/use-symbol-extraction"
+import { loadSymbolIndex, type SymbolResult } from "./symbol-index"
 
 /* ── Types ─────────────────────────────────────────────────────────── */
 
@@ -27,12 +28,6 @@ interface FileResult {
   path: string
   name: string
   lineCount: number
-}
-
-interface SymbolResult {
-  symbol: ExtractedSymbol
-  filePath: string
-  fileName: string
 }
 
 interface GlobalSearchOverlayProps {
@@ -473,6 +468,7 @@ export function GlobalSearchOverlay({
     if (activeTab !== 'symbols') return
 
     let stale = false
+    const controller = new AbortController()
     queueMicrotask(() => {
       if (!stale) {
         setSymbolSourceError(null)
@@ -480,30 +476,15 @@ export function GlobalSearchOverlay({
       }
     })
 
-    const paths = Array.from(codeIndex.files.keys())
-    resolveFileContents(codeIndex, paths)
-      .then(resolved => {
+    loadSymbolIndex(codeIndex, controller.signal)
+      .then(loaded => {
         if (stale) return
-        const result: SymbolResult[] = []
-        for (const [, file] of codeIndex.files) {
-          const content = resolved.contents.get(file.path)
-          if (typeof content !== 'string') continue
-          const symbols = extractSymbols(content, file.language)
-          for (const symbol of symbols) {
-            result.push({ symbol, filePath: file.path, fileName: file.name })
-            if (symbol.children) {
-              for (const child of symbol.children) {
-                result.push({ symbol: child, filePath: file.path, fileName: file.name })
-              }
-            }
-          }
-        }
-        setAllSymbols(result)
-        if (resolved.missingPaths.length > 0) {
-          const residentNote = resolved.residentOnly
+        setAllSymbols(loaded.symbols)
+        if (loaded.missingPaths > 0) {
+          const residentNote = loaded.residentOnly
             ? ' On-demand repository content was not bulk fetched.'
             : ''
-          setSymbolSourceError(`Source unavailable for ${resolved.missingPaths.length} of ${paths.length} files.${residentNote}`)
+          setSymbolSourceError(`Source unavailable for ${loaded.missingPaths} of ${loaded.totalPaths} files.${residentNote}`)
         }
       })
       .catch(error => {
@@ -516,7 +497,10 @@ export function GlobalSearchOverlay({
         if (!stale) setIsExtractingSymbols(false)
       })
 
-    return () => { stale = true }
+    return () => {
+      stale = true
+      controller.abort()
+    }
   }, [codeIndex, activeTab])
 
   const symbolResults = useMemo(() => {

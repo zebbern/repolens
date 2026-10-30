@@ -801,7 +801,7 @@ The initial repository context built by `buildStructuralIndexAsync()` favors a c
 
 ### Multi-Phase Code Analysis
 
-`analyzeCodebase()` runs a 5-phase pipeline (per-file analysis → dependency graph → circular detection → topology → framework detection) producing a `FullAnalysis` object that powers both diagrams and structural scanning. The analysis is computed once after indexing completes (debounced by 50ms) and stored in `RepositoryProvider`.
+`analyzeCodebase()` runs a 5-phase pipeline (per-file analysis → dependency graph → circular detection → topology → framework detection) producing a `FullAnalysis` object that powers both diagrams and structural scanning. The analysis is computed after indexing completes and again whenever `codeIndex` changes (debounced by 50ms), and stored in `RepositoryProvider`; a new index aborts the superseded run. The analyzer yields to the event loop after each 50-file batch and between graph phases, and reuses per-file results for unchanged `IndexedFile` records while the indexed path set is the same, so re-analysis after an edit only re-extracts the edited files.
 
 ### Proxy URL Rewriting
 

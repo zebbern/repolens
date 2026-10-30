@@ -13,6 +13,8 @@ const issuesHarness = vi.hoisted(() => {
     session: { id: 1, signal: new AbortController().signal },
     isCurrent: (session: unknown) => session === harness.session,
     validateFinding: vi.fn(),
+    /** When set, the provider mocks serve this analysis and a real tab cache. */
+    providerState: null as null | { analysis: unknown; tabCache: Map<string, unknown> },
     latestProps: null as null | {
     onValidate: (issue: never) => void
     onShowFix: (issue: never) => void
@@ -145,15 +147,31 @@ vi.mock('@/providers', () => ({
   }),
   useRepositoryData: () => ({
     repo: { fullName: 'owner/repo' },
-    codebaseAnalysis: { files: new Map() },
+    codebaseAnalysis: issuesHarness.providerState
+      ? issuesHarness.providerState.analysis
+      : { files: new Map() },
     repositorySession: issuesHarness.session,
   }),
-  useRepositoryActions: () => ({
-    getTabCache: () => undefined,
-    setTabCache: () => {},
-    isRepositorySessionCurrent: issuesHarness.isCurrent,
-  }),
+  useRepositoryActions: () => issuesHarness.providerState
+    ? {
+      getTabCache: tabCacheGet,
+      setTabCache: tabCacheSet,
+      isRepositorySessionCurrent: issuesHarness.isCurrent,
+    }
+    : {
+      getTabCache: () => undefined,
+      setTabCache: () => {},
+      isRepositorySessionCurrent: issuesHarness.isCurrent,
+    },
 }))
+
+// Stable identities, like the provider's useCallback-wrapped tab cache accessors.
+function tabCacheGet(key: string) {
+  return issuesHarness.providerState?.tabCache.get(key)
+}
+function tabCacheSet(key: string, value: unknown) {
+  issuesHarness.providerState?.tabCache.set(key, value)
+}
 
 vi.mock('@/providers/api-keys-provider', () => ({
   useAPIKeys: () => ({
@@ -175,6 +193,7 @@ vi.mock('@/hooks/use-batch-operations', () => ({
 }))
 
 import { IssuesPanel } from '../issues-panel'
+import { scanInWorker } from '@/lib/code/issue-scanner'
 
 // Also mock issue-types to avoid import issues
 vi.mock('../issue-types', async (importOriginal) => {
@@ -199,6 +218,7 @@ describe('IssuesPanel', () => {
     vi.clearAllMocks()
     issuesHarness.session = { id: 1, signal: new AbortController().signal }
     issuesHarness.latestProps = null
+    issuesHarness.providerState = null
     issuesHarness.validateFinding.mockResolvedValue({ issueId: 'issue-1', verdict: 'true-positive', confidence: 'high', reasoning: 'Confirmed' })
     mockScanResults.diagnostics.engines = {}
     mockScanResults.diagnostics.failures = []
@@ -440,5 +460,58 @@ describe('IssuesPanel', () => {
     const { container } = render(<IssuesPanel codeIndex={emptyIndex as unknown as CodeIndex} />)
     // With 0 files, scanInWorker is not called → no issue-summary rendered
     expect(screen.queryByTestId('issue-summary')).not.toBeInTheDocument()
+  })
+
+  describe('analysis arrival vs. the tab cache', () => {
+    const codeIndex = mockCodeIndex as unknown as CodeIndex
+    const analysis = { files: new Map([['src/utils.ts', { path: 'src/utils.ts' }]]) }
+
+    it('rescans with the analysis when it arrives before the first scan resolves', async () => {
+      let resolveFirst!: (value: unknown) => void
+      vi.mocked(scanInWorker)
+        .mockReturnValueOnce(new Promise(resolve => { resolveFirst = resolve }) as never)
+      issuesHarness.providerState = { analysis: null, tabCache: new Map() }
+      const { rerender } = render(<IssuesPanel codeIndex={codeIndex} />)
+      await waitFor(() => expect(scanInWorker).toHaveBeenCalledWith(codeIndex, null))
+
+      issuesHarness.providerState.analysis = analysis
+      rerender(<IssuesPanel codeIndex={codeIndex} />)
+      await waitFor(() => expect(scanInWorker).toHaveBeenLastCalledWith(codeIndex, analysis))
+      resolveFirst({ ...mockScanResults, scannedFiles: 0 })
+
+      await waitFor(() => expect(issuesHarness.providerState?.tabCache.get('issues')).toBe(mockScanResults))
+    })
+
+    // A scan that resolved before the analysis arrived must not be served from the
+    // cache once the analysis is there, or structural findings never appear.
+    it('rescans with the analysis when it arrives after the analysis-less scan resolved', async () => {
+      const withAnalysis = { ...mockScanResults, scannedFiles: 2 }
+      vi.mocked(scanInWorker)
+        .mockResolvedValueOnce(mockScanResults as never)
+        .mockResolvedValueOnce(withAnalysis as never)
+      issuesHarness.providerState = { analysis: null, tabCache: new Map() }
+      const { rerender } = render(<IssuesPanel codeIndex={codeIndex} />)
+      await waitFor(() => expect(issuesHarness.providerState?.tabCache.get('issues')).toBe(mockScanResults))
+      expect(scanInWorker).toHaveBeenLastCalledWith(codeIndex, null)
+
+      issuesHarness.providerState.analysis = analysis
+      rerender(<IssuesPanel codeIndex={codeIndex} />)
+
+      await waitFor(() => expect(scanInWorker).toHaveBeenLastCalledWith(codeIndex, analysis))
+      await waitFor(() => expect(issuesHarness.providerState?.tabCache.get('issues')).toBe(withAnalysis))
+    })
+
+    it('serves the cached scan on remount when the analysis has not changed', async () => {
+      issuesHarness.providerState = { analysis, tabCache: new Map() }
+      vi.mocked(scanInWorker).mockReset().mockResolvedValue(mockScanResults as never)
+      const first = render(<IssuesPanel codeIndex={codeIndex} />)
+      await waitFor(() => expect(issuesHarness.providerState?.tabCache.get('issues')).toBe(mockScanResults))
+      first.unmount()
+
+      render(<IssuesPanel codeIndex={codeIndex} />)
+      await waitFor(() => expect(screen.getByTestId('issue-summary')).toBeInTheDocument())
+
+      expect(scanInWorker).toHaveBeenCalledTimes(1)
+    })
   })
 })

@@ -180,6 +180,7 @@ workproject/                    # Next.js application root
 │   │   ├── cve-proxy-client.ts # OSV lookups via the same-origin CVE proxy route
 │   │   ├── language-colors.ts  # Extension → language color map
 │   │   ├── open-indexed-db.ts  # Cancellable IndexedDB open helper
+│   │   ├── yield.ts            # yieldToEventLoop() for sliced main-thread loops
 │   │   ├── parser/             # Language-specific AST parsers
 │   │   └── scanner/            # Security/quality scanner (regex, composite, and tree-sitter rules)
 │   │       ├── scanner.ts            # Main scanner entry (assembles RULES, orchestrates scans)

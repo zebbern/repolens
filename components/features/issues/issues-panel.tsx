@@ -2,6 +2,7 @@
 
 import { useState, useMemo, useCallback, useRef, useEffect, type KeyboardEvent } from 'react'
 import type { CodeIndex } from '@/lib/code/code-index'
+import type { FullAnalysis } from '@/lib/code/parser/types'
 import {
   scanInWorker,
   generateFix,
@@ -35,6 +36,9 @@ interface IssuesPanelProps {
 }
 
 const COLLAPSED_FAILURE_PATHS = 3
+
+/** The codebase analysis each cached scan ran with, so a later analysis invalidates it. */
+const scanAnalysis = new WeakMap<ScanResults, FullAnalysis | null>()
 
 const VIEW_TABS = [
   ['overview', Activity, 'Overview'],
@@ -180,8 +184,10 @@ export function IssuesPanel({ codeIndex, onNavigateToFile }: IssuesPanelProps) {
       return
     }
 
+    // A scan cached before the analysis arrived (or under an older analysis) is
+    // stale: rescanning with the current analysis adds the structural findings.
     const cached = getTabCache<ScanResults>('issues')
-    if (cached) {
+    if (cached && scanAnalysis.get(cached) === analysis) {
       setResults(cached)
       return
     }
@@ -195,6 +201,7 @@ export function IssuesPanel({ codeIndex, onNavigateToFile }: IssuesPanelProps) {
       .then(scanResults => {
         if (stale || !isRepositorySessionCurrent(requestSession)) return
         setResults(scanResults)
+        scanAnalysis.set(scanResults, analysis)
         setTabCache('issues', scanResults)
       })
       .catch(err => {

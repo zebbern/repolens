@@ -1,0 +1,1582 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`analyzeImports characterization > pins reverse-lookup coverage when some importers are unavailable 1`] = `
+{
+  "contentCoverage": {
+    "note": "Content-dependent analysis covered 55/57 files; 2 files were unavailable without bulk-fetching on-demand source.",
+    "searchedFiles": 55,
+    "totalFiles": 57,
+    "unavailableFiles": 2,
+  },
+  "importedBy": [
+    "src/index.ts",
+    "src/core/index.ts",
+    "src/ui/widget.tsx",
+    "src/legacy.js",
+    "src/core/hub.test.ts",
+    "src/feature/f0.ts",
+    "src/feature/f1.ts",
+    "src/feature/f2.ts",
+    "src/feature/f4.ts",
+    "src/feature/f5.ts",
+    "src/feature/f6.ts",
+    "src/feature/f7.ts",
+    "src/feature/f8.ts",
+    "src/feature/f9.ts",
+    "src/feature/f10.ts",
+    "src/feature/f11.ts",
+    "src/feature/f12.ts",
+    "src/feature/f13.ts",
+    "src/feature/f14.ts",
+    "src/feature/f15.ts",
+    "src/feature/f16.ts",
+    "src/feature/f17.ts",
+    "src/feature/f18.ts",
+    "src/feature/f19.ts",
+    "src/feature/f20.ts",
+    "src/feature/f21.ts",
+    "src/feature/f22.ts",
+    "src/feature/f23.ts",
+    "src/feature/f24.ts",
+    "src/feature/f25.ts",
+  ],
+  "imports": [],
+  "path": "src/core/hub.ts",
+}
+`;
+
+exports[`analyzeImports characterization > returns the pinned result for cmd/main.go 1`] = `
+{
+  "importedBy": [],
+  "imports": [],
+  "path": "cmd/main.go",
+}
+`;
+
+exports[`analyzeImports characterization > returns the pinned result for core/hub.ts 1`] = `
+{
+  "importedBy": [
+    "src/index.ts",
+    "src/core/index.ts",
+    "src/ui/widget.tsx",
+    "src/legacy.js",
+    "src/core/hub.test.ts",
+    "src/feature/f0.ts",
+    "src/feature/f1.ts",
+    "src/feature/f2.ts",
+    "src/feature/f3.ts",
+    "src/feature/f4.ts",
+    "src/feature/f5.ts",
+    "src/feature/f6.ts",
+    "src/feature/f7.ts",
+    "src/feature/f8.ts",
+    "src/feature/f9.ts",
+    "src/feature/f10.ts",
+    "src/feature/f11.ts",
+    "src/feature/f12.ts",
+    "src/feature/f13.ts",
+    "src/feature/f14.ts",
+    "src/feature/f15.ts",
+    "src/feature/f16.ts",
+    "src/feature/f17.ts",
+    "src/feature/f18.ts",
+    "src/feature/f19.ts",
+    "src/feature/f20.ts",
+    "src/feature/f21.ts",
+    "src/feature/f22.ts",
+    "src/feature/f23.ts",
+    "src/feature/f24.ts",
+  ],
+  "imports": [],
+  "path": "src/core/hub.ts",
+}
+`;
+
+exports[`analyzeImports characterization > returns the pinned result for server/models.py 1`] = `
+{
+  "importedBy": [
+    "server/app.py",
+  ],
+  "imports": [],
+  "path": "server/models.py",
+}
+`;
+
+exports[`analyzeImports characterization > returns the pinned result for server/util.py 1`] = `
+{
+  "importedBy": [
+    "server/app.py",
+  ],
+  "imports": [],
+  "path": "server/util.py",
+}
+`;
+
+exports[`analyzeImports characterization > returns the pinned result for src/config.ts 1`] = `
+{
+  "importedBy": [
+    "src/ui/layout.tsx",
+  ],
+  "imports": [],
+  "path": "src/config.ts",
+}
+`;
+
+exports[`analyzeImports characterization > returns the pinned result for src/core/hub.ts 1`] = `
+{
+  "importedBy": [
+    "src/index.ts",
+    "src/core/index.ts",
+    "src/ui/widget.tsx",
+    "src/legacy.js",
+    "src/core/hub.test.ts",
+    "src/feature/f0.ts",
+    "src/feature/f1.ts",
+    "src/feature/f2.ts",
+    "src/feature/f3.ts",
+    "src/feature/f4.ts",
+    "src/feature/f5.ts",
+    "src/feature/f6.ts",
+    "src/feature/f7.ts",
+    "src/feature/f8.ts",
+    "src/feature/f9.ts",
+    "src/feature/f10.ts",
+    "src/feature/f11.ts",
+    "src/feature/f12.ts",
+    "src/feature/f13.ts",
+    "src/feature/f14.ts",
+    "src/feature/f15.ts",
+    "src/feature/f16.ts",
+    "src/feature/f17.ts",
+    "src/feature/f18.ts",
+    "src/feature/f19.ts",
+    "src/feature/f20.ts",
+    "src/feature/f21.ts",
+    "src/feature/f22.ts",
+    "src/feature/f23.ts",
+    "src/feature/f24.ts",
+  ],
+  "imports": [],
+  "path": "src/core/hub.ts",
+}
+`;
+
+exports[`analyzeImports characterization > returns the pinned result for src/ui/widget.tsx 1`] = `
+{
+  "importedBy": [
+    "src/index.ts",
+    "src/ui/layout.tsx",
+    "src/__tests__/widget.spec.ts",
+  ],
+  "imports": [
+    "../core/hub",
+  ],
+  "path": "src/ui/widget.tsx",
+}
+`;
+
+exports[`findSymbol characterization > pins the partial-index and partial-content warnings 1`] = `
+{
+  "contentCoverage": {
+    "note": "Symbol search covered 58/59 files with loaded content.",
+    "searchedFiles": 58,
+    "totalFiles": 59,
+  },
+  "matchCount": 20,
+  "results": [
+    {
+      "kind": "function",
+      "line": 5,
+      "match": "export const handler = async () => hub(1)",
+      "path": "src/core/hub.ts",
+    },
+    {
+      "kind": "function",
+      "line": 4,
+      "match": "export function HANDLER() {}",
+      "path": "src/ui/widget.tsx",
+    },
+    {
+      "kind": "function",
+      "line": 2,
+      "match": "module.exports = function handler() { return hub }",
+      "path": "src/legacy.js",
+    },
+    {
+      "kind": "function",
+      "line": 2,
+      "match": "export function handler() {}",
+      "path": "src/__tests__/widget.spec.ts",
+    },
+    {
+      "kind": "function",
+      "line": 2,
+      "match": "export function handler() { return 0 }",
+      "path": "src/feature/f0.ts",
+    },
+    {
+      "kind": "function",
+      "line": 2,
+      "match": "export const handler = (n: number) => n + 1",
+      "path": "src/feature/f1.ts",
+    },
+    {
+      "kind": "function",
+      "line": 2,
+      "match": "export function handler() { return 2 }",
+      "path": "src/feature/f2.ts",
+    },
+    {
+      "kind": "function",
+      "line": 2,
+      "match": "export const handler = (n: number) => n + 3",
+      "path": "src/feature/f3.ts",
+    },
+    {
+      "kind": "function",
+      "line": 2,
+      "match": "export function handler() { return 4 }",
+      "path": "src/feature/f4.ts",
+    },
+    {
+      "kind": "function",
+      "line": 2,
+      "match": "export const handler = (n: number) => n + 5",
+      "path": "src/feature/f5.ts",
+    },
+    {
+      "kind": "function",
+      "line": 2,
+      "match": "export function handler() { return 6 }",
+      "path": "src/feature/f6.ts",
+    },
+    {
+      "kind": "function",
+      "line": 2,
+      "match": "export const handler = (n: number) => n + 7",
+      "path": "src/feature/f7.ts",
+    },
+    {
+      "kind": "function",
+      "line": 2,
+      "match": "export function handler() { return 8 }",
+      "path": "src/feature/f8.ts",
+    },
+    {
+      "kind": "function",
+      "line": 2,
+      "match": "export const handler = (n: number) => n + 9",
+      "path": "src/feature/f9.ts",
+    },
+    {
+      "kind": "function",
+      "line": 2,
+      "match": "export function handler() { return 10 }",
+      "path": "src/feature/f10.ts",
+    },
+    {
+      "kind": "function",
+      "line": 2,
+      "match": "export const handler = (n: number) => n + 11",
+      "path": "src/feature/f11.ts",
+    },
+    {
+      "kind": "function",
+      "line": 2,
+      "match": "export function handler() { return 12 }",
+      "path": "src/feature/f12.ts",
+    },
+    {
+      "kind": "function",
+      "line": 2,
+      "match": "export const handler = (n: number) => n + 13",
+      "path": "src/feature/f13.ts",
+    },
+    {
+      "kind": "function",
+      "line": 2,
+      "match": "export function handler() { return 14 }",
+      "path": "src/feature/f14.ts",
+    },
+    {
+      "kind": "function",
+      "line": 2,
+      "match": "export const handler = (n: number) => n + 15",
+      "path": "src/feature/f15.ts",
+    },
+  ],
+  "symbolName": "handler",
+  "warning": "Index covers 58/60 files. Some symbols may be missing.",
+}
+`;
+
+exports[`findSymbol characterization > pins the partial-index and partial-content warnings 2`] = `
+{
+  "contentCoverage": {
+    "note": "Content-dependent analysis covered 55/58 files; 3 files were unavailable without bulk-fetching on-demand source.",
+    "searchedFiles": 55,
+    "totalFiles": 58,
+    "unavailableFiles": 3,
+  },
+  "matchCount": 20,
+  "results": [
+    {
+      "kind": "function",
+      "line": 5,
+      "match": "export const handler = async () => hub(1)",
+      "path": "src/core/hub.ts",
+    },
+    {
+      "kind": "function",
+      "line": 4,
+      "match": "export function HANDLER() {}",
+      "path": "src/ui/widget.tsx",
+    },
+    {
+      "kind": "function",
+      "line": 2,
+      "match": "module.exports = function handler() { return hub }",
+      "path": "src/legacy.js",
+    },
+    {
+      "kind": "function",
+      "line": 2,
+      "match": "export function handler() {}",
+      "path": "src/__tests__/widget.spec.ts",
+    },
+    {
+      "kind": "function",
+      "line": 2,
+      "match": "export const handler = (n: number) => n + 1",
+      "path": "src/feature/f1.ts",
+    },
+    {
+      "kind": "function",
+      "line": 2,
+      "match": "export function handler() { return 2 }",
+      "path": "src/feature/f2.ts",
+    },
+    {
+      "kind": "function",
+      "line": 2,
+      "match": "export const handler = (n: number) => n + 3",
+      "path": "src/feature/f3.ts",
+    },
+    {
+      "kind": "function",
+      "line": 2,
+      "match": "export function handler() { return 4 }",
+      "path": "src/feature/f4.ts",
+    },
+    {
+      "kind": "function",
+      "line": 2,
+      "match": "export const handler = (n: number) => n + 5",
+      "path": "src/feature/f5.ts",
+    },
+    {
+      "kind": "function",
+      "line": 2,
+      "match": "export function handler() { return 6 }",
+      "path": "src/feature/f6.ts",
+    },
+    {
+      "kind": "function",
+      "line": 2,
+      "match": "export const handler = (n: number) => n + 7",
+      "path": "src/feature/f7.ts",
+    },
+    {
+      "kind": "function",
+      "line": 2,
+      "match": "export function handler() { return 8 }",
+      "path": "src/feature/f8.ts",
+    },
+    {
+      "kind": "function",
+      "line": 2,
+      "match": "export const handler = (n: number) => n + 9",
+      "path": "src/feature/f9.ts",
+    },
+    {
+      "kind": "function",
+      "line": 2,
+      "match": "export function handler() { return 10 }",
+      "path": "src/feature/f10.ts",
+    },
+    {
+      "kind": "function",
+      "line": 2,
+      "match": "export const handler = (n: number) => n + 11",
+      "path": "src/feature/f11.ts",
+    },
+    {
+      "kind": "function",
+      "line": 2,
+      "match": "export function handler() { return 12 }",
+      "path": "src/feature/f12.ts",
+    },
+    {
+      "kind": "function",
+      "line": 2,
+      "match": "export const handler = (n: number) => n + 13",
+      "path": "src/feature/f13.ts",
+    },
+    {
+      "kind": "function",
+      "line": 2,
+      "match": "export function handler() { return 14 }",
+      "path": "src/feature/f14.ts",
+    },
+    {
+      "kind": "function",
+      "line": 2,
+      "match": "export const handler = (n: number) => n + 15",
+      "path": "src/feature/f15.ts",
+    },
+    {
+      "kind": "function",
+      "line": 2,
+      "match": "export function handler() { return 16 }",
+      "path": "src/feature/f16.ts",
+    },
+  ],
+  "symbolName": "handler",
+}
+`;
+
+exports[`findSymbol characterization > returns the pinned result for { name: 'Config', kind: 'any' } 1`] = `
+{
+  "matchCount": 2,
+  "results": [
+    {
+      "kind": "class",
+      "line": 4,
+      "match": "export class Config {}",
+      "path": "src/ui/layout.tsx",
+    },
+    {
+      "kind": "interface",
+      "line": 1,
+      "match": "export interface Config { debug: boolean }",
+      "path": "src/config.ts",
+    },
+  ],
+  "symbolName": "Config",
+}
+`;
+
+exports[`findSymbol characterization > returns the pinned result for { name: 'Feature12' } 1`] = `
+{
+  "matchCount": 1,
+  "results": [
+    {
+      "kind": "class",
+      "line": 3,
+      "match": "export class Feature12 {}",
+      "path": "src/feature/f12.ts",
+    },
+  ],
+  "symbolName": "Feature12",
+}
+`;
+
+exports[`findSymbol characterization > returns the pinned result for { name: 'HANDLER' } 1`] = `
+{
+  "matchCount": 20,
+  "results": [
+    {
+      "kind": "function",
+      "line": 5,
+      "match": "export const handler = async () => hub(1)",
+      "path": "src/core/hub.ts",
+    },
+    {
+      "kind": "function",
+      "line": 4,
+      "match": "export function HANDLER() {}",
+      "path": "src/ui/widget.tsx",
+    },
+    {
+      "kind": "function",
+      "line": 2,
+      "match": "module.exports = function handler() { return hub }",
+      "path": "src/legacy.js",
+    },
+    {
+      "kind": "function",
+      "line": 2,
+      "match": "export function handler() {}",
+      "path": "src/__tests__/widget.spec.ts",
+    },
+    {
+      "kind": "function",
+      "line": 2,
+      "match": "export function handler() { return 0 }",
+      "path": "src/feature/f0.ts",
+    },
+    {
+      "kind": "function",
+      "line": 2,
+      "match": "export const handler = (n: number) => n + 1",
+      "path": "src/feature/f1.ts",
+    },
+    {
+      "kind": "function",
+      "line": 2,
+      "match": "export function handler() { return 2 }",
+      "path": "src/feature/f2.ts",
+    },
+    {
+      "kind": "function",
+      "line": 2,
+      "match": "export const handler = (n: number) => n + 3",
+      "path": "src/feature/f3.ts",
+    },
+    {
+      "kind": "function",
+      "line": 2,
+      "match": "export function handler() { return 4 }",
+      "path": "src/feature/f4.ts",
+    },
+    {
+      "kind": "function",
+      "line": 2,
+      "match": "export const handler = (n: number) => n + 5",
+      "path": "src/feature/f5.ts",
+    },
+    {
+      "kind": "function",
+      "line": 2,
+      "match": "export function handler() { return 6 }",
+      "path": "src/feature/f6.ts",
+    },
+    {
+      "kind": "function",
+      "line": 2,
+      "match": "export const handler = (n: number) => n + 7",
+      "path": "src/feature/f7.ts",
+    },
+    {
+      "kind": "function",
+      "line": 2,
+      "match": "export function handler() { return 8 }",
+      "path": "src/feature/f8.ts",
+    },
+    {
+      "kind": "function",
+      "line": 2,
+      "match": "export const handler = (n: number) => n + 9",
+      "path": "src/feature/f9.ts",
+    },
+    {
+      "kind": "function",
+      "line": 2,
+      "match": "export function handler() { return 10 }",
+      "path": "src/feature/f10.ts",
+    },
+    {
+      "kind": "function",
+      "line": 2,
+      "match": "export const handler = (n: number) => n + 11",
+      "path": "src/feature/f11.ts",
+    },
+    {
+      "kind": "function",
+      "line": 2,
+      "match": "export function handler() { return 12 }",
+      "path": "src/feature/f12.ts",
+    },
+    {
+      "kind": "function",
+      "line": 2,
+      "match": "export const handler = (n: number) => n + 13",
+      "path": "src/feature/f13.ts",
+    },
+    {
+      "kind": "function",
+      "line": 2,
+      "match": "export function handler() { return 14 }",
+      "path": "src/feature/f14.ts",
+    },
+    {
+      "kind": "function",
+      "line": 2,
+      "match": "export const handler = (n: number) => n + 15",
+      "path": "src/feature/f15.ts",
+    },
+  ],
+  "symbolName": "HANDLER",
+}
+`;
+
+exports[`findSymbol characterization > returns the pinned result for { name: 'Mode', kind: 'enum' } 1`] = `
+{
+  "matchCount": 1,
+  "results": [
+    {
+      "kind": "enum",
+      "line": 4,
+      "match": "export enum Mode { A, B }",
+      "path": "src/core/hub.ts",
+    },
+  ],
+  "symbolName": "Mode",
+}
+`;
+
+exports[`findSymbol characterization > returns the pinned result for { name: 'Shape', kind: 'type' } 1`] = `
+{
+  "matchCount": 1,
+  "results": [
+    {
+      "kind": "type",
+      "line": 3,
+      "match": "export type Shape = { kind: string }",
+      "path": "src/core/hub.ts",
+    },
+  ],
+  "symbolName": "Shape",
+}
+`;
+
+exports[`findSymbol characterization > returns the pinned result for { name: 'Widget' } 1`] = `
+{
+  "matchCount": 2,
+  "results": [
+    {
+      "kind": "interface",
+      "line": 2,
+      "match": "export interface Widget { id: string }",
+      "path": "src/core/hub.ts",
+    },
+    {
+      "kind": "class",
+      "line": 2,
+      "match": "export class Widget { render() { return hub(this) } }",
+      "path": "src/ui/widget.tsx",
+    },
+  ],
+  "symbolName": "Widget",
+}
+`;
+
+exports[`findSymbol characterization > returns the pinned result for { name: 'Widget', kind: 'interface' } 1`] = `
+{
+  "matchCount": 1,
+  "results": [
+    {
+      "kind": "interface",
+      "line": 2,
+      "match": "export interface Widget { id: string }",
+      "path": "src/core/hub.ts",
+    },
+  ],
+  "symbolName": "Widget",
+}
+`;
+
+exports[`findSymbol characterization > returns the pinned result for { name: 'han' } 1`] = `
+{
+  "matchCount": 0,
+  "results": [],
+  "symbolName": "han",
+}
+`;
+
+exports[`findSymbol characterization > returns the pinned result for { name: 'handler' } 1`] = `
+{
+  "matchCount": 20,
+  "results": [
+    {
+      "kind": "function",
+      "line": 5,
+      "match": "export const handler = async () => hub(1)",
+      "path": "src/core/hub.ts",
+    },
+    {
+      "kind": "function",
+      "line": 4,
+      "match": "export function HANDLER() {}",
+      "path": "src/ui/widget.tsx",
+    },
+    {
+      "kind": "function",
+      "line": 2,
+      "match": "module.exports = function handler() { return hub }",
+      "path": "src/legacy.js",
+    },
+    {
+      "kind": "function",
+      "line": 2,
+      "match": "export function handler() {}",
+      "path": "src/__tests__/widget.spec.ts",
+    },
+    {
+      "kind": "function",
+      "line": 2,
+      "match": "export function handler() { return 0 }",
+      "path": "src/feature/f0.ts",
+    },
+    {
+      "kind": "function",
+      "line": 2,
+      "match": "export const handler = (n: number) => n + 1",
+      "path": "src/feature/f1.ts",
+    },
+    {
+      "kind": "function",
+      "line": 2,
+      "match": "export function handler() { return 2 }",
+      "path": "src/feature/f2.ts",
+    },
+    {
+      "kind": "function",
+      "line": 2,
+      "match": "export const handler = (n: number) => n + 3",
+      "path": "src/feature/f3.ts",
+    },
+    {
+      "kind": "function",
+      "line": 2,
+      "match": "export function handler() { return 4 }",
+      "path": "src/feature/f4.ts",
+    },
+    {
+      "kind": "function",
+      "line": 2,
+      "match": "export const handler = (n: number) => n + 5",
+      "path": "src/feature/f5.ts",
+    },
+    {
+      "kind": "function",
+      "line": 2,
+      "match": "export function handler() { return 6 }",
+      "path": "src/feature/f6.ts",
+    },
+    {
+      "kind": "function",
+      "line": 2,
+      "match": "export const handler = (n: number) => n + 7",
+      "path": "src/feature/f7.ts",
+    },
+    {
+      "kind": "function",
+      "line": 2,
+      "match": "export function handler() { return 8 }",
+      "path": "src/feature/f8.ts",
+    },
+    {
+      "kind": "function",
+      "line": 2,
+      "match": "export const handler = (n: number) => n + 9",
+      "path": "src/feature/f9.ts",
+    },
+    {
+      "kind": "function",
+      "line": 2,
+      "match": "export function handler() { return 10 }",
+      "path": "src/feature/f10.ts",
+    },
+    {
+      "kind": "function",
+      "line": 2,
+      "match": "export const handler = (n: number) => n + 11",
+      "path": "src/feature/f11.ts",
+    },
+    {
+      "kind": "function",
+      "line": 2,
+      "match": "export function handler() { return 12 }",
+      "path": "src/feature/f12.ts",
+    },
+    {
+      "kind": "function",
+      "line": 2,
+      "match": "export const handler = (n: number) => n + 13",
+      "path": "src/feature/f13.ts",
+    },
+    {
+      "kind": "function",
+      "line": 2,
+      "match": "export function handler() { return 14 }",
+      "path": "src/feature/f14.ts",
+    },
+    {
+      "kind": "function",
+      "line": 2,
+      "match": "export const handler = (n: number) => n + 15",
+      "path": "src/feature/f15.ts",
+    },
+  ],
+  "symbolName": "handler",
+}
+`;
+
+exports[`findSymbol characterization > returns the pinned result for { name: 'handler', kind: 'class' } 1`] = `
+{
+  "matchCount": 0,
+  "results": [],
+  "symbolName": "handler",
+}
+`;
+
+exports[`findSymbol characterization > returns the pinned result for { name: 'handler', kind: 'function' } 1`] = `
+{
+  "matchCount": 20,
+  "results": [
+    {
+      "kind": "function",
+      "line": 5,
+      "match": "export const handler = async () => hub(1)",
+      "path": "src/core/hub.ts",
+    },
+    {
+      "kind": "function",
+      "line": 4,
+      "match": "export function HANDLER() {}",
+      "path": "src/ui/widget.tsx",
+    },
+    {
+      "kind": "function",
+      "line": 2,
+      "match": "module.exports = function handler() { return hub }",
+      "path": "src/legacy.js",
+    },
+    {
+      "kind": "function",
+      "line": 2,
+      "match": "export function handler() {}",
+      "path": "src/__tests__/widget.spec.ts",
+    },
+    {
+      "kind": "function",
+      "line": 2,
+      "match": "export function handler() { return 0 }",
+      "path": "src/feature/f0.ts",
+    },
+    {
+      "kind": "function",
+      "line": 2,
+      "match": "export const handler = (n: number) => n + 1",
+      "path": "src/feature/f1.ts",
+    },
+    {
+      "kind": "function",
+      "line": 2,
+      "match": "export function handler() { return 2 }",
+      "path": "src/feature/f2.ts",
+    },
+    {
+      "kind": "function",
+      "line": 2,
+      "match": "export const handler = (n: number) => n + 3",
+      "path": "src/feature/f3.ts",
+    },
+    {
+      "kind": "function",
+      "line": 2,
+      "match": "export function handler() { return 4 }",
+      "path": "src/feature/f4.ts",
+    },
+    {
+      "kind": "function",
+      "line": 2,
+      "match": "export const handler = (n: number) => n + 5",
+      "path": "src/feature/f5.ts",
+    },
+    {
+      "kind": "function",
+      "line": 2,
+      "match": "export function handler() { return 6 }",
+      "path": "src/feature/f6.ts",
+    },
+    {
+      "kind": "function",
+      "line": 2,
+      "match": "export const handler = (n: number) => n + 7",
+      "path": "src/feature/f7.ts",
+    },
+    {
+      "kind": "function",
+      "line": 2,
+      "match": "export function handler() { return 8 }",
+      "path": "src/feature/f8.ts",
+    },
+    {
+      "kind": "function",
+      "line": 2,
+      "match": "export const handler = (n: number) => n + 9",
+      "path": "src/feature/f9.ts",
+    },
+    {
+      "kind": "function",
+      "line": 2,
+      "match": "export function handler() { return 10 }",
+      "path": "src/feature/f10.ts",
+    },
+    {
+      "kind": "function",
+      "line": 2,
+      "match": "export const handler = (n: number) => n + 11",
+      "path": "src/feature/f11.ts",
+    },
+    {
+      "kind": "function",
+      "line": 2,
+      "match": "export function handler() { return 12 }",
+      "path": "src/feature/f12.ts",
+    },
+    {
+      "kind": "function",
+      "line": 2,
+      "match": "export const handler = (n: number) => n + 13",
+      "path": "src/feature/f13.ts",
+    },
+    {
+      "kind": "function",
+      "line": 2,
+      "match": "export function handler() { return 14 }",
+      "path": "src/feature/f14.ts",
+    },
+    {
+      "kind": "function",
+      "line": 2,
+      "match": "export const handler = (n: number) => n + 15",
+      "path": "src/feature/f15.ts",
+    },
+  ],
+  "symbolName": "handler",
+}
+`;
+
+exports[`findSymbol characterization > returns the pinned result for { name: 'widget', kind: 'class' } 1`] = `
+{
+  "matchCount": 1,
+  "results": [
+    {
+      "kind": "class",
+      "line": 2,
+      "match": "export class Widget { render() { return hub(this) } }",
+      "path": "src/ui/widget.tsx",
+    },
+  ],
+  "symbolName": "widget",
+}
+`;
+
+exports[`findSymbol characterization > returns the pinned result for { name: 'zzNoSuchSymbolZz' } 1`] = `
+{
+  "matchCount": 0,
+  "results": [],
+  "symbolName": "zzNoSuchSymbolZz",
+}
+`;
+
+exports[`generateDiagram topology characterization > pins the unavailable-content error 1`] = `
+{
+  "contentCoverage": {
+    "note": "Content-dependent analysis covered 57/58 files; 1 files were unavailable without bulk-fetching on-demand source.",
+    "searchedFiles": 57,
+    "totalFiles": 58,
+    "unavailableFiles": 1,
+  },
+  "error": "Content unavailable for 1 indexed files",
+}
+`;
+
+exports[`generateDiagram topology characterization > returns the pinned import-graph diagram 1`] = `
+{
+  "edgeCount": 9,
+  "mermaid": "graph LR
+  src["src"] --> __core["./core"]
+  src["src"] --> __src_ui["@/src/ui"]
+  src_ui["src/ui"] --> ___core["../core"]
+  src_ui["src/ui"] --> _["."]
+  src_ui["src/ui"] --> __[".."]
+  src_core["src/core"] --> _["."]
+  src___tests__["src/__tests__"] --> ___ui["../ui"]
+  app["app"] --> __src_ui["@/src/ui"]
+  src_feature["src/feature"] --> ___core["../core"]
+",
+  "nodeCount": 15,
+  "totalEdges": 9,
+  "type": "import-graph",
+}
+`;
+
+exports[`generateDiagram topology characterization > returns the pinned topology diagram 1`] = `
+{
+  "edgeCount": 9,
+  "mermaid": "graph LR
+  src["src"] --> __core["./core"]
+  src["src"] --> __src_ui["@/src/ui"]
+  src_ui["src/ui"] --> ___core["../core"]
+  src_ui["src/ui"] --> _["."]
+  src_ui["src/ui"] --> __[".."]
+  src_core["src/core"] --> _["."]
+  src___tests__["src/__tests__"] --> ___ui["../ui"]
+  app["app"] --> __src_ui["@/src/ui"]
+  src_feature["src/feature"] --> ___core["../core"]
+",
+  "nodeCount": 15,
+  "totalEdges": 9,
+  "type": "topology",
+}
+`;
+
+exports[`generateTour ranking characterization > pins the unavailable-content error 1`] = `
+{
+  "contentCoverage": {
+    "note": "Content-dependent analysis covered 57/58 files; 1 files were unavailable without bulk-fetching on-demand source.",
+    "searchedFiles": 57,
+    "totalFiles": 58,
+    "unavailableFiles": 1,
+  },
+  "error": "Content unavailable for 1 indexed files",
+}
+`;
+
+exports[`generateTour ranking characterization > returns the pinned stop order for { repoKey: 'owner/repo' } 1`] = `
+{
+  "stopCount": 8,
+  "tour": {
+    "createdAt": "<time>",
+    "description": "A guided tour of the key architectural files in this codebase.",
+    "id": "<id>",
+    "name": "Architecture Tour",
+    "repoKey": "owner/repo",
+    "stops": [
+      {
+        "annotation": "**index.ts** in \`src\` — exports 2 symbols, imports from 2 modules. This stop highlights the \`main\` declaration.",
+        "endLine": 4,
+        "filePath": "src/index.ts",
+        "id": "<id>",
+        "startLine": 3,
+        "title": "main",
+      },
+      {
+        "annotation": "**index.ts** in \`src/core\` — exports 2 symbols.",
+        "endLine": 2,
+        "filePath": "src/core/index.ts",
+        "id": "<id>",
+        "startLine": 1,
+        "title": "File overview",
+      },
+      {
+        "annotation": "**layout.tsx** in \`src/ui\` — exports 2 symbols, imports from 2 modules. This stop highlights the \`Layout\` declaration.",
+        "endLine": 4,
+        "filePath": "src/ui/layout.tsx",
+        "id": "<id>",
+        "startLine": 3,
+        "title": "Layout",
+      },
+      {
+        "annotation": "**config.ts** in \`src\` — exports 2 symbols. This stop highlights the \`Config\` declaration.",
+        "endLine": 2,
+        "filePath": "src/config.ts",
+        "id": "<id>",
+        "startLine": 1,
+        "title": "Config",
+      },
+      {
+        "annotation": "**main.ts** in \`app\` — exports 2 symbols. This stop highlights the \`boot\` declaration.",
+        "endLine": 2,
+        "filePath": "app/main.ts",
+        "id": "<id>",
+        "startLine": 1,
+        "title": "boot",
+      },
+      {
+        "annotation": "**page.tsx** in \`app\` — exports 1 symbol, imports from 1 module. This stop highlights the \`Page\` declaration.",
+        "endLine": 2,
+        "filePath": "app/page.tsx",
+        "id": "<id>",
+        "startLine": 2,
+        "title": "Page",
+      },
+      {
+        "annotation": "**f4.ts** in \`src/feature\` — exports 7 symbols. This stop highlights the \`handler\` declaration.",
+        "endLine": 7,
+        "filePath": "src/feature/f4.ts",
+        "id": "<id>",
+        "startLine": 2,
+        "title": "handler",
+      },
+      {
+        "annotation": "**f19.ts** in \`src/feature\` — exports 7 symbols. This stop highlights the \`handler\` declaration.",
+        "endLine": 7,
+        "filePath": "src/feature/f19.ts",
+        "id": "<id>",
+        "startLine": 2,
+        "title": "handler",
+      },
+    ],
+    "updatedAt": "<time>",
+  },
+}
+`;
+
+exports[`generateTour ranking characterization > returns the pinned stop order for { repoKey: 'owner/repo', maxStops: 3 } 1`] = `
+{
+  "stopCount": 3,
+  "tour": {
+    "createdAt": "<time>",
+    "description": "A guided tour of the key architectural files in this codebase.",
+    "id": "<id>",
+    "name": "Architecture Tour",
+    "repoKey": "owner/repo",
+    "stops": [
+      {
+        "annotation": "**index.ts** in \`src\` — exports 2 symbols, imports from 2 modules. This stop highlights the \`main\` declaration.",
+        "endLine": 4,
+        "filePath": "src/index.ts",
+        "id": "<id>",
+        "startLine": 3,
+        "title": "main",
+      },
+      {
+        "annotation": "**index.ts** in \`src/core\` — exports 2 symbols.",
+        "endLine": 2,
+        "filePath": "src/core/index.ts",
+        "id": "<id>",
+        "startLine": 1,
+        "title": "File overview",
+      },
+      {
+        "annotation": "**layout.tsx** in \`src/ui\` — exports 2 symbols, imports from 2 modules. This stop highlights the \`Layout\` declaration.",
+        "endLine": 4,
+        "filePath": "src/ui/layout.tsx",
+        "id": "<id>",
+        "startLine": 3,
+        "title": "Layout",
+      },
+    ],
+    "updatedAt": "<time>",
+  },
+}
+`;
+
+exports[`generateTour ranking characterization > returns the pinned stop order for { repoKey: 'owner/repo', maxStops: 25 } 1`] = `
+{
+  "stopCount": 25,
+  "tour": {
+    "createdAt": "<time>",
+    "description": "A guided tour of the key architectural files in this codebase.",
+    "id": "<id>",
+    "name": "Architecture Tour",
+    "repoKey": "owner/repo",
+    "stops": [
+      {
+        "annotation": "**index.ts** in \`src\` — exports 2 symbols, imports from 2 modules. This stop highlights the \`main\` declaration.",
+        "endLine": 4,
+        "filePath": "src/index.ts",
+        "id": "<id>",
+        "startLine": 3,
+        "title": "main",
+      },
+      {
+        "annotation": "**index.ts** in \`src/core\` — exports 2 symbols.",
+        "endLine": 2,
+        "filePath": "src/core/index.ts",
+        "id": "<id>",
+        "startLine": 1,
+        "title": "File overview",
+      },
+      {
+        "annotation": "**layout.tsx** in \`src/ui\` — exports 2 symbols, imports from 2 modules. This stop highlights the \`Layout\` declaration.",
+        "endLine": 4,
+        "filePath": "src/ui/layout.tsx",
+        "id": "<id>",
+        "startLine": 3,
+        "title": "Layout",
+      },
+      {
+        "annotation": "**config.ts** in \`src\` — exports 2 symbols. This stop highlights the \`Config\` declaration.",
+        "endLine": 2,
+        "filePath": "src/config.ts",
+        "id": "<id>",
+        "startLine": 1,
+        "title": "Config",
+      },
+      {
+        "annotation": "**main.ts** in \`app\` — exports 2 symbols. This stop highlights the \`boot\` declaration.",
+        "endLine": 2,
+        "filePath": "app/main.ts",
+        "id": "<id>",
+        "startLine": 1,
+        "title": "boot",
+      },
+      {
+        "annotation": "**page.tsx** in \`app\` — exports 1 symbol, imports from 1 module. This stop highlights the \`Page\` declaration.",
+        "endLine": 2,
+        "filePath": "app/page.tsx",
+        "id": "<id>",
+        "startLine": 2,
+        "title": "Page",
+      },
+      {
+        "annotation": "**f4.ts** in \`src/feature\` — exports 7 symbols. This stop highlights the \`handler\` declaration.",
+        "endLine": 7,
+        "filePath": "src/feature/f4.ts",
+        "id": "<id>",
+        "startLine": 2,
+        "title": "handler",
+      },
+      {
+        "annotation": "**f19.ts** in \`src/feature\` — exports 7 symbols. This stop highlights the \`handler\` declaration.",
+        "endLine": 7,
+        "filePath": "src/feature/f19.ts",
+        "id": "<id>",
+        "startLine": 2,
+        "title": "handler",
+      },
+      {
+        "annotation": "**f34.ts** in \`src/feature\` — exports 7 symbols. This stop highlights the \`handler\` declaration.",
+        "endLine": 7,
+        "filePath": "src/feature/f34.ts",
+        "id": "<id>",
+        "startLine": 2,
+        "title": "handler",
+      },
+      {
+        "annotation": "**README.md** in \`\\(root\\)\` — exports 1 symbol.",
+        "endLine": 2,
+        "filePath": "README.md",
+        "id": "<id>",
+        "startLine": 1,
+        "title": "File overview",
+      },
+      {
+        "annotation": "**f9.ts** in \`src/feature\` — exports 6 symbols, imports from 1 module. This stop highlights the \`handler\` declaration.",
+        "endLine": 7,
+        "filePath": "src/feature/f9.ts",
+        "id": "<id>",
+        "startLine": 2,
+        "title": "handler",
+      },
+      {
+        "annotation": "**f13.ts** in \`src/feature\` — exports 6 symbols. This stop highlights the \`handler\` declaration.",
+        "endLine": 6,
+        "filePath": "src/feature/f13.ts",
+        "id": "<id>",
+        "startLine": 2,
+        "title": "handler",
+      },
+      {
+        "annotation": "**f14.ts** in \`src/feature\` — exports 6 symbols. This stop highlights the \`handler\` declaration.",
+        "endLine": 7,
+        "filePath": "src/feature/f14.ts",
+        "id": "<id>",
+        "startLine": 2,
+        "title": "handler",
+      },
+      {
+        "annotation": "**f24.ts** in \`src/feature\` — exports 6 symbols, imports from 1 module. This stop highlights the \`handler\` declaration.",
+        "endLine": 7,
+        "filePath": "src/feature/f24.ts",
+        "id": "<id>",
+        "startLine": 2,
+        "title": "handler",
+      },
+      {
+        "annotation": "**f28.ts** in \`src/feature\` — exports 6 symbols. This stop highlights the \`handler\` declaration.",
+        "endLine": 6,
+        "filePath": "src/feature/f28.ts",
+        "id": "<id>",
+        "startLine": 2,
+        "title": "handler",
+      },
+      {
+        "annotation": "**f29.ts** in \`src/feature\` — exports 6 symbols. This stop highlights the \`handler\` declaration.",
+        "endLine": 7,
+        "filePath": "src/feature/f29.ts",
+        "id": "<id>",
+        "startLine": 2,
+        "title": "handler",
+      },
+      {
+        "annotation": "**f39.ts** in \`src/feature\` — exports 6 symbols, imports from 1 module. This stop highlights the \`handler\` declaration.",
+        "endLine": 7,
+        "filePath": "src/feature/f39.ts",
+        "id": "<id>",
+        "startLine": 2,
+        "title": "handler",
+      },
+      {
+        "annotation": "**hub.ts** in \`src/core\` — exports 5 symbols. This stop highlights the \`hub\` declaration.",
+        "endLine": 5,
+        "filePath": "src/core/hub.ts",
+        "id": "<id>",
+        "startLine": 1,
+        "title": "hub",
+      },
+      {
+        "annotation": "**f3.ts** in \`src/feature\` — exports 5 symbols, imports from 1 module. This stop highlights the \`handler\` declaration.",
+        "endLine": 6,
+        "filePath": "src/feature/f3.ts",
+        "id": "<id>",
+        "startLine": 2,
+        "title": "handler",
+      },
+      {
+        "annotation": "**f7.ts** in \`src/feature\` — exports 5 symbols. This stop highlights the \`handler\` declaration.",
+        "endLine": 5,
+        "filePath": "src/feature/f7.ts",
+        "id": "<id>",
+        "startLine": 2,
+        "title": "handler",
+      },
+      {
+        "annotation": "**f8.ts** in \`src/feature\` — exports 5 symbols. This stop highlights the \`handler\` declaration.",
+        "endLine": 6,
+        "filePath": "src/feature/f8.ts",
+        "id": "<id>",
+        "startLine": 2,
+        "title": "handler",
+      },
+      {
+        "annotation": "**f18.ts** in \`src/feature\` — exports 5 symbols, imports from 1 module. This stop highlights the \`handler\` declaration.",
+        "endLine": 6,
+        "filePath": "src/feature/f18.ts",
+        "id": "<id>",
+        "startLine": 2,
+        "title": "handler",
+      },
+      {
+        "annotation": "**f22.ts** in \`src/feature\` — exports 5 symbols. This stop highlights the \`handler\` declaration.",
+        "endLine": 5,
+        "filePath": "src/feature/f22.ts",
+        "id": "<id>",
+        "startLine": 2,
+        "title": "handler",
+      },
+      {
+        "annotation": "**f23.ts** in \`src/feature\` — exports 5 symbols. This stop highlights the \`handler\` declaration.",
+        "endLine": 6,
+        "filePath": "src/feature/f23.ts",
+        "id": "<id>",
+        "startLine": 2,
+        "title": "handler",
+      },
+      {
+        "annotation": "**f33.ts** in \`src/feature\` — exports 5 symbols, imports from 1 module. This stop highlights the \`handler\` declaration.",
+        "endLine": 6,
+        "filePath": "src/feature/f33.ts",
+        "id": "<id>",
+        "startLine": 2,
+        "title": "handler",
+      },
+    ],
+    "updatedAt": "<time>",
+  },
+}
+`;
+
+exports[`generateTour ranking characterization > returns the pinned stop order for { repoKey: 'owner/repo', theme: 'hub' } 1`] = `
+{
+  "stopCount": 8,
+  "tour": {
+    "createdAt": "<time>",
+    "description": "A guided tour focused on hub in this codebase.",
+    "id": "<id>",
+    "name": "Hub Tour",
+    "repoKey": "owner/repo",
+    "stops": [
+      {
+        "annotation": "**index.ts** in \`src\` — exports 2 symbols, imports from 2 modules. This stop highlights the \`main\` declaration.",
+        "endLine": 4,
+        "filePath": "src/index.ts",
+        "id": "<id>",
+        "startLine": 3,
+        "title": "main",
+      },
+      {
+        "annotation": "**index.ts** in \`src/core\` — exports 2 symbols.",
+        "endLine": 2,
+        "filePath": "src/core/index.ts",
+        "id": "<id>",
+        "startLine": 1,
+        "title": "File overview",
+      },
+      {
+        "annotation": "**f4.ts** in \`src/feature\` — exports 7 symbols. This stop highlights the \`handler\` declaration.",
+        "endLine": 7,
+        "filePath": "src/feature/f4.ts",
+        "id": "<id>",
+        "startLine": 2,
+        "title": "handler",
+      },
+      {
+        "annotation": "**f19.ts** in \`src/feature\` — exports 7 symbols. This stop highlights the \`handler\` declaration.",
+        "endLine": 7,
+        "filePath": "src/feature/f19.ts",
+        "id": "<id>",
+        "startLine": 2,
+        "title": "handler",
+      },
+      {
+        "annotation": "**f34.ts** in \`src/feature\` — exports 7 symbols. This stop highlights the \`handler\` declaration.",
+        "endLine": 7,
+        "filePath": "src/feature/f34.ts",
+        "id": "<id>",
+        "startLine": 2,
+        "title": "handler",
+      },
+      {
+        "annotation": "**f9.ts** in \`src/feature\` — exports 6 symbols, imports from 1 module. This stop highlights the \`handler\` declaration.",
+        "endLine": 7,
+        "filePath": "src/feature/f9.ts",
+        "id": "<id>",
+        "startLine": 2,
+        "title": "handler",
+      },
+      {
+        "annotation": "**f13.ts** in \`src/feature\` — exports 6 symbols. This stop highlights the \`handler\` declaration.",
+        "endLine": 6,
+        "filePath": "src/feature/f13.ts",
+        "id": "<id>",
+        "startLine": 2,
+        "title": "handler",
+      },
+      {
+        "annotation": "**f14.ts** in \`src/feature\` — exports 6 symbols. This stop highlights the \`handler\` declaration.",
+        "endLine": 7,
+        "filePath": "src/feature/f14.ts",
+        "id": "<id>",
+        "startLine": 2,
+        "title": "handler",
+      },
+    ],
+    "updatedAt": "<time>",
+  },
+}
+`;
+
+exports[`generateTour ranking characterization > returns the pinned stop order for { repoKey: 'owner/repo', theme: 'nothing-matches-this' } 1`] = `
+{
+  "stopCount": 8,
+  "tour": {
+    "createdAt": "<time>",
+    "description": "A guided tour focused on nothing-matches-this in this codebase.",
+    "id": "<id>",
+    "name": "Nothing-matches-this Tour",
+    "repoKey": "owner/repo",
+    "stops": [
+      {
+        "annotation": "**index.ts** in \`src\` — exports 2 symbols, imports from 2 modules. This stop highlights the \`main\` declaration.",
+        "endLine": 4,
+        "filePath": "src/index.ts",
+        "id": "<id>",
+        "startLine": 3,
+        "title": "main",
+      },
+      {
+        "annotation": "**index.ts** in \`src/core\` — exports 2 symbols.",
+        "endLine": 2,
+        "filePath": "src/core/index.ts",
+        "id": "<id>",
+        "startLine": 1,
+        "title": "File overview",
+      },
+      {
+        "annotation": "**layout.tsx** in \`src/ui\` — exports 2 symbols, imports from 2 modules. This stop highlights the \`Layout\` declaration.",
+        "endLine": 4,
+        "filePath": "src/ui/layout.tsx",
+        "id": "<id>",
+        "startLine": 3,
+        "title": "Layout",
+      },
+      {
+        "annotation": "**config.ts** in \`src\` — exports 2 symbols. This stop highlights the \`Config\` declaration.",
+        "endLine": 2,
+        "filePath": "src/config.ts",
+        "id": "<id>",
+        "startLine": 1,
+        "title": "Config",
+      },
+      {
+        "annotation": "**main.ts** in \`app\` — exports 2 symbols. This stop highlights the \`boot\` declaration.",
+        "endLine": 2,
+        "filePath": "app/main.ts",
+        "id": "<id>",
+        "startLine": 1,
+        "title": "boot",
+      },
+      {
+        "annotation": "**page.tsx** in \`app\` — exports 1 symbol, imports from 1 module. This stop highlights the \`Page\` declaration.",
+        "endLine": 2,
+        "filePath": "app/page.tsx",
+        "id": "<id>",
+        "startLine": 2,
+        "title": "Page",
+      },
+      {
+        "annotation": "**README.md** in \`\\(root\\)\` — exports 1 symbol.",
+        "endLine": 2,
+        "filePath": "README.md",
+        "id": "<id>",
+        "startLine": 1,
+        "title": "File overview",
+      },
+      {
+        "annotation": "**hub.ts** in \`src/core\` — exports 5 symbols. This stop highlights the \`hub\` declaration.",
+        "endLine": 5,
+        "filePath": "src/core/hub.ts",
+        "id": "<id>",
+        "startLine": 1,
+        "title": "hub",
+      },
+    ],
+    "updatedAt": "<time>",
+  },
+}
+`;
+
+exports[`generateTour ranking characterization > returns the pinned stop order for { repoKey: 'owner/repo', theme: 'widget', maxStops: 4 } 1`] = `
+{
+  "stopCount": 4,
+  "tour": {
+    "createdAt": "<time>",
+    "description": "A guided tour focused on widget in this codebase.",
+    "id": "<id>",
+    "name": "Widget Tour",
+    "repoKey": "owner/repo",
+    "stops": [
+      {
+        "annotation": "**index.ts** in \`src\` — exports 2 symbols, imports from 2 modules. This stop highlights the \`main\` declaration.",
+        "endLine": 4,
+        "filePath": "src/index.ts",
+        "id": "<id>",
+        "startLine": 3,
+        "title": "main",
+      },
+      {
+        "annotation": "**layout.tsx** in \`src/ui\` — exports 2 symbols, imports from 2 modules. This stop highlights the \`Layout\` declaration.",
+        "endLine": 4,
+        "filePath": "src/ui/layout.tsx",
+        "id": "<id>",
+        "startLine": 3,
+        "title": "Layout",
+      },
+      {
+        "annotation": "**hub.ts** in \`src/core\` — exports 5 symbols. This stop highlights the \`hub\` declaration.",
+        "endLine": 5,
+        "filePath": "src/core/hub.ts",
+        "id": "<id>",
+        "startLine": 1,
+        "title": "hub",
+      },
+      {
+        "annotation": "**widget.tsx** in \`src/ui\` — exports 3 symbols, imports from 1 module. This stop highlights the \`Widget\` declaration.",
+        "endLine": 4,
+        "filePath": "src/ui/widget.tsx",
+        "id": "<id>",
+        "startLine": 2,
+        "title": "Widget",
+      },
+    ],
+    "updatedAt": "<time>",
+  },
+}
+`;

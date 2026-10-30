@@ -1,0 +1,1966 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`analyzeCodebase golden output > matches the stored reference digest for the full corpus 1`] = `
+{
+  "circular": [
+    [
+      "src/store.ts",
+      "src/format.ts",
+    ],
+  ],
+  "detectedFramework": "Next.js",
+  "edgeCount": 288,
+  "externalDeps": [
+    [
+      "next",
+      [
+        "app/dashboard/page.tsx",
+      ],
+    ],
+    [
+      "react",
+      [
+        "components/header.tsx",
+      ],
+    ],
+    [
+      "clsx",
+      [
+        "lib/utils.ts",
+      ],
+    ],
+    [
+      "tailwind-merge",
+      [
+        "lib/utils.ts",
+      ],
+    ],
+    [
+      "zustand",
+      [
+        "src/store.ts",
+      ],
+    ],
+    [
+      "path",
+      [
+        "src/legacy.js",
+      ],
+    ],
+    [
+      "flask",
+      [
+        "server/app.py",
+      ],
+    ],
+    [
+      "os",
+      [
+        "server/app.py",
+      ],
+    ],
+    [
+      "json",
+      [
+        "server/app.py",
+      ],
+    ],
+    [
+      "fmt",
+      [
+        "cmd/main.go",
+      ],
+    ],
+    [
+      "github.com",
+      [
+        "cmd/main.go",
+      ],
+    ],
+    [
+      "net",
+      [
+        "internal/api/api.go",
+      ],
+    ],
+    [
+      "lodash",
+      [
+        "src/gen/mod0.ts",
+        "src/gen/mod11.ts",
+        "src/gen/mod22.ts",
+        "src/gen/mod33.ts",
+        "src/gen/mod44.ts",
+        "src/gen/mod55.ts",
+        "src/gen/mod66.ts",
+        "src/gen/mod77.ts",
+        "src/gen/mod88.ts",
+        "src/gen/mod99.ts",
+        "src/gen/mod110.ts",
+        "src/gen/mod121.ts",
+      ],
+    ],
+  ],
+  "fileOrder": [
+    "app/dashboard/page.tsx",
+    "components/header.tsx",
+    "components/ui/button.tsx",
+    "components/ui/index.ts",
+    "lib/utils.ts",
+    "src/store.ts",
+    "src/format.ts",
+    "src/models/user.ts",
+    "src/legacy.js",
+    "src/helper.js",
+    "server/app.py",
+    "server/services/user_service.py",
+    "server/services/__init__.py",
+    "server/models.py",
+    "cmd/main.go",
+    "internal/api/api.go",
+    "README.md",
+    "package.json",
+    "src/gen/mod0.ts",
+    "src/gen/mod1.ts",
+    "src/gen/mod2.ts",
+    "src/gen/mod3.ts",
+    "src/gen/mod4.ts",
+    "src/gen/mod5.ts",
+    "src/gen/mod6.ts",
+    "src/gen/mod7.ts",
+    "src/gen/mod8.ts",
+    "src/gen/mod9.ts",
+    "src/gen/mod10.ts",
+    "src/gen/mod11.ts",
+    "src/gen/mod12.ts",
+    "src/gen/mod13.ts",
+    "src/gen/mod14.ts",
+    "src/gen/mod15.ts",
+    "src/gen/mod16.ts",
+    "src/gen/mod17.ts",
+    "src/gen/mod18.ts",
+    "src/gen/mod19.ts",
+    "src/gen/mod20.ts",
+    "src/gen/mod21.ts",
+    "src/gen/mod22.ts",
+    "src/gen/mod23.ts",
+    "src/gen/mod24.ts",
+    "src/gen/mod25.ts",
+    "src/gen/mod26.ts",
+    "src/gen/mod27.ts",
+    "src/gen/mod28.ts",
+    "src/gen/mod29.ts",
+    "src/gen/mod30.ts",
+    "src/gen/mod31.ts",
+    "src/gen/mod32.ts",
+    "src/gen/mod33.ts",
+    "src/gen/mod34.ts",
+    "src/gen/mod35.ts",
+    "src/gen/mod36.ts",
+    "src/gen/mod37.ts",
+    "src/gen/mod38.ts",
+    "src/gen/mod39.ts",
+    "src/gen/mod40.ts",
+    "src/gen/mod41.ts",
+    "src/gen/mod42.ts",
+    "src/gen/mod43.ts",
+    "src/gen/mod44.ts",
+    "src/gen/mod45.ts",
+    "src/gen/mod46.ts",
+    "src/gen/mod47.ts",
+    "src/gen/mod48.ts",
+    "src/gen/mod49.ts",
+    "src/gen/mod50.ts",
+    "src/gen/mod51.ts",
+    "src/gen/mod52.ts",
+    "src/gen/mod53.ts",
+    "src/gen/mod54.ts",
+    "src/gen/mod55.ts",
+    "src/gen/mod56.ts",
+    "src/gen/mod57.ts",
+    "src/gen/mod58.ts",
+    "src/gen/mod59.ts",
+    "src/gen/mod60.ts",
+    "src/gen/mod61.ts",
+    "src/gen/mod62.ts",
+    "src/gen/mod63.ts",
+    "src/gen/mod64.ts",
+    "src/gen/mod65.ts",
+    "src/gen/mod66.ts",
+    "src/gen/mod67.ts",
+    "src/gen/mod68.ts",
+    "src/gen/mod69.ts",
+    "src/gen/mod70.ts",
+    "src/gen/mod71.ts",
+    "src/gen/mod72.ts",
+    "src/gen/mod73.ts",
+    "src/gen/mod74.ts",
+    "src/gen/mod75.ts",
+    "src/gen/mod76.ts",
+    "src/gen/mod77.ts",
+    "src/gen/mod78.ts",
+    "src/gen/mod79.ts",
+    "src/gen/mod80.ts",
+    "src/gen/mod81.ts",
+    "src/gen/mod82.ts",
+    "src/gen/mod83.ts",
+    "src/gen/mod84.ts",
+    "src/gen/mod85.ts",
+    "src/gen/mod86.ts",
+    "src/gen/mod87.ts",
+    "src/gen/mod88.ts",
+    "src/gen/mod89.ts",
+    "src/gen/mod90.ts",
+    "src/gen/mod91.ts",
+    "src/gen/mod92.ts",
+    "src/gen/mod93.ts",
+    "src/gen/mod94.ts",
+    "src/gen/mod95.ts",
+    "src/gen/mod96.ts",
+    "src/gen/mod97.ts",
+    "src/gen/mod98.ts",
+    "src/gen/mod99.ts",
+    "src/gen/mod100.ts",
+    "src/gen/mod101.ts",
+    "src/gen/mod102.ts",
+    "src/gen/mod103.ts",
+    "src/gen/mod104.ts",
+    "src/gen/mod105.ts",
+    "src/gen/mod106.ts",
+    "src/gen/mod107.ts",
+    "src/gen/mod108.ts",
+    "src/gen/mod109.ts",
+    "src/gen/mod110.ts",
+    "src/gen/mod111.ts",
+    "src/gen/mod112.ts",
+    "src/gen/mod113.ts",
+    "src/gen/mod114.ts",
+    "src/gen/mod115.ts",
+    "src/gen/mod116.ts",
+    "src/gen/mod117.ts",
+    "src/gen/mod118.ts",
+    "src/gen/mod119.ts",
+    "src/gen/mod120.ts",
+    "src/gen/mod121.ts",
+    "src/gen/mod122.ts",
+    "src/gen/mod123.ts",
+    "src/gen/mod124.ts",
+    "src/gen/mod125.ts",
+    "src/gen/mod126.ts",
+    "src/gen/mod127.ts",
+    "src/gen/mod128.ts",
+    "src/gen/mod129.ts",
+  ],
+  "primaryLanguage": "typescript",
+  "topology": {
+    "clusters": [
+      [
+        "app/dashboard/page.tsx",
+        "components/header.tsx",
+        "components/ui/button.tsx",
+        "components/ui/index.ts",
+        "lib/utils.ts",
+        "src/store.ts",
+        "src/format.ts",
+        "src/models/user.ts",
+        "src/gen/mod0.ts",
+        "src/gen/mod1.ts",
+        "src/gen/mod2.ts",
+        "src/gen/mod3.ts",
+        "src/gen/mod4.ts",
+        "src/gen/mod5.ts",
+        "src/gen/mod6.ts",
+        "src/gen/mod7.ts",
+        "src/gen/mod8.ts",
+        "src/gen/mod9.ts",
+        "src/gen/mod10.ts",
+        "src/gen/mod11.ts",
+        "src/gen/mod12.ts",
+        "src/gen/mod13.ts",
+        "src/gen/mod14.ts",
+        "src/gen/mod15.ts",
+        "src/gen/mod16.ts",
+        "src/gen/mod17.ts",
+        "src/gen/mod18.ts",
+        "src/gen/mod19.ts",
+        "src/gen/mod20.ts",
+        "src/gen/mod21.ts",
+        "src/gen/mod22.ts",
+        "src/gen/mod23.ts",
+        "src/gen/mod24.ts",
+        "src/gen/mod25.ts",
+        "src/gen/mod26.ts",
+        "src/gen/mod27.ts",
+        "src/gen/mod28.ts",
+        "src/gen/mod29.ts",
+        "src/gen/mod30.ts",
+        "src/gen/mod31.ts",
+        "src/gen/mod32.ts",
+        "src/gen/mod33.ts",
+        "src/gen/mod34.ts",
+        "src/gen/mod35.ts",
+        "src/gen/mod36.ts",
+        "src/gen/mod37.ts",
+        "src/gen/mod38.ts",
+        "src/gen/mod39.ts",
+        "src/gen/mod40.ts",
+        "src/gen/mod41.ts",
+        "src/gen/mod42.ts",
+        "src/gen/mod43.ts",
+        "src/gen/mod44.ts",
+        "src/gen/mod45.ts",
+        "src/gen/mod46.ts",
+        "src/gen/mod47.ts",
+        "src/gen/mod48.ts",
+        "src/gen/mod49.ts",
+        "src/gen/mod50.ts",
+        "src/gen/mod51.ts",
+        "src/gen/mod52.ts",
+        "src/gen/mod53.ts",
+        "src/gen/mod54.ts",
+        "src/gen/mod55.ts",
+        "src/gen/mod56.ts",
+        "src/gen/mod57.ts",
+        "src/gen/mod58.ts",
+        "src/gen/mod59.ts",
+        "src/gen/mod60.ts",
+        "src/gen/mod61.ts",
+        "src/gen/mod62.ts",
+        "src/gen/mod63.ts",
+        "src/gen/mod64.ts",
+        "src/gen/mod65.ts",
+        "src/gen/mod66.ts",
+        "src/gen/mod67.ts",
+        "src/gen/mod68.ts",
+        "src/gen/mod69.ts",
+        "src/gen/mod70.ts",
+        "src/gen/mod71.ts",
+        "src/gen/mod72.ts",
+        "src/gen/mod73.ts",
+        "src/gen/mod74.ts",
+        "src/gen/mod75.ts",
+        "src/gen/mod76.ts",
+        "src/gen/mod77.ts",
+        "src/gen/mod78.ts",
+        "src/gen/mod79.ts",
+        "src/gen/mod80.ts",
+        "src/gen/mod81.ts",
+        "src/gen/mod82.ts",
+        "src/gen/mod83.ts",
+        "src/gen/mod84.ts",
+        "src/gen/mod85.ts",
+        "src/gen/mod86.ts",
+        "src/gen/mod87.ts",
+        "src/gen/mod88.ts",
+        "src/gen/mod89.ts",
+        "src/gen/mod90.ts",
+        "src/gen/mod91.ts",
+        "src/gen/mod92.ts",
+        "src/gen/mod93.ts",
+        "src/gen/mod94.ts",
+        "src/gen/mod95.ts",
+        "src/gen/mod96.ts",
+        "src/gen/mod97.ts",
+        "src/gen/mod98.ts",
+        "src/gen/mod99.ts",
+        "src/gen/mod100.ts",
+        "src/gen/mod101.ts",
+        "src/gen/mod102.ts",
+        "src/gen/mod103.ts",
+        "src/gen/mod104.ts",
+        "src/gen/mod105.ts",
+        "src/gen/mod106.ts",
+        "src/gen/mod107.ts",
+        "src/gen/mod108.ts",
+        "src/gen/mod109.ts",
+        "src/gen/mod110.ts",
+        "src/gen/mod111.ts",
+        "src/gen/mod112.ts",
+        "src/gen/mod113.ts",
+        "src/gen/mod114.ts",
+        "src/gen/mod115.ts",
+        "src/gen/mod116.ts",
+        "src/gen/mod117.ts",
+        "src/gen/mod118.ts",
+        "src/gen/mod119.ts",
+        "src/gen/mod120.ts",
+        "src/gen/mod121.ts",
+        "src/gen/mod122.ts",
+        "src/gen/mod123.ts",
+        "src/gen/mod124.ts",
+        "src/gen/mod125.ts",
+        "src/gen/mod126.ts",
+        "src/gen/mod127.ts",
+        "src/gen/mod128.ts",
+        "src/gen/mod129.ts",
+      ],
+      [
+        "src/legacy.js",
+        "src/helper.js",
+      ],
+    ],
+    "connectors": [
+      "components/header.tsx",
+      "src/store.ts",
+      "app/dashboard/page.tsx",
+    ],
+    "depthMap": [
+      [
+        "components/header.tsx",
+        4,
+      ],
+      [
+        "src/store.ts",
+        1,
+      ],
+      [
+        "components/ui/button.tsx",
+        5,
+      ],
+      [
+        "src/models/user.ts",
+        2,
+      ],
+      [
+        "src/format.ts",
+        2,
+      ],
+      [
+        "lib/utils.ts",
+        3,
+      ],
+      [
+        "src/gen/mod128.ts",
+        1,
+      ],
+      [
+        "src/gen/mod127.ts",
+        2,
+      ],
+      [
+        "src/gen/mod126.ts",
+        3,
+      ],
+      [
+        "src/gen/mod125.ts",
+        4,
+      ],
+      [
+        "src/gen/mod124.ts",
+        5,
+      ],
+      [
+        "src/gen/mod123.ts",
+        6,
+      ],
+      [
+        "src/gen/mod122.ts",
+        7,
+      ],
+      [
+        "src/gen/mod121.ts",
+        8,
+      ],
+      [
+        "src/gen/mod120.ts",
+        9,
+      ],
+      [
+        "src/gen/mod119.ts",
+        10,
+      ],
+      [
+        "src/gen/mod118.ts",
+        11,
+      ],
+      [
+        "src/gen/mod117.ts",
+        12,
+      ],
+      [
+        "src/gen/mod116.ts",
+        13,
+      ],
+      [
+        "src/gen/mod115.ts",
+        14,
+      ],
+      [
+        "src/gen/mod114.ts",
+        15,
+      ],
+      [
+        "src/gen/mod113.ts",
+        16,
+      ],
+      [
+        "src/gen/mod112.ts",
+        17,
+      ],
+      [
+        "src/gen/mod111.ts",
+        18,
+      ],
+      [
+        "src/gen/mod110.ts",
+        19,
+      ],
+      [
+        "src/gen/mod109.ts",
+        20,
+      ],
+      [
+        "src/gen/mod108.ts",
+        21,
+      ],
+      [
+        "src/gen/mod107.ts",
+        22,
+      ],
+      [
+        "src/gen/mod106.ts",
+        23,
+      ],
+      [
+        "src/gen/mod105.ts",
+        24,
+      ],
+      [
+        "src/gen/mod104.ts",
+        25,
+      ],
+      [
+        "src/gen/mod103.ts",
+        26,
+      ],
+      [
+        "src/gen/mod102.ts",
+        27,
+      ],
+      [
+        "src/gen/mod101.ts",
+        28,
+      ],
+      [
+        "src/gen/mod100.ts",
+        29,
+      ],
+      [
+        "src/gen/mod99.ts",
+        30,
+      ],
+      [
+        "src/gen/mod98.ts",
+        31,
+      ],
+      [
+        "src/gen/mod97.ts",
+        32,
+      ],
+      [
+        "src/gen/mod96.ts",
+        33,
+      ],
+      [
+        "src/gen/mod95.ts",
+        34,
+      ],
+      [
+        "src/gen/mod94.ts",
+        35,
+      ],
+      [
+        "src/gen/mod93.ts",
+        36,
+      ],
+      [
+        "src/gen/mod92.ts",
+        37,
+      ],
+      [
+        "src/gen/mod91.ts",
+        38,
+      ],
+      [
+        "src/gen/mod90.ts",
+        39,
+      ],
+      [
+        "src/gen/mod89.ts",
+        40,
+      ],
+      [
+        "src/gen/mod88.ts",
+        41,
+      ],
+      [
+        "src/gen/mod87.ts",
+        42,
+      ],
+      [
+        "src/gen/mod86.ts",
+        43,
+      ],
+      [
+        "src/gen/mod85.ts",
+        44,
+      ],
+      [
+        "src/gen/mod84.ts",
+        45,
+      ],
+      [
+        "src/gen/mod83.ts",
+        46,
+      ],
+      [
+        "src/gen/mod82.ts",
+        47,
+      ],
+      [
+        "src/gen/mod81.ts",
+        48,
+      ],
+      [
+        "src/gen/mod80.ts",
+        49,
+      ],
+      [
+        "src/gen/mod79.ts",
+        50,
+      ],
+      [
+        "src/gen/mod78.ts",
+        51,
+      ],
+      [
+        "src/gen/mod77.ts",
+        52,
+      ],
+      [
+        "src/gen/mod76.ts",
+        53,
+      ],
+      [
+        "src/gen/mod75.ts",
+        54,
+      ],
+      [
+        "src/gen/mod74.ts",
+        55,
+      ],
+      [
+        "src/gen/mod73.ts",
+        56,
+      ],
+      [
+        "src/gen/mod72.ts",
+        57,
+      ],
+      [
+        "src/gen/mod71.ts",
+        58,
+      ],
+      [
+        "src/gen/mod70.ts",
+        59,
+      ],
+      [
+        "src/gen/mod69.ts",
+        60,
+      ],
+      [
+        "src/gen/mod68.ts",
+        61,
+      ],
+      [
+        "src/gen/mod67.ts",
+        62,
+      ],
+      [
+        "src/gen/mod66.ts",
+        63,
+      ],
+      [
+        "src/gen/mod65.ts",
+        64,
+      ],
+      [
+        "src/gen/mod64.ts",
+        65,
+      ],
+      [
+        "src/gen/mod63.ts",
+        66,
+      ],
+      [
+        "src/gen/mod62.ts",
+        67,
+      ],
+      [
+        "src/gen/mod61.ts",
+        68,
+      ],
+      [
+        "src/gen/mod60.ts",
+        69,
+      ],
+      [
+        "src/gen/mod59.ts",
+        70,
+      ],
+      [
+        "src/gen/mod58.ts",
+        71,
+      ],
+      [
+        "src/gen/mod57.ts",
+        72,
+      ],
+      [
+        "src/gen/mod56.ts",
+        73,
+      ],
+      [
+        "src/gen/mod55.ts",
+        74,
+      ],
+      [
+        "src/gen/mod54.ts",
+        75,
+      ],
+      [
+        "src/gen/mod53.ts",
+        76,
+      ],
+      [
+        "src/gen/mod52.ts",
+        77,
+      ],
+      [
+        "src/gen/mod51.ts",
+        78,
+      ],
+      [
+        "src/gen/mod50.ts",
+        79,
+      ],
+      [
+        "src/gen/mod49.ts",
+        80,
+      ],
+      [
+        "src/gen/mod48.ts",
+        81,
+      ],
+      [
+        "src/gen/mod47.ts",
+        82,
+      ],
+      [
+        "src/gen/mod46.ts",
+        83,
+      ],
+      [
+        "src/gen/mod45.ts",
+        84,
+      ],
+      [
+        "src/gen/mod44.ts",
+        85,
+      ],
+      [
+        "src/gen/mod43.ts",
+        86,
+      ],
+      [
+        "src/gen/mod42.ts",
+        87,
+      ],
+      [
+        "src/gen/mod41.ts",
+        88,
+      ],
+      [
+        "src/gen/mod40.ts",
+        89,
+      ],
+      [
+        "src/gen/mod39.ts",
+        90,
+      ],
+      [
+        "src/gen/mod38.ts",
+        91,
+      ],
+      [
+        "src/gen/mod37.ts",
+        92,
+      ],
+      [
+        "src/gen/mod36.ts",
+        93,
+      ],
+      [
+        "src/gen/mod35.ts",
+        94,
+      ],
+      [
+        "src/gen/mod34.ts",
+        95,
+      ],
+      [
+        "src/gen/mod33.ts",
+        96,
+      ],
+      [
+        "src/gen/mod32.ts",
+        97,
+      ],
+      [
+        "src/gen/mod31.ts",
+        98,
+      ],
+      [
+        "src/gen/mod30.ts",
+        99,
+      ],
+      [
+        "src/gen/mod29.ts",
+        100,
+      ],
+      [
+        "src/gen/mod28.ts",
+        101,
+      ],
+      [
+        "src/gen/mod27.ts",
+        102,
+      ],
+      [
+        "src/gen/mod26.ts",
+        103,
+      ],
+      [
+        "src/gen/mod25.ts",
+        104,
+      ],
+      [
+        "src/gen/mod24.ts",
+        105,
+      ],
+      [
+        "src/gen/mod23.ts",
+        106,
+      ],
+      [
+        "src/gen/mod22.ts",
+        107,
+      ],
+      [
+        "src/gen/mod21.ts",
+        108,
+      ],
+      [
+        "src/gen/mod20.ts",
+        109,
+      ],
+      [
+        "src/gen/mod19.ts",
+        110,
+      ],
+      [
+        "src/gen/mod18.ts",
+        111,
+      ],
+      [
+        "src/gen/mod17.ts",
+        112,
+      ],
+      [
+        "src/gen/mod16.ts",
+        113,
+      ],
+      [
+        "src/gen/mod15.ts",
+        114,
+      ],
+      [
+        "src/gen/mod14.ts",
+        115,
+      ],
+      [
+        "src/gen/mod13.ts",
+        116,
+      ],
+      [
+        "src/gen/mod12.ts",
+        117,
+      ],
+      [
+        "src/gen/mod11.ts",
+        118,
+      ],
+      [
+        "src/gen/mod10.ts",
+        119,
+      ],
+      [
+        "src/gen/mod9.ts",
+        120,
+      ],
+      [
+        "src/gen/mod8.ts",
+        121,
+      ],
+      [
+        "src/gen/mod7.ts",
+        122,
+      ],
+      [
+        "src/gen/mod6.ts",
+        123,
+      ],
+      [
+        "src/gen/mod5.ts",
+        124,
+      ],
+      [
+        "src/gen/mod4.ts",
+        125,
+      ],
+      [
+        "src/gen/mod3.ts",
+        126,
+      ],
+      [
+        "src/gen/mod2.ts",
+        127,
+      ],
+      [
+        "src/gen/mod1.ts",
+        128,
+      ],
+      [
+        "src/gen/mod0.ts",
+        129,
+      ],
+      [
+        "src/helper.js",
+        1,
+      ],
+    ],
+    "entryPoints": [
+      "app/dashboard/page.tsx",
+      "components/ui/index.ts",
+      "src/gen/mod129.ts",
+      "src/legacy.js",
+    ],
+    "hubs": [
+      "lib/utils.ts",
+      "components/header.tsx",
+      "components/ui/button.tsx",
+      "src/store.ts",
+    ],
+    "leafNodes": [
+      "lib/utils.ts",
+      "src/models/user.ts",
+      "src/helper.js",
+    ],
+    "maxDepth": 129,
+    "orphans": [
+      "server/app.py",
+      "server/services/user_service.py",
+      "server/services/__init__.py",
+      "server/models.py",
+      "cmd/main.go",
+      "internal/api/api.go",
+      "README.md",
+      "package.json",
+    ],
+  },
+}
+`;
+
+exports[`analyzeCodebase golden output > matches the stored reference for the core corpus 1`] = `
+{
+  "detectedFramework": "Next.js",
+  "files": [
+    [
+      "app/dashboard/page.tsx",
+      {
+        "classes": [],
+        "exports": [
+          {
+            "isDefault": true,
+            "kind": "component",
+            "name": "DashboardPage",
+          },
+        ],
+        "imports": [
+          {
+            "isDefault": false,
+            "isExternal": false,
+            "resolvedPath": "components/header.tsx",
+            "source": "@/components/header",
+            "specifiers": [
+              "Header",
+            ],
+          },
+          {
+            "isDefault": false,
+            "isExternal": false,
+            "resolvedPath": "src/store.ts",
+            "source": "../../src/store",
+            "specifiers": [
+              "useStore",
+            ],
+          },
+          {
+            "isDefault": true,
+            "isExternal": true,
+            "resolvedPath": null,
+            "source": "next/link",
+            "specifiers": [
+              "Link",
+            ],
+          },
+        ],
+        "jsxComponents": [
+          "Header",
+          "Link",
+        ],
+        "language": "typescript",
+        "path": "app/dashboard/page.tsx",
+        "types": [],
+      },
+    ],
+    [
+      "components/header.tsx",
+      {
+        "classes": [],
+        "exports": [
+          {
+            "isDefault": false,
+            "kind": "interface",
+            "name": "HeaderProps",
+          },
+          {
+            "isDefault": false,
+            "kind": "component",
+            "name": "Header",
+          },
+        ],
+        "imports": [
+          {
+            "isDefault": true,
+            "isExternal": true,
+            "resolvedPath": null,
+            "source": "react",
+            "specifiers": [
+              "React",
+            ],
+          },
+          {
+            "isDefault": false,
+            "isExternal": false,
+            "resolvedPath": "components/ui/button.tsx",
+            "source": "./ui/button",
+            "specifiers": [
+              "Button",
+            ],
+          },
+        ],
+        "jsxComponents": [
+          "Button",
+        ],
+        "language": "typescript",
+        "path": "components/header.tsx",
+        "types": [
+          {
+            "exported": false,
+            "extends": undefined,
+            "kind": "interface",
+            "name": "HeaderProps",
+            "properties": [
+              "title: string; subtitle?: string",
+            ],
+          },
+        ],
+      },
+    ],
+    [
+      "components/ui/button.tsx",
+      {
+        "classes": [],
+        "exports": [
+          {
+            "isDefault": false,
+            "kind": "type",
+            "name": "ButtonVariant",
+          },
+          {
+            "isDefault": false,
+            "kind": "component",
+            "name": "Button",
+          },
+        ],
+        "imports": [
+          {
+            "isDefault": false,
+            "isExternal": false,
+            "resolvedPath": "lib/utils.ts",
+            "source": "@/lib/utils",
+            "specifiers": [
+              "cn",
+            ],
+          },
+        ],
+        "jsxComponents": [],
+        "language": "typescript",
+        "path": "components/ui/button.tsx",
+        "types": [
+          {
+            "exported": false,
+            "kind": "type",
+            "name": "ButtonVariant",
+            "properties": [
+              ""primary"",
+              ""ghost"
+export const Button = ({ label }: { label: string }) => <button className={cn(label)}>{label}</button>",
+            ],
+          },
+        ],
+      },
+    ],
+    [
+      "components/ui/index.ts",
+      {
+        "classes": [],
+        "exports": [],
+        "imports": [
+          {
+            "isDefault": false,
+            "isExternal": false,
+            "resolvedPath": "components/ui/button.tsx",
+            "source": "./button",
+            "specifiers": [],
+          },
+          {
+            "isDefault": false,
+            "isExternal": false,
+            "resolvedPath": "components/header.tsx",
+            "source": "../header",
+            "specifiers": [],
+          },
+        ],
+        "jsxComponents": [],
+        "language": "typescript",
+        "path": "components/ui/index.ts",
+        "types": [],
+      },
+    ],
+    [
+      "lib/utils.ts",
+      {
+        "classes": [],
+        "exports": [
+          {
+            "isDefault": false,
+            "kind": "function",
+            "name": "cn",
+          },
+          {
+            "isDefault": false,
+            "kind": "component",
+            "name": "VERSION",
+          },
+          {
+            "isDefault": false,
+            "kind": "enum",
+            "name": "Mode",
+          },
+        ],
+        "imports": [
+          {
+            "isDefault": false,
+            "isExternal": true,
+            "resolvedPath": null,
+            "source": "clsx",
+            "specifiers": [
+              "clsx",
+            ],
+          },
+          {
+            "isDefault": false,
+            "isExternal": true,
+            "resolvedPath": null,
+            "source": "tailwind-merge",
+            "specifiers": [
+              "twMerge",
+            ],
+          },
+        ],
+        "jsxComponents": [],
+        "language": "typescript",
+        "path": "lib/utils.ts",
+        "types": [
+          {
+            "exported": false,
+            "kind": "enum",
+            "name": "Mode",
+            "properties": [
+              "Light",
+              "Dark",
+            ],
+          },
+        ],
+      },
+    ],
+    [
+      "src/store.ts",
+      {
+        "classes": [],
+        "exports": [
+          {
+            "isDefault": false,
+            "kind": "interface",
+            "name": "StoreState",
+          },
+          {
+            "isDefault": false,
+            "kind": "variable",
+            "name": "useStore",
+          },
+        ],
+        "imports": [
+          {
+            "isDefault": false,
+            "isExternal": true,
+            "resolvedPath": null,
+            "source": "zustand",
+            "specifiers": [
+              "create",
+            ],
+          },
+          {
+            "isDefault": false,
+            "isExternal": false,
+            "resolvedPath": "src/models/user.ts",
+            "source": "./models/user",
+            "specifiers": [
+              "User",
+            ],
+          },
+          {
+            "isDefault": false,
+            "isExternal": false,
+            "resolvedPath": "src/format.ts",
+            "source": "./format",
+            "specifiers": [
+              "formatUser",
+            ],
+          },
+        ],
+        "jsxComponents": [
+          "StoreState",
+        ],
+        "language": "typescript",
+        "path": "src/store.ts",
+        "types": [
+          {
+            "exported": false,
+            "extends": undefined,
+            "kind": "interface",
+            "name": "StoreState",
+            "properties": [
+              "title: string; user?: User",
+            ],
+          },
+        ],
+      },
+    ],
+    [
+      "src/format.ts",
+      {
+        "classes": [],
+        "exports": [
+          {
+            "isDefault": false,
+            "kind": "function",
+            "name": "formatUser",
+          },
+        ],
+        "imports": [
+          {
+            "isDefault": false,
+            "isExternal": false,
+            "resolvedPath": "src/store.ts",
+            "source": "./store",
+            "specifiers": [
+              "useStore",
+            ],
+          },
+          {
+            "isDefault": false,
+            "isExternal": false,
+            "resolvedPath": null,
+            "source": "./not-yet-there",
+            "specifiers": [
+              "missing",
+            ],
+          },
+        ],
+        "jsxComponents": [],
+        "language": "typescript",
+        "path": "src/format.ts",
+        "types": [],
+      },
+    ],
+    [
+      "src/models/user.ts",
+      {
+        "classes": [],
+        "exports": [
+          {
+            "isDefault": false,
+            "kind": "interface",
+            "name": "User",
+          },
+          {
+            "isDefault": false,
+            "kind": "class",
+            "name": "UserRepository",
+          },
+        ],
+        "imports": [],
+        "jsxComponents": [
+          "User",
+        ],
+        "language": "typescript",
+        "path": "src/models/user.ts",
+        "types": [
+          {
+            "exported": false,
+            "extends": [
+              "Base",
+            ],
+            "kind": "interface",
+            "name": "User",
+            "properties": [
+              "id: string; name: string",
+            ],
+          },
+          {
+            "exported": false,
+            "extends": undefined,
+            "kind": "interface",
+            "name": "Base",
+            "properties": [
+              "createdAt: number",
+            ],
+          },
+        ],
+      },
+    ],
+    [
+      "src/legacy.js",
+      {
+        "classes": [],
+        "exports": [],
+        "imports": [
+          {
+            "isDefault": true,
+            "isExternal": true,
+            "resolvedPath": null,
+            "source": "path",
+            "specifiers": [
+              "path",
+            ],
+          },
+          {
+            "isDefault": true,
+            "isExternal": false,
+            "resolvedPath": "src/helper.js",
+            "source": "./helper",
+            "specifiers": [
+              "helper",
+            ],
+          },
+        ],
+        "jsxComponents": [],
+        "language": "javascript",
+        "path": "src/legacy.js",
+        "types": [],
+      },
+    ],
+    [
+      "src/helper.js",
+      {
+        "classes": [],
+        "exports": [
+          {
+            "isDefault": true,
+            "kind": "function",
+            "name": "helper",
+          },
+        ],
+        "imports": [],
+        "jsxComponents": [],
+        "language": "javascript",
+        "path": "src/helper.js",
+        "types": [],
+      },
+    ],
+    [
+      "server/app.py",
+      {
+        "classes": [
+          {
+            "exported": true,
+            "extends": undefined,
+            "implements": undefined,
+            "methods": [
+              "create",
+            ],
+            "name": "AppFactory",
+            "properties": [],
+          },
+        ],
+        "exports": [
+          {
+            "isDefault": false,
+            "kind": "class",
+            "name": "AppFactory",
+          },
+        ],
+        "imports": [
+          {
+            "isDefault": false,
+            "isExternal": true,
+            "resolvedPath": null,
+            "source": "flask",
+            "specifiers": [
+              "Flask",
+            ],
+          },
+          {
+            "isDefault": false,
+            "isExternal": false,
+            "resolvedPath": null,
+            "source": ".services",
+            "specifiers": [
+              "user_service",
+            ],
+          },
+          {
+            "isDefault": false,
+            "isExternal": true,
+            "resolvedPath": null,
+            "source": "os",
+            "specifiers": [
+              "os",
+            ],
+          },
+          {
+            "isDefault": false,
+            "isExternal": true,
+            "resolvedPath": null,
+            "source": "json",
+            "specifiers": [
+              "json",
+            ],
+          },
+        ],
+        "jsxComponents": [],
+        "language": "python",
+        "path": "server/app.py",
+        "types": [],
+      },
+    ],
+    [
+      "server/services/user_service.py",
+      {
+        "classes": [
+          {
+            "exported": true,
+            "extends": undefined,
+            "implements": undefined,
+            "methods": [
+              "get",
+            ],
+            "name": "UserService",
+            "properties": [],
+          },
+        ],
+        "exports": [
+          {
+            "isDefault": false,
+            "kind": "class",
+            "name": "UserService",
+          },
+        ],
+        "imports": [
+          {
+            "isDefault": false,
+            "isExternal": false,
+            "resolvedPath": null,
+            "source": "..models",
+            "specifiers": [
+              "User",
+            ],
+          },
+        ],
+        "jsxComponents": [],
+        "language": "python",
+        "path": "server/services/user_service.py",
+        "types": [],
+      },
+    ],
+    [
+      "server/services/__init__.py",
+      {
+        "classes": [],
+        "exports": [],
+        "imports": [
+          {
+            "isDefault": false,
+            "isExternal": false,
+            "resolvedPath": null,
+            "source": ".",
+            "specifiers": [
+              "user_service",
+            ],
+          },
+        ],
+        "jsxComponents": [],
+        "language": "python",
+        "path": "server/services/__init__.py",
+        "types": [],
+      },
+    ],
+    [
+      "server/models.py",
+      {
+        "classes": [
+          {
+            "exported": true,
+            "extends": undefined,
+            "implements": undefined,
+            "methods": [],
+            "name": "User",
+            "properties": [],
+          },
+        ],
+        "exports": [
+          {
+            "isDefault": false,
+            "kind": "class",
+            "name": "User",
+          },
+        ],
+        "imports": [],
+        "jsxComponents": [],
+        "language": "python",
+        "path": "server/models.py",
+        "types": [],
+      },
+    ],
+    [
+      "cmd/main.go",
+      {
+        "classes": [],
+        "exports": [],
+        "imports": [
+          {
+            "isDefault": false,
+            "isExternal": true,
+            "resolvedPath": null,
+            "source": "fmt",
+            "specifiers": [
+              "fmt",
+            ],
+          },
+          {
+            "isDefault": false,
+            "isExternal": true,
+            "resolvedPath": null,
+            "source": "github.com/acme/app/internal/api",
+            "specifiers": [
+              "api",
+            ],
+          },
+        ],
+        "jsxComponents": [],
+        "language": "go",
+        "path": "cmd/main.go",
+        "types": [
+          {
+            "exported": true,
+            "kind": "interface",
+            "name": "Server",
+            "properties": [
+              "Port int",
+            ],
+          },
+        ],
+      },
+    ],
+    [
+      "internal/api/api.go",
+      {
+        "classes": [],
+        "exports": [],
+        "imports": [
+          {
+            "isDefault": false,
+            "isExternal": true,
+            "resolvedPath": null,
+            "source": "net/http",
+            "specifiers": [
+              "http",
+            ],
+          },
+        ],
+        "jsxComponents": [],
+        "language": "go",
+        "path": "internal/api/api.go",
+        "types": [
+          {
+            "exported": true,
+            "kind": "interface",
+            "name": "Handler",
+            "properties": [
+              "Serve(w http.ResponseWriter)",
+            ],
+          },
+        ],
+      },
+    ],
+    [
+      "README.md",
+      {
+        "classes": [],
+        "exports": [],
+        "imports": [],
+        "jsxComponents": [],
+        "language": "unknown",
+        "path": "README.md",
+        "types": [],
+      },
+    ],
+    [
+      "package.json",
+      {
+        "classes": [],
+        "exports": [],
+        "imports": [],
+        "jsxComponents": [],
+        "language": "unknown",
+        "path": "package.json",
+        "types": [],
+      },
+    ],
+  ],
+  "graph": {
+    "circular": [
+      [
+        "src/store.ts",
+        "src/format.ts",
+      ],
+    ],
+    "edges": [
+      [
+        "app/dashboard/page.tsx",
+        [
+          "components/header.tsx",
+          "src/store.ts",
+        ],
+      ],
+      [
+        "components/header.tsx",
+        [
+          "components/ui/button.tsx",
+        ],
+      ],
+      [
+        "components/ui/button.tsx",
+        [
+          "lib/utils.ts",
+        ],
+      ],
+      [
+        "components/ui/index.ts",
+        [
+          "components/ui/button.tsx",
+          "components/header.tsx",
+        ],
+      ],
+      [
+        "lib/utils.ts",
+        [],
+      ],
+      [
+        "src/store.ts",
+        [
+          "src/models/user.ts",
+          "src/format.ts",
+        ],
+      ],
+      [
+        "src/format.ts",
+        [
+          "src/store.ts",
+        ],
+      ],
+      [
+        "src/models/user.ts",
+        [],
+      ],
+      [
+        "src/legacy.js",
+        [
+          "src/helper.js",
+        ],
+      ],
+      [
+        "src/helper.js",
+        [],
+      ],
+      [
+        "server/app.py",
+        [],
+      ],
+      [
+        "server/services/user_service.py",
+        [],
+      ],
+      [
+        "server/services/__init__.py",
+        [],
+      ],
+      [
+        "server/models.py",
+        [],
+      ],
+      [
+        "cmd/main.go",
+        [],
+      ],
+      [
+        "internal/api/api.go",
+        [],
+      ],
+      [
+        "README.md",
+        [],
+      ],
+      [
+        "package.json",
+        [],
+      ],
+    ],
+    "externalDeps": [
+      [
+        "next",
+        [
+          "app/dashboard/page.tsx",
+        ],
+      ],
+      [
+        "react",
+        [
+          "components/header.tsx",
+        ],
+      ],
+      [
+        "clsx",
+        [
+          "lib/utils.ts",
+        ],
+      ],
+      [
+        "tailwind-merge",
+        [
+          "lib/utils.ts",
+        ],
+      ],
+      [
+        "zustand",
+        [
+          "src/store.ts",
+        ],
+      ],
+      [
+        "path",
+        [
+          "src/legacy.js",
+        ],
+      ],
+      [
+        "flask",
+        [
+          "server/app.py",
+        ],
+      ],
+      [
+        "os",
+        [
+          "server/app.py",
+        ],
+      ],
+      [
+        "json",
+        [
+          "server/app.py",
+        ],
+      ],
+      [
+        "fmt",
+        [
+          "cmd/main.go",
+        ],
+      ],
+      [
+        "github.com",
+        [
+          "cmd/main.go",
+        ],
+      ],
+      [
+        "net",
+        [
+          "internal/api/api.go",
+        ],
+      ],
+    ],
+    "reverseEdges": [
+      [
+        "components/header.tsx",
+        [
+          "app/dashboard/page.tsx",
+          "components/ui/index.ts",
+        ],
+      ],
+      [
+        "src/store.ts",
+        [
+          "app/dashboard/page.tsx",
+          "src/format.ts",
+        ],
+      ],
+      [
+        "components/ui/button.tsx",
+        [
+          "components/header.tsx",
+          "components/ui/index.ts",
+        ],
+      ],
+      [
+        "lib/utils.ts",
+        [
+          "components/ui/button.tsx",
+        ],
+      ],
+      [
+        "src/models/user.ts",
+        [
+          "src/store.ts",
+        ],
+      ],
+      [
+        "src/format.ts",
+        [
+          "src/store.ts",
+        ],
+      ],
+      [
+        "src/helper.js",
+        [
+          "src/legacy.js",
+        ],
+      ],
+    ],
+  },
+  "primaryLanguage": "typescript",
+  "topology": {
+    "clusters": [
+      [
+        "app/dashboard/page.tsx",
+        "components/header.tsx",
+        "components/ui/button.tsx",
+        "components/ui/index.ts",
+        "lib/utils.ts",
+        "src/store.ts",
+        "src/format.ts",
+        "src/models/user.ts",
+      ],
+      [
+        "src/legacy.js",
+        "src/helper.js",
+      ],
+    ],
+    "connectors": [
+      "components/ui/button.tsx",
+      "components/header.tsx",
+      "src/store.ts",
+      "app/dashboard/page.tsx",
+    ],
+    "depthMap": [
+      [
+        "components/header.tsx",
+        1,
+      ],
+      [
+        "src/store.ts",
+        1,
+      ],
+      [
+        "components/ui/button.tsx",
+        2,
+      ],
+      [
+        "src/models/user.ts",
+        2,
+      ],
+      [
+        "src/format.ts",
+        2,
+      ],
+      [
+        "lib/utils.ts",
+        3,
+      ],
+      [
+        "src/helper.js",
+        1,
+      ],
+    ],
+    "entryPoints": [
+      "app/dashboard/page.tsx",
+      "components/ui/index.ts",
+      "src/legacy.js",
+    ],
+    "hubs": [
+      "components/header.tsx",
+      "components/ui/button.tsx",
+    ],
+    "leafNodes": [
+      "lib/utils.ts",
+      "src/models/user.ts",
+      "src/helper.js",
+    ],
+    "maxDepth": 3,
+    "orphans": [
+      "server/app.py",
+      "server/services/user_service.py",
+      "server/services/__init__.py",
+      "server/models.py",
+      "cmd/main.go",
+      "internal/api/api.go",
+      "README.md",
+      "package.json",
+    ],
+  },
+}
+`;

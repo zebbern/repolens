@@ -25,6 +25,7 @@ vi.mock('@/lib/cache/repo-cache', () => ({
 
 vi.mock('@/lib/code/import-parser', () => ({
   analyzeCodebase: vi.fn(() => ({})),
+  resetAnalysisMemo: vi.fn(),
 }))
 
 vi.mock('sonner', () => ({

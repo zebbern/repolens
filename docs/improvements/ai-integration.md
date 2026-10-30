@@ -50,6 +50,7 @@ Verification result: all 7 proposed findings were substantiated in the code. One
 - **Where:** `lib/ai/client-tool-executor.ts:438-467`
 - **Problem:** `executeFindSymbol` iterates every file, every line, and every symbol pattern with a nested `while`-`exec` loop, awaiting per-file line fetches, breaking only after 20 results (`:466`). When the target symbol is rare or absent it scans the entire codebase line-by-line on the main thread. The structural index already holds extracted symbols/signatures that could answer most calls without a scan.
 - **Impact:** Noticeable UI jank or multi-second freezes on large repos, worst-case on not-found symbols. Purely a performance/UX hazard, self-contained to the user's session.
+- **Status:** Mitigated by refactor (1) in [refactor-options.md](./refactor-options.md) without changing results: `findSymbol` resolves source in 50-file batches with a yield after each and skips files whose lowercased source does not contain the name (about 6-10x faster at 2,000-5,000 files, longest block about 15 ms). It still scans source rather than an index.
 - **Recommendation:** Resolve `findSymbol` against the pre-built structural index (exports/signatures per file) first, falling back to a scan only for misses; if scanning, yield to the event loop periodically or move to a worker.
 - **Effort:** M · **Confidence:** medium
 

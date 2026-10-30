@@ -175,6 +175,17 @@ describe('ChatSidebar repository session isolation', () => {
     }
   })
 
+  // Profiling (production build, ~600-chunk reply): one commit per chunk re-parsed
+  // the whole streaming markdown each time — 1.6 s of blocking time at 1x CPU and a
+  // 33 s freeze at 4x. Batching updates every 50 ms cut that to 43 ms and 1.5 s.
+  it('batches streamed UI updates instead of committing on every chunk', async () => {
+    const { useChat } = await import('@ai-sdk/react')
+
+    render(<ChatSidebar />)
+
+    expect(vi.mocked(useChat)).toHaveBeenCalledWith(expect.objectContaining({ experimental_throttle: 50 }))
+  })
+
   it('wraps generateTour success and error outputs while preserving tour side effects', async () => {
     const tour = {
       id: 'tour-1',

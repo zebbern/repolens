@@ -212,6 +212,10 @@ export function ChatSidebar({ className, onCollapse }: { className?: string; onC
     ),
 
     sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithToolCalls,
+
+    // Each update re-parses the whole streaming message as markdown. One commit
+    // per chunk froze slower machines for seconds; 50 ms batches keep ~60 fps.
+    experimental_throttle: 50,
   })
 
   const isChatLoading = status === 'streaming' || status === 'submitted'

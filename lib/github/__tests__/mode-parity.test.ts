@@ -450,22 +450,9 @@ interface Divergence {
   direct: Expected
 }
 
-function failed(error: string, kind?: GitHubErrorKind): Outcome {
-  return { ok: false, error, kind }
-}
-
-function succeeded(partial: Record<string, unknown>): Outcome {
-  return { ok: true, value: expect.objectContaining(partial) }
-}
-
-const KNOWN_DIVERGENCES: Record<string, Divergence> = {
-  // Unusual success data: the server fetcher throws a TypeError (reported as
-  // a generic 500) where direct mode defaults the missing stats to zeros.
-  'commit detail (no stats) / ok': {
-    proxy: failed('Failed to fetch commit detail', 'upstream'),
-    direct: succeeded({ sha: 'feedface', stats: { additions: 0, deletions: 0, total: 0 } }),
-  },
-}
+// Empty: proxy and PAT direct mode agree on every endpoint and scenario. A new
+// difference fails the suite; record it here only if it is intended.
+const KNOWN_DIVERGENCES: Record<string, Divergence> = {}
 
 async function resolveExpected(expected: Expected, mode: Mode, call: Call): Promise<Outcome> {
   return expected === 'success' ? run(mode, 'ok', call) : expected

@@ -427,7 +427,8 @@ export async function fetchCommitDetail(
   const commitAuthor = commit.author as Record<string, string>
   const commitCommitter = commit.committer as Record<string, string>
   const author = data.author as Record<string, string> | null
-  const stats = data.stats as Record<string, number>
+  // GitHub omits stats for some commits (e.g. very large ones); match direct mode's zeros.
+  const stats = (data.stats as Record<string, number> | undefined) ?? { additions: 0, deletions: 0, total: 0 }
   const rawFiles = (data.files as Array<Record<string, unknown>>) ?? []
 
   return {

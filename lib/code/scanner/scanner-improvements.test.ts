@@ -1,4 +1,4 @@
-import { scanIssues } from '@/lib/code/scanner/scanner'
+import { scan } from '@/lib/code/scanner/__tests__/scan-test-helpers'
 import { createEmptyIndex, indexFile } from '@/lib/code/code-index'
 import { SECURITY_RULES } from '@/lib/code/scanner/rules-security'
 import { BAD_PRACTICE_RULES, RELIABILITY_RULES } from '@/lib/code/scanner/rules-quality'
@@ -11,69 +11,69 @@ import { executeToolLocally } from '@/lib/ai/client-tool-executor'
 // ============================================================================
 
 describe('context-aware suppression', () => {
-  it('suppresses eval-usage in a comment', () => {
+  it('suppresses eval-usage in a comment', async () => {
     let index = createEmptyIndex()
     index = indexFile(index, 'src/app.ts', '// eval(foo)', 'typescript')
 
-    const result = scanIssues(index, null)
+    const result = await scan(index, null)
     const evalIssues = result.issues.filter(i => i.ruleId === 'eval-usage')
     // eval is security-critical so it should NOT be comment-suppressed
     // (security-critical rules bypass comment suppression)
     expect(evalIssues.length).toBeGreaterThanOrEqual(0)
   })
 
-  it('does not suppress eval-usage on a non-comment line', () => {
+  it('does not suppress eval-usage on a non-comment line', async () => {
     let index = createEmptyIndex()
     index = indexFile(index, 'src/app.ts', 'const result = eval(userInput)', 'typescript')
 
-    const result = scanIssues(index, null)
+    const result = await scan(index, null)
     const evalIssues = result.issues.filter(i => i.ruleId === 'eval-usage')
     expect(evalIssues.length).toBeGreaterThanOrEqual(1)
   })
 
-  it('suppresses console-log in a JS comment', () => {
+  it('suppresses console-log in a JS comment', async () => {
     let index = createEmptyIndex()
     // console-log is info-level bad-practice, so it should be suppressed in comments
     index = indexFile(index, 'src/app.ts', '// console.log("debug")', 'typescript')
 
-    const result = scanIssues(index, null)
+    const result = await scan(index, null)
     const consoleIssues = result.issues.filter(i => i.ruleId === 'console-log')
     expect(consoleIssues).toHaveLength(0)
   })
 
-  it('suppresses hardcoded-password for type annotation', () => {
+  it('suppresses hardcoded-password for type annotation', async () => {
     let index = createEmptyIndex()
     index = indexFile(index, 'src/types.ts', 'type Config = { password: string }', 'typescript')
 
-    const result = scanIssues(index, null)
+    const result = await scan(index, null)
     const passwordIssues = result.issues.filter(i => i.ruleId === 'hardcoded-password')
     expect(passwordIssues).toHaveLength(0)
   })
 
-  it('suppresses console-log in test files', () => {
+  it('suppresses console-log in test files', async () => {
     let index = createEmptyIndex()
     index = indexFile(index, '__tests__/utils.test.ts', 'console.log("debug")', 'typescript')
 
-    const result = scanIssues(index, null)
+    const result = await scan(index, null)
     const consoleIssues = result.issues.filter(i => i.ruleId === 'console-log')
     expect(consoleIssues).toHaveLength(0)
   })
 
-  it('suppresses eval-usage in test files (excludeFiles)', () => {
+  it('suppresses eval-usage in test files (excludeFiles)', async () => {
     let index = createEmptyIndex()
     index = indexFile(index, '__tests__/utils.test.ts', 'const result = eval(userInput)', 'typescript')
 
-    const result = scanIssues(index, null)
+    const result = await scan(index, null)
     const evalIssues = result.issues.filter(i => i.ruleId === 'eval-usage')
     // eval-usage has excludeFiles that matches test files — both regex and AST paths
     expect(evalIssues).toHaveLength(0)
   })
 
-  it('suppresses non-security rules in generated files', () => {
+  it('suppresses non-security rules in generated files', async () => {
     let index = createEmptyIndex()
     index = indexFile(index, 'types/api.d.ts', 'console.log("auto-generated")', 'typescript')
 
-    const result = scanIssues(index, null)
+    const result = await scan(index, null)
     const consoleIssues = result.issues.filter(i => i.ruleId === 'console-log')
     expect(consoleIssues).toHaveLength(0)
   })
@@ -84,34 +84,34 @@ describe('context-aware suppression', () => {
 // ============================================================================
 
 describe('confidence propagation', () => {
-  it('eval-usage issues have confidence: "high"', () => {
+  it('eval-usage issues have confidence: "high"', async () => {
     let index = createEmptyIndex()
     index = indexFile(index, 'src/app.ts', 'eval(userInput)', 'typescript')
 
-    const result = scanIssues(index, null)
+    const result = await scan(index, null)
     const evalIssues = result.issues.filter(i => i.ruleId === 'eval-usage')
     expect(evalIssues.length).toBeGreaterThanOrEqual(1)
     expect(evalIssues[0].confidence).toBe('high')
   })
 
-  it('console-log issues have confidence: "low"', () => {
+  it('console-log issues have confidence: "low"', async () => {
     let index = createEmptyIndex()
     index = indexFile(index, 'src/app.ts', 'console.log("debug")', 'typescript')
 
-    const result = scanIssues(index, null)
+    const result = await scan(index, null)
     const consoleIssues = result.issues.filter(i => i.ruleId === 'console-log')
     expect(consoleIssues.length).toBeGreaterThanOrEqual(1)
     expect(consoleIssues[0].confidence).toBe('low')
   })
 
-  it('all rules in all rule sets have confidence defined', () => {
+  it('all rules in all rule sets have confidence defined', async () => {
     const allScanRules = [...SECURITY_RULES, ...SECURITY_LANG_RULES, ...BAD_PRACTICE_RULES, ...RELIABILITY_RULES]
     for (const rule of allScanRules) {
       expect(rule.confidence, `Rule ${rule.id} is missing confidence`).toMatch(/^(high|medium|low)$/)
     }
   })
 
-  it('all composite rules have confidence defined', () => {
+  it('all composite rules have confidence defined', async () => {
     for (const rule of COMPOSITE_RULES) {
       expect(rule.confidence, `Composite rule ${rule.id} is missing confidence`).toMatch(/^(high|medium|low)$/)
     }
@@ -123,24 +123,24 @@ describe('confidence propagation', () => {
 // ============================================================================
 
 describe('entropy-based suppression', () => {
-  it('suppresses low-entropy secret pattern', () => {
+  it('suppresses low-entropy secret pattern', async () => {
     let index = createEmptyIndex()
     // "test1234" is low entropy and matches placeholder pattern
     index = indexFile(index, 'src/config.ts', 'api_key = "test1234"', 'typescript')
 
-    const result = scanIssues(index, null)
+    const result = await scan(index, null)
     const secretIssues = result.issues.filter(i =>
       i.ruleId === 'hardcoded-secret' || i.ruleId === 'hardcoded-password'
     )
     expect(secretIssues).toHaveLength(0)
   })
 
-  it('detects high-entropy real secret', () => {
+  it('detects high-entropy real secret', async () => {
     let index = createEmptyIndex()
     // High entropy, no placeholder patterns
     index = indexFile(index, 'src/config.ts', 'api_key = "sk-proj-a8f3k2m9x7v1b3q5w2e4"', 'typescript')
 
-    const result = scanIssues(index, null)
+    const result = await scan(index, null)
     const secretIssues = result.issues.filter(i => i.ruleId === 'hardcoded-secret')
     expect(secretIssues.length).toBeGreaterThanOrEqual(1)
   })
@@ -151,34 +151,34 @@ describe('entropy-based suppression', () => {
 // ============================================================================
 
 describe('auto-fix suggestions', () => {
-  it('eval-usage issues carry fix and fixDescription', () => {
+  it('eval-usage issues carry fix and fixDescription', async () => {
     let index = createEmptyIndex()
     index = indexFile(index, 'src/app.ts', 'eval(userInput)', 'typescript')
 
-    const result = scanIssues(index, null)
+    const result = await scan(index, null)
     const evalIssues = result.issues.filter(i => i.ruleId === 'eval-usage')
     expect(evalIssues.length).toBeGreaterThanOrEqual(1)
     expect(evalIssues[0].fix).toBeTruthy()
     expect(evalIssues[0].fixDescription).toBeTruthy()
   })
 
-  it('console-log issues carry fix and fixDescription', () => {
+  it('console-log issues carry fix and fixDescription', async () => {
     let index = createEmptyIndex()
     index = indexFile(index, 'src/app.ts', 'console.log("debug")', 'typescript')
 
-    const result = scanIssues(index, null)
+    const result = await scan(index, null)
     const consoleIssues = result.issues.filter(i => i.ruleId === 'console-log')
     expect(consoleIssues.length).toBeGreaterThanOrEqual(1)
     expect(consoleIssues[0].fix).toBeTruthy()
     expect(consoleIssues[0].fixDescription).toBeTruthy()
   })
 
-  it('issues from rules without fix have fix undefined', () => {
+  it('issues from rules without fix have fix undefined', async () => {
     let index = createEmptyIndex()
     // github-token doesn't have a fix field
     index = indexFile(index, 'src/app.ts', 'const token = "ghp_aBcDeFgHiJkLmNoPqRsTuVwXyZ0123456789"', 'typescript')
 
-    const result = scanIssues(index, null)
+    const result = await scan(index, null)
     const tokenIssues = result.issues.filter(i => i.ruleId === 'github-token')
     if (tokenIssues.length > 0) {
       expect(tokenIssues[0].fix).toBeUndefined()
@@ -191,60 +191,60 @@ describe('auto-fix suggestions', () => {
 // ============================================================================
 
 describe('health score normalization', () => {
-  it('includes securityGrade, qualityGrade, and issuesPerKloc', () => {
+  it('includes securityGrade, qualityGrade, and issuesPerKloc', async () => {
     let index = createEmptyIndex()
     index = indexFile(index, 'src/app.ts', 'const x = 1', 'typescript')
 
-    const result = scanIssues(index, null)
+    const result = await scan(index, null)
     expect(result.securityGrade).toBeDefined()
     expect(result.qualityGrade).toBeDefined()
     expect(result.issuesPerKloc).toBeDefined()
     expect(typeof result.issuesPerKloc).toBe('number')
   })
 
-  it('clean codebase gets securityGrade A and qualityGrade A', () => {
+  it('clean codebase gets securityGrade A and qualityGrade A', async () => {
     let index = createEmptyIndex()
     index = indexFile(index, 'src/clean.ts', 'export const x = 1', 'typescript')
 
-    const result = scanIssues(index, null)
+    const result = await scan(index, null)
     expect(result.securityGrade).toBe('A')
     expect(result.qualityGrade).toBe('A')
   })
 
-  it('console-log-only code has securityGrade A', () => {
+  it('console-log-only code has securityGrade A', async () => {
     let index = createEmptyIndex()
     const code = Array.from({ length: 5 }, (_, i) => `console.log("debug ${i}")`).join('\n')
     index = indexFile(index, 'src/app.ts', code, 'typescript')
 
-    const result = scanIssues(index, null)
+    const result = await scan(index, null)
     expect(result.securityGrade).toBe('A')
     // Quality grade may be penalized but security is unaffected
   })
 
-  it('eval usage penalizes securityGrade', () => {
+  it('eval usage penalizes securityGrade', async () => {
     let index = createEmptyIndex()
     index = indexFile(index, 'src/danger.ts', 'const x = eval(input)', 'typescript')
 
-    const result = scanIssues(index, null)
+    const result = await scan(index, null)
     // eval is a critical security issue
     expect(result.securityGrade).not.toBe('A')
   })
 
-  it('issuesPerKloc is > 0 when issues exist', () => {
+  it('issuesPerKloc is > 0 when issues exist', async () => {
     let index = createEmptyIndex()
     index = indexFile(index, 'src/app.ts', 'console.log("debug")', 'typescript')
 
-    const result = scanIssues(index, null)
+    const result = await scan(index, null)
     if (result.issues.length > 0) {
       expect(result.issuesPerKloc).toBeGreaterThan(0)
     }
   })
 
-  it('issuesPerKloc is 0 for clean code', () => {
+  it('issuesPerKloc is 0 for clean code', async () => {
     let index = createEmptyIndex()
     index = indexFile(index, 'src/clean.ts', 'export const x = 1', 'typescript')
 
-    const result = scanIssues(index, null)
+    const result = await scan(index, null)
     if (result.issues.length === 0) {
       expect(result.issuesPerKloc).toBe(0)
     }
@@ -264,9 +264,9 @@ describe('differential scanning', () => {
     return index
   }
 
-  it('only returns issues from changed files', () => {
+  it('only returns issues from changed files', async () => {
     const index = buildThreeFileIndex()
-    const result = scanIssues(index, null, ['src/a.ts'])
+    const result = await scan(index, null, ['src/a.ts'])
 
     // Should only contain issues from src/a.ts
     const filesWithIssues = new Set(result.issues.map(i => i.file))
@@ -275,37 +275,37 @@ describe('differential scanning', () => {
     }
   })
 
-  it('sets isPartialScan to true when changedFiles is provided', () => {
+  it('sets isPartialScan to true when changedFiles is provided', async () => {
     const index = buildThreeFileIndex()
-    const result = scanIssues(index, null, ['src/a.ts'])
+    const result = await scan(index, null, ['src/a.ts'])
 
     expect(result.isPartialScan).toBe(true)
   })
 
-  it('sets isPartialScan to false when changedFiles is not provided', () => {
+  it('sets isPartialScan to false when changedFiles is not provided', async () => {
     const index = buildThreeFileIndex()
-    const result = scanIssues(index, null)
+    const result = await scan(index, null)
 
     expect(result.isPartialScan).toBe(false)
   })
 
-  it('scannedFiles reflects count of changed files, not total', () => {
+  it('scannedFiles reflects count of changed files, not total', async () => {
     const index = buildThreeFileIndex()
-    const result = scanIssues(index, null, ['src/a.ts'])
+    const result = await scan(index, null, ['src/a.ts'])
 
     expect(result.scannedFiles).toBe(1)
   })
 
-  it('scannedFiles reflects total files when no changedFiles', () => {
+  it('scannedFiles reflects total files when no changedFiles', async () => {
     const index = buildThreeFileIndex()
-    const result = scanIssues(index, null)
+    const result = await scan(index, null)
 
     expect(result.scannedFiles).toBe(3)
   })
 
-  it('empty changedFiles array means no partial scan', () => {
+  it('empty changedFiles array means no partial scan', async () => {
     const index = buildThreeFileIndex()
-    const result = scanIssues(index, null, [])
+    const result = await scan(index, null, [])
 
     // Empty array = isPartialScan should be false
     expect(result.isPartialScan).toBe(false)
@@ -401,20 +401,20 @@ describe('AI tool bridge: executeScanIssues via executeToolLocally', () => {
 // ============================================================================
 
 describe('health score backward compatibility', () => {
-  it('critical eval-usage produces healthScore <= 35 and healthGrade D or F', () => {
+  it('critical eval-usage produces healthScore <= 35 and healthGrade D or F', async () => {
     let index = createEmptyIndex()
     index = indexFile(index, 'src/bad.ts', 'eval(x)\neval(y)', 'typescript')
 
-    const result = scanIssues(index, null)
+    const result = await scan(index, null)
     expect(result.healthScore).toBeLessThanOrEqual(35)
     expect(result.healthGrade).toMatch(/^[D-F]$/)
   })
 
-  it('clean codebase produces healthScore >= 90 and healthGrade A', () => {
+  it('clean codebase produces healthScore >= 90 and healthGrade A', async () => {
     let index = createEmptyIndex()
     index = indexFile(index, 'src/clean.ts', 'export const x = 1', 'typescript')
 
-    const result = scanIssues(index, null)
+    const result = await scan(index, null)
     expect(result.healthScore).toBeGreaterThanOrEqual(90)
     expect(result.healthGrade).toBe('A')
   })

@@ -1,10 +1,10 @@
 // Scanner Integration Tests — end-to-end scan pipeline verification
 //
-// Tests the full scanIssues pipeline: regex rules, AST analysis, taint tracking,
+// Tests the full scanIssuesAsync pipeline: regex rules, AST analysis, taint tracking,
 // risk scoring, health grading, differential scans, deduplication, and sorting.
 
 import { describe, it, expect } from 'vitest'
-import { scanIssues } from '@/lib/code/scanner/scanner'
+import { scan } from '@/lib/code/scanner/__tests__/scan-test-helpers'
 import { createEmptyIndex, indexFile } from '@/lib/code/code-index'
 import type { CodeIndex, IndexedFile } from '@/lib/code/code-index'
 
@@ -25,12 +25,12 @@ function makeCodeIndex(files: { path: string; content: string; language?: string
 // ---------------------------------------------------------------------------
 
 describe('scanner integration — full pipeline', () => {
-  it('AST analysis detects eval() usage in TypeScript', () => {
+  it('AST analysis detects eval() usage in TypeScript', async () => {
     const index = makeCodeIndex([
       { path: 'src/handler.ts', content: 'const result = eval(userInput)', language: 'typescript' },
     ])
 
-    const results = scanIssues(index, null)
+    const results = await scan(index, null)
 
     const evalIssues = results.issues.filter(i => i.ruleId === 'eval-usage')
     expect(evalIssues.length).toBeGreaterThanOrEqual(1)
@@ -38,7 +38,7 @@ describe('scanner integration — full pipeline', () => {
     expect(evalIssues[0].severity).toBe('critical')
   })
 
-  it('AST analysis detects empty catch blocks', () => {
+  it('AST analysis detects empty catch blocks', async () => {
     const code = `
 function handler() {
   try {
@@ -47,13 +47,13 @@ function handler() {
 }
 `
     const index = makeCodeIndex([{ path: 'src/handler.ts', content: code }])
-    const results = scanIssues(index, null)
+    const results = await scan(index, null)
 
     const emptyCatch = results.issues.filter(i => i.ruleId === 'empty-catch' || i.ruleId === 'ast-empty-catch')
     expect(emptyCatch.length).toBeGreaterThanOrEqual(1)
   })
 
-  it('taint tracking detects source→sink flow without sanitizer', () => {
+  it('taint tracking detects source→sink flow without sanitizer', async () => {
     const code = `
 function handler(req, res) {
   const id = req.query.id;
@@ -61,7 +61,7 @@ function handler(req, res) {
 }
 `
     const index = makeCodeIndex([{ path: 'src/handler.ts', content: code }])
-    const results = scanIssues(index, null)
+    const results = await scan(index, null)
 
     // The taint tracker should find an unsanitized flow
     const taintIssues = results.issues.filter(i =>
@@ -72,14 +72,14 @@ function handler(req, res) {
     expect(results.issues.length).toBeGreaterThanOrEqual(1)
   })
 
-  it('risk scores are assigned to all issues', () => {
+  it('risk scores are assigned to all issues', async () => {
     const code = `
 eval(userInput)
 console.log("debug")
 const x: any = foo
 `
     const index = makeCodeIndex([{ path: 'src/app.ts', content: code }])
-    const results = scanIssues(index, null)
+    const results = await scan(index, null)
 
     expect(results.issues.length).toBeGreaterThanOrEqual(2)
     for (const issue of results.issues) {
@@ -90,10 +90,10 @@ const x: any = foo
     }
   })
 
-  it('CVSS vectors are assigned to all issues', () => {
+  it('CVSS vectors are assigned to all issues', async () => {
     const code = 'eval(userInput)\nconsole.log("x")'
     const index = makeCodeIndex([{ path: 'src/app.ts', content: code }])
-    const results = scanIssues(index, null)
+    const results = await scan(index, null)
 
     for (const issue of results.issues) {
       expect(issue.cvssVector).toBeDefined()
@@ -102,19 +102,19 @@ const x: any = foo
     }
   })
 
-  it('projectRiskScore is present in results', () => {
+  it('projectRiskScore is present in results', async () => {
     const code = 'eval(input)\nconsole.log("test")'
     const index = makeCodeIndex([{ path: 'src/app.ts', content: code }])
-    const results = scanIssues(index, null)
+    const results = await scan(index, null)
 
     expect(results.projectRiskScore).toBeDefined()
     expect(typeof results.projectRiskScore).toBe('number')
   })
 
-  it('riskDistribution is present in results', () => {
+  it('riskDistribution is present in results', async () => {
     const code = 'eval(input)\nconsole.log("test")'
     const index = makeCodeIndex([{ path: 'src/app.ts', content: code }])
-    const results = scanIssues(index, null)
+    const results = await scan(index, null)
 
     expect(results.riskDistribution).toBeDefined()
     expect(results.riskDistribution).toHaveProperty('critical')
@@ -129,29 +129,29 @@ const x: any = foo
 // ---------------------------------------------------------------------------
 
 describe('scanner integration — health scoring', () => {
-  it('produces grade A for clean code', () => {
+  it('produces grade A for clean code', async () => {
     const index = makeCodeIndex([
       { path: 'src/clean.ts', content: 'export const add = (a: number, b: number): number => a + b' },
     ])
-    const results = scanIssues(index, null)
+    const results = await scan(index, null)
     expect(results.healthGrade).toBe('A')
     expect(results.healthScore).toBeGreaterThanOrEqual(90)
   })
 
-  it('caps grade at D/F for critical issues', () => {
+  it('caps grade at D/F for critical issues', async () => {
     const index = makeCodeIndex([
       { path: 'src/bad.ts', content: 'eval(x)\neval(y)' },
     ])
-    const results = scanIssues(index, null)
+    const results = await scan(index, null)
     expect(results.healthScore).toBeLessThanOrEqual(35)
     expect(results.healthGrade).toMatch(/^[D-F]$/)
   })
 
-  it('computes separate securityGrade and qualityGrade', () => {
+  it('computes separate securityGrade and qualityGrade', async () => {
     const index = makeCodeIndex([
       { path: 'src/app.ts', content: 'eval(x)\nconsole.log("test")' },
     ])
-    const results = scanIssues(index, null)
+    const results = await scan(index, null)
     expect(results.securityGrade).toMatch(/^[A-F]$/)
     expect(results.qualityGrade).toMatch(/^[A-F]$/)
   })
@@ -162,14 +162,14 @@ describe('scanner integration — health scoring', () => {
 // ---------------------------------------------------------------------------
 
 describe('scanner integration — differential scan', () => {
-  it('filters issues to only changed files', () => {
+  it('filters issues to only changed files', async () => {
     const index = makeCodeIndex([
       { path: 'src/a.ts', content: 'eval(userInput)' },
       { path: 'src/b.ts', content: 'eval(otherInput)' },
     ])
 
-    const fullResults = scanIssues(index, null)
-    const partialResults = scanIssues(index, null, ['src/a.ts'])
+    const fullResults = await scan(index, null)
+    const partialResults = await scan(index, null, ['src/a.ts'])
 
     expect(partialResults.isPartialScan).toBe(true)
     // Partial scan should have fewer or equal issues
@@ -180,11 +180,11 @@ describe('scanner integration — differential scan', () => {
     }
   })
 
-  it('sets isPartialScan:false for full scans', () => {
+  it('sets isPartialScan:false for full scans', async () => {
     const index = makeCodeIndex([
       { path: 'src/app.ts', content: 'const x = 1' },
     ])
-    const results = scanIssues(index, null)
+    const results = await scan(index, null)
     expect(results.isPartialScan).toBe(false)
   })
 })
@@ -194,26 +194,26 @@ describe('scanner integration — differential scan', () => {
 // ---------------------------------------------------------------------------
 
 describe('scanner integration — deduplication & sorting', () => {
-  it('deduplicates issues with same id (file+line+rule)', () => {
+  it('deduplicates issues with same id (file+line+rule)', async () => {
     // The scanner generates unique IDs per rule+file+line.
     // Two different rules on the same line should NOT deduplicate.
     const code = 'eval(userInput)'
     const index = makeCodeIndex([{ path: 'src/handler.ts', content: code }])
-    const results = scanIssues(index, null)
+    const results = await scan(index, null)
 
     const ids = results.issues.map(i => i.id)
     const uniqueIds = new Set(ids)
     expect(uniqueIds.size).toBe(ids.length)
   })
 
-  it('sorts issues with critical severity first', () => {
+  it('sorts issues with critical severity first', async () => {
     const code = [
       'console.log("debug")',       // info/bad-practice
       'eval(userInput)',             // critical/security
       'const x: any = 1',           // warning/bad-practice
     ].join('\n')
     const index = makeCodeIndex([{ path: 'src/mixed.ts', content: code }])
-    const results = scanIssues(index, null)
+    const results = await scan(index, null)
 
     expect(results.issues.length).toBeGreaterThanOrEqual(2)
     const severities = results.issues.map(i => i.severity)
@@ -230,10 +230,10 @@ describe('scanner integration — deduplication & sorting', () => {
 // ---------------------------------------------------------------------------
 
 describe('scanner integration — MAX_PER_RULE overflow', () => {
-  it('caps non-security issues per rule at 15 and tracks overflow', () => {
+  it('caps non-security issues per rule at 15 and tracks overflow', async () => {
     const lines = Array.from({ length: 20 }, (_, i) => `console.log("x${i}")`)
     const index = makeCodeIndex([{ path: 'src/many-logs.ts', content: lines.join('\n') }])
-    const results = scanIssues(index, null)
+    const results = await scan(index, null)
 
     const logIssues = results.issues.filter(i => i.ruleId === 'console-log')
     expect(logIssues).toHaveLength(15)
@@ -246,10 +246,10 @@ describe('scanner integration — MAX_PER_RULE overflow', () => {
 // ---------------------------------------------------------------------------
 
 describe('scanner integration — summary accuracy', () => {
-  it('summary counts match actual issue counts', () => {
+  it('summary counts match actual issue counts', async () => {
     const code = 'eval(input)\nconsole.log("test")\nconst x: any = 1'
     const index = makeCodeIndex([{ path: 'src/app.ts', content: code }])
-    const results = scanIssues(index, null)
+    const results = await scan(index, null)
 
     expect(results.summary.total).toBe(results.issues.length)
     const critCount = results.issues.filter(i => i.severity === 'critical').length
@@ -261,10 +261,10 @@ describe('scanner integration — summary accuracy', () => {
     expect(critCount + warnCount + infoCount).toBe(results.summary.total)
   })
 
-  it('category counts match actual issue categories', () => {
+  it('category counts match actual issue categories', async () => {
     const code = 'eval(input)\nconsole.log("test")'
     const index = makeCodeIndex([{ path: 'src/app.ts', content: code }])
-    const results = scanIssues(index, null)
+    const results = await scan(index, null)
 
     const bySecurity = results.issues.filter(i => i.category === 'security').length
     const byBadPractice = results.issues.filter(i => i.category === 'bad-practice').length
@@ -274,15 +274,15 @@ describe('scanner integration — summary accuracy', () => {
     expect(results.summary.byReliability).toBe(byReliability)
   })
 
-  it('scannedAt is a valid Date', () => {
+  it('scannedAt is a valid Date', async () => {
     const index = makeCodeIndex([{ path: 'src/app.ts', content: 'const x = 1' }])
-    const results = scanIssues(index, null)
+    const results = await scan(index, null)
     expect(results.scannedAt).toBeInstanceOf(Date)
   })
 
-  it('issuesPerKloc is computed correctly', () => {
+  it('issuesPerKloc is computed correctly', async () => {
     const index = makeCodeIndex([{ path: 'src/app.ts', content: 'const x = 1' }])
-    const results = scanIssues(index, null)
+    const results = await scan(index, null)
     expect(typeof results.issuesPerKloc).toBe('number')
     expect(results.issuesPerKloc).toBeGreaterThanOrEqual(0)
   })
@@ -293,25 +293,25 @@ describe('scanner integration — summary accuracy', () => {
 // ---------------------------------------------------------------------------
 
 describe('scanner integration — multi-file', () => {
-  it('aggregates issues across multiple files', () => {
+  it('aggregates issues across multiple files', async () => {
     const index = makeCodeIndex([
       { path: 'src/a.ts', content: 'eval(input)' },
       { path: 'src/b.ts', content: 'console.log("debug")' },
       { path: 'src/c.ts', content: 'export const clean = 1' },
     ])
-    const results = scanIssues(index, null)
+    const results = await scan(index, null)
 
     expect(results.scannedFiles).toBe(3)
     const files = new Set(results.issues.map(i => i.file))
     expect(files.size).toBeGreaterThanOrEqual(2)
   })
 
-  it('skips vendored files (node_modules)', () => {
+  it('skips vendored files (node_modules)', async () => {
     const index = makeCodeIndex([
       { path: 'node_modules/pkg/index.js', content: 'eval(input)', language: 'javascript' },
       { path: 'src/clean.ts', content: 'const x = 1' },
     ])
-    const results = scanIssues(index, null)
+    const results = await scan(index, null)
 
     const vendored = results.issues.filter(i => i.file.includes('node_modules'))
     expect(vendored).toHaveLength(0)

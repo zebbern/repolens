@@ -20,9 +20,6 @@ const scanIssuesAsync = vi.fn().mockResolvedValue({
 
 vi.mock('@/lib/code/scanner/scanner', () => ({
   scanIssuesAsync,
-  scanIssues: vi.fn(() => {
-    throw new Error('sync scanner must not be used')
-  }),
 }))
 
 import { executeToolLocally } from '@/lib/ai/client-tool-executor'

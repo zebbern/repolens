@@ -1,8 +1,8 @@
 // Main scanner — orchestrates all rule scanning, computes health score,
 // and produces the final ScanResults.
 //
-// scanIssuesAsync is authoritative and memoizes successful complete scans.
-// scanIssues remains a deprecated, synchronous core-only compatibility API.
+// scanIssuesAsync is the only scan orchestrator and memoizes successful
+// complete scans.
 
 import type { CodeIndex, IndexedFile } from '../code-index'
 import { buildSearchRegex, getFileLines, recordResolvedFileLineCount, resolveFileContentBatches } from '../code-index'
@@ -32,6 +32,9 @@ import { scoreIssue, scoreProject, getRiskDistribution, buildCvssVector } from '
 import { scanWithTreeSitter } from './tree-sitter-scanner'
 
 const MAX_PER_RULE = 15
+
+/** Files whose content is resolved and scanned per batch. */
+const DEFAULT_SCAN_BATCH_SIZE = 50
 
 /** File entry type extracted from CodeIndex. */
 type FileEntry = CodeIndex['files'] extends Map<string, infer V> ? V : never
@@ -202,8 +205,9 @@ function isExcludedCredential(rule: ScanRule, lineContent: string, match: RegExp
 }
 
 // ---------------------------------------------------------------------------
-// Scan memoization — avoids redundant O(n) scans when multiple components
-// (code-browser + issues-panel) call scanIssues with the same codeIndex.
+// Scan memoization — scanIssuesAsync reuses a complete scan, or joins one in
+// flight, for the same CodeIndex object, analysis and options. Worker requests
+// deserialize a fresh CodeIndex, so only in-thread callers can hit it.
 // ---------------------------------------------------------------------------
 
 let lastScanRef: WeakRef<CodeIndex> | null = null
@@ -831,9 +835,10 @@ function deduplicateIssues(
     }
   }
 
-  // Async scans cannot cap AST fallbacks until every regex batch has run.
-  // Retain only the latest candidates that the synchronous reverse pass would
-  // select; the total count preserves truthful overflow reporting.
+  // Batched scans cannot cap AST fallbacks until every regex batch has run.
+  // Retain only the latest candidates that a single reverse pass over the
+  // whole index would select; the total count preserves truthful overflow
+  // reporting.
   if (deferredAstEval && deferredAstEval.issueIds.size > MAX_PER_RULE) {
     let retained = 0
     for (let index = issues.length - 1; index >= 0; index--) {
@@ -851,7 +856,7 @@ function deduplicateIssues(
 // Scan options
 // ---------------------------------------------------------------------------
 
-/** Options for scanIssues and scanIssuesAsync. */
+/** Options for scanIssuesAsync. */
 export interface ScanOptions {
   /** When true, only metadata-only rules run (no content parsing). */
   metadataOnly?: boolean
@@ -862,6 +867,11 @@ export interface ScanOptions {
 export interface AsyncScanOptions extends ScanOptions {
   signal?: AbortSignal
   failureMode?: 'best-effort' | 'strict'
+  /**
+   * @internal Files per content batch (default 50, capped at 100). Results do
+   * not depend on it; tests vary it to prove that. Not sent to the worker.
+   */
+  batchSize?: number
 }
 
 interface ScanAccumulator {
@@ -994,6 +1004,7 @@ function scanOptionsKey(options: AsyncScanOptions): string {
     changedFiles: options.changedFiles ?? null,
     metadataOnly: options.metadataOnly ?? false,
     failureMode: options.failureMode ?? 'best-effort',
+    batchSize: options.batchSize ?? DEFAULT_SCAN_BATCH_SIZE,
   })
 }
 
@@ -1080,165 +1091,8 @@ function finalizeScan(
 }
 
 // ---------------------------------------------------------------------------
-// Main scan orchestrator
-// ---------------------------------------------------------------------------
-
-/**
- * @deprecated Core-only compatibility scan. Use scanIssuesAsync for authoritative results.
- * Tree-sitter is not run and is reported as skipped in diagnostics.
- */
-export function scanIssues(
-  codeIndex: CodeIndex,
-  analysis: FullAnalysis | null,
-  changedFilesOrOptions?: string[] | ScanOptions,
-): ScanResults {
-  const options: ScanOptions = Array.isArray(changedFilesOrOptions)
-    ? { changedFiles: changedFilesOrOptions }
-    : changedFilesOrOptions ?? {}
-  const { metadataOnly = false, changedFiles } = options
-
-  const accumulator = createScanAccumulator()
-  const { issues, seenIds } = accumulator
-
-  const isPartialScan = changedFiles !== undefined && changedFiles.length > 0
-
-  // Build the set of files to scan, excluding test/fixture paths that
-  // produce false positives (test corpus intentionally contains vulnerable patterns).
-  const filesToScan = new Map<string, FileEntry>()
-  if (changedFiles !== undefined && changedFiles.length > 0) {
-    for (const changed of changedFiles!) {
-      if (SCANNER_EXCLUDE_PATTERNS.test(changed)) continue
-      const file = codeIndex.files.get(changed)
-      if (file) filesToScan.set(changed, file)
-    }
-  } else {
-    for (const [path, file] of codeIndex.files) {
-      if (SCANNER_EXCLUDE_PATTERNS.test(path)) continue
-      filesToScan.set(path, file)
-    }
-  }
-
-  const scanCodeIndex = codeIndex
-
-  // Pre-compute extension-based data structures for performance
-  const blockCommentCache = new Map<string, Set<number> | undefined>()
-  const presentExtensions = new Set(
-    Array.from(filesToScan.keys()).map(p => '.' + (p.split('.').pop() || '').toLowerCase())
-  )
-  const filesByExtension = new Map<string, Map<string, FileEntry>>()
-  for (const [path, file] of filesToScan) {
-    const ext = '.' + (path.split('.').pop() || '').toLowerCase()
-    let group = filesByExtension.get(ext)
-    if (!group) {
-      group = new Map<string, FileEntry>()
-      filesByExtension.set(ext, group)
-    }
-    group.set(path, file)
-  }
-
-  // 1. Regex-based rules (content-required)
-  let rulesEvaluated = 0
-  let suppressionCount = 0
-  let ruleOverflow = new Map<string, number>()
-  const ruleCounts = new Map<string, number>()
-  const ruleMatchIds = new Set<string>()
-
-  if (!metadataOnly) {
-    const regexResult = runRegexRules({
-      filesToScan, scanCodeIndex, isPartialScan,
-      blockCommentCache, presentExtensions, filesByExtension,
-    }, ruleCounts, ruleOverflow, undefined, ruleMatchIds)
-    for (const issue of regexResult.issues) {
-      if (!seenIds.has(issue.id)) {
-        seenIds.add(issue.id)
-        issues.push(issue)
-      }
-    }
-    rulesEvaluated = regexResult.rulesEvaluated
-    suppressionCount = regexResult.suppressionCount
-    ruleOverflow = regexResult.ruleOverflow
-  }
-
-  // 2. AST-based analysis (content-required)
-  if (!metadataOnly) {
-    const astResult = runAstAnalysis(filesToScan)
-    for (const issue of astResult.issues) {
-      if (!seenIds.has(issue.id)) {
-        seenIds.add(issue.id)
-        issues.push(issue)
-      }
-    }
-    recordPartialEngine(accumulator, 'ast', astResult.omittedPaths)
-
-    // 2b. Taint tracking
-    const taintResult = runTaintAnalysis(filesToScan)
-    for (const issue of taintResult.issues) {
-      if (!seenIds.has(issue.id)) {
-        seenIds.add(issue.id)
-        issues.push(issue)
-      }
-    }
-    recordPartialEngine(accumulator, 'taint', taintResult.omittedPaths)
-
-    // 2c–2d. Deduplicate AST vs regex overlapping findings
-    deduplicateIssues(issues, scanCodeIndex, ruleOverflow, ruleCounts, ruleMatchIds)
-  }
-
-  // 3. Composite file-level rules (content-required)
-  if (!metadataOnly) {
-    const compositeIssues = scanCompositeRules(codeIndex)
-    rulesEvaluated += COMPOSITE_RULES.length
-    for (const issue of compositeIssues) {
-      if (!filesToScan.has(issue.file)) continue
-      if (!seenIds.has(issue.id)) {
-        seenIds.add(issue.id)
-        issues.push(issue)
-      }
-    }
-  }
-
-  // 4. Structural rules (metadata-safe — large-file check works without content)
-  const structuralIssues = scanStructuralIssues(codeIndex, analysis)
-  const structuralRuleIds = new Set(structuralIssues.map(i => i.ruleId))
-  rulesEvaluated += structuralRuleIds.size
-  for (const issue of structuralIssues) {
-    if (!filesToScan.has(issue.file)) continue
-    if (!seenIds.has(issue.id)) {
-      seenIds.add(issue.id)
-      issues.push(issue)
-    }
-  }
-
-  // 5. Supply chain rules (content-required)
-  if (!metadataOnly) {
-    const supplyChainIssues = scanSupplyChain(scanCodeIndex)
-    const supplyChainRuleIds = new Set(supplyChainIssues.map(i => i.ruleId))
-    rulesEvaluated += supplyChainRuleIds.size
-    for (const issue of supplyChainIssues) {
-      if (!filesToScan.has(issue.file)) continue
-      if (!seenIds.has(issue.id)) {
-        seenIds.add(issue.id)
-        issues.push(issue)
-      }
-    }
-  }
-
-  accumulator.rulesEvaluated = rulesEvaluated
-  accumulator.suppressionCount = suppressionCount
-  accumulator.ruleOverflow = ruleOverflow
-  for (const engine of ['regex', 'ast', 'taint', 'composite', 'supply-chain'] as const) {
-    if (accumulator.diagnostics.engines[engine] !== 'partial') {
-      completeEngine(accumulator, engine, metadataOnly ? 'not-applicable' : 'completed')
-    }
-  }
-  completeEngine(accumulator, 'structural')
-  completeEngine(accumulator, 'tree-sitter', 'skipped')
-
-  return finalizeScan(codeIndex, analysis, filesToScan, isPartialScan, metadataOnly, accumulator)
-}
-
-// ---------------------------------------------------------------------------
-// Async scanner — yields to main thread between phases to avoid blocking UI
+// Main scan orchestrator — yields to the main thread between content batches
+// and phases to avoid blocking the UI
 // ---------------------------------------------------------------------------
 
 /** Yield to the main thread so the browser can process events / paint. */
@@ -1247,11 +1101,13 @@ function yieldToMain(): Promise<void> {
 }
 
 /**
- * Async version of `scanIssues` that yields to the main thread between each
- * scanning phase so the UI stays responsive on large codebases.
+ * Scan a CodeIndex for security and quality issues. Content is resolved and
+ * scanned in bounded batches, yielding to the main thread between batches and
+ * phases so the UI stays responsive on large codebases.
  *
- * This is the authoritative scanner path. Cancellation rejects with AbortError;
- * best-effort engine failures are returned in diagnostics and strict failures throw.
+ * This is the only scanner orchestrator; the scanner worker and every in-thread
+ * caller use it. Cancellation rejects with AbortError; best-effort engine
+ * failures are returned in diagnostics and strict failures throw.
  */
 export async function scanIssuesAsync(
   codeIndex: CodeIndex,
@@ -1332,7 +1188,6 @@ async function scanIssuesAsyncImpl(
   } else {
     for (const [path, file] of codeIndex.files) {
       if (SCANNER_EXCLUDE_PATTERNS.test(path)) continue
-      if (!metadataOnly && missingContentPaths.includes(path)) continue
       filesToScan.set(path, file)
     }
   }
@@ -1359,7 +1214,7 @@ async function scanIssuesAsyncImpl(
     for await (const batch of resolveFileContentBatches(
       codeIndex,
       pathsToResolve,
-      { batchSize: 50, signal },
+      { batchSize: options.batchSize ?? DEFAULT_SCAN_BATCH_SIZE, signal },
     )) {
       throwIfScanAborted(signal)
       missingContentPaths.push(...batch.missingPaths)
@@ -1551,32 +1406,13 @@ async function scanIssuesAsyncImpl(
 }
 
 // ---------------------------------------------------------------------------
-// On-demand single-file scanning
-// ---------------------------------------------------------------------------
-
-/**
- * Scan a single file against all rules. Used when lazy-loaded content
- * becomes available for a file that was previously metadata-only.
- * Does NOT use scan memoization (partial scans bypass the cache).
- *
- * @deprecated Core-engine-only compatibility path. Use scanIssuesAsync with
- * changedFiles for authoritative results, including Tree-sitter.
- */
-export function scanOnDemand(
-  codeIndex: CodeIndex,
-  analysis: FullAnalysis | null,
-  filePath: string,
-): ScanResults {
-  return scanIssues(codeIndex, analysis, { changedFiles: [filePath] })
-}
-
-// ---------------------------------------------------------------------------
 // Merge scan results
 // ---------------------------------------------------------------------------
 
 /**
- * Merge two ScanResults (e.g. metadata-only base + on-demand content scan).
- * Deduplicates issues by id. Recomputes summary and health grades.
+ * Merge two ScanResults (e.g. a metadata-only base plus an on-demand content
+ * scan from scanIssuesAsync with `changedFiles`). Deduplicates issues by id.
+ * Recomputes summary and health grades.
  */
 export function mergeScanResults(
   base: ScanResults,

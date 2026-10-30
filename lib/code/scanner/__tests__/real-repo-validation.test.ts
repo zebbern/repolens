@@ -1,7 +1,11 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
+
+vi.mock('@/lib/parsers/tree-sitter', () => import('@/lib/code/scanner/__tests__/tree-sitter-mock'))
+
 import { createEmptyIndex, indexFile } from '@/lib/code/code-index'
-import { scanIssues, clearScanCache } from '@/lib/code/scanner'
+import { clearScanCache } from '@/lib/code/scanner'
 import type { CodeIssue } from '../types'
+import { scan } from './scan-test-helpers'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -264,11 +268,11 @@ describe('Real repository pattern validation', () => {
     describe(snippet.id, () => {
       let findings: CodeIssue[]
 
-      beforeEach(() => {
+      beforeEach(async () => {
         clearScanCache()
         let index = createEmptyIndex()
         index = indexFile(index, snippet.path, snippet.content, snippet.language)
-        const result = scanIssues(index, null)
+        const result = await scan(index, null)
         findings = result.issues
       })
 
@@ -335,7 +339,7 @@ describe('Real repository pattern validation', () => {
 
   // Overall summary
   describe('Overall accuracy', () => {
-    it('should have >= 80% recall on vulnerable snippets', () => {
+    it('should have >= 80% recall on vulnerable snippets', async () => {
       clearScanCache()
       let totalExpected = 0
       let totalHit = 0
@@ -343,7 +347,7 @@ describe('Real repository pattern validation', () => {
       for (const snippet of SNIPPETS.filter(s => s.category === 'vulnerable')) {
         let index = createEmptyIndex()
         index = indexFile(index, snippet.path, snippet.content, snippet.language)
-        const result = scanIssues(index, null)
+        const result = await scan(index, null)
 
         for (const ruleId of snippet.expectedRules) {
           totalExpected++
@@ -361,7 +365,7 @@ describe('Real repository pattern validation', () => {
       expect(recall).toBeGreaterThanOrEqual(80)
     })
 
-    it('should have low false positive rate on secure snippets', () => {
+    it('should have low false positive rate on secure snippets', async () => {
       clearScanCache()
       let totalFP = 0
       let totalSecure = 0
@@ -369,7 +373,7 @@ describe('Real repository pattern validation', () => {
       for (const snippet of SNIPPETS.filter(s => s.category === 'secure')) {
         let index = createEmptyIndex()
         index = indexFile(index, snippet.path, snippet.content, snippet.language)
-        const result = scanIssues(index, null)
+        const result = await scan(index, null)
         const nonInfoFindings = result.issues.filter(f => f.severity !== 'info')
         totalFP += nonInfoFindings.length
         totalSecure++

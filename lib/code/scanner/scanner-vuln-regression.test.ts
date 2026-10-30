@@ -9,22 +9,22 @@
 import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'fs'
 import { join } from 'path'
-import { scanIssues } from '@/lib/code/scanner/scanner'
+import { scan } from '@/lib/code/scanner/__tests__/scan-test-helpers'
 import { createEmptyIndex, indexFile } from '@/lib/code/code-index'
 import type { CodeIssue } from '@/lib/code/scanner/types'
 
-function scanCode(filename: string, code: string, lang?: string) {
+async function scanCode(filename: string, code: string, lang?: string) {
   let index = createEmptyIndex()
   index = indexFile(index, filename, code, lang)
-  return scanIssues(index, null)
+  return scan(index, null)
 }
 
-function scanMultiFile(files: Array<{ path: string; code: string; lang?: string }>) {
+async function scanMultiFile(files: Array<{ path: string; code: string; lang?: string }>) {
   let index = createEmptyIndex()
   for (const f of files) {
     index = indexFile(index, f.path, f.code, f.lang)
   }
-  return scanIssues(index, null)
+  return scan(index, null)
 }
 
 function issuesForRule(issues: CodeIssue[], ruleId: string) {
@@ -53,7 +53,7 @@ describe('Self-Scan Regression', () => {
     }
   }
 
-  it('R1: Self-scan of rule files produces fewer than 100 total issues', () => {
+  it('R1: Self-scan of rule files produces fewer than 100 total issues', async () => {
     const files = RULE_FILES
       .map(name => ({
         path: `lib/code/scanner/${name}`,
@@ -64,12 +64,12 @@ describe('Self-Scan Regression', () => {
 
     expect(files.length).toBeGreaterThanOrEqual(3)
 
-    const result = scanMultiFile(files)
+    const result = await scanMultiFile(files)
     console.log(`R1: Self-scan total issues: ${result.issues.length}`)
     expect(result.issues.length).toBeLessThan(100)
   })
 
-  it('R2: No hardcoded-secret/password/eval-usage on rule definition files', () => {
+  it('R2: No hardcoded-secret/password/eval-usage on rule definition files', async () => {
     const files = RULE_FILES
       .map(name => ({
         path: `lib/code/scanner/${name}`,
@@ -78,7 +78,7 @@ describe('Self-Scan Regression', () => {
       }))
       .filter(f => f.code.length > 0)
 
-    const result = scanMultiFile(files)
+    const result = await scanMultiFile(files)
 
     const secretHits = issuesForRule(result.issues, 'hardcoded-secret')
     const passwordHits = issuesForRule(result.issues, 'hardcoded-password')
@@ -99,44 +99,44 @@ describe('Self-Scan Regression', () => {
     expect(evalHits).toHaveLength(0)
   })
 
-  it('R3: Detection rate report — new rules from Groups E/F', () => {
+  it('R3: Detection rate report — new rules from Groups E/F', async () => {
     const detectionTests: Array<{ name: string; detected: boolean; ruleId: string }> = []
 
-    function check(name: string, ruleId: string, code: string, filename: string, lang?: string) {
-      const result = scanCode(filename, code, lang)
+    async function check(name: string, ruleId: string, code: string, filename: string, lang?: string) {
+      const result = await scanCode(filename, code, lang)
       const hits = issuesForRule(result.issues, ruleId)
       detectionTests.push({ name, detected: hits.length > 0, ruleId })
     }
 
     // New rules
-    check('NoSQL $where', 'nosql-injection',
+    await check('NoSQL $where', 'nosql-injection',
       'db.collection.find({ $where: req.body.query })', 'src/api.ts', 'typescript')
-    check('NoSQL mapReduce', 'nosql-injection-mapreduce',
+    await check('NoSQL mapReduce', 'nosql-injection-mapreduce',
       'collection.mapReduce(req.body.mapper, req.body.reducer)', 'src/api.ts', 'typescript')
-    check('Prompt injection', 'prompt-injection',
+    await check('Prompt injection', 'prompt-injection',
       'const system = `Analyze this: ${req.body.content}`', 'src/ai.ts', 'typescript')
-    check('Deprecated TLS', 'deprecated-tls',
+    await check('Deprecated TLS', 'deprecated-tls',
       "tls.createServer({ secureProtocol: 'TLSv1_method' })", 'src/server.ts', 'typescript')
-    check('localStorage secret', 'localstorage-secret',
+    await check('localStorage secret', 'localstorage-secret',
       "localStorage.setItem('auth_token', token)", 'src/auth.ts', 'typescript')
-    check('Next.js RSC SSRF', 'nextjs-rsc-ssrf',
+    await check('Next.js RSC SSRF', 'nextjs-rsc-ssrf',
       'const data = await fetch(apiUrl)', 'src/api.ts', 'typescript')
-    check('React localStorage secret', 'localstorage-secret',
+    await check('React localStorage secret', 'localstorage-secret',
       "localStorage.setItem('token', jwt)", 'src/Auth.tsx', 'typescript')
-    check('SRI missing CDN', 'sri-missing-cdn',
+    await check('SRI missing CDN', 'sri-missing-cdn',
       '<script src="https://cdn.jsdelivr.net/npm/lodash@4/lodash.min.js"></script>',
       'public/index.html')
 
     // Core rules for aggregate rate
-    check('AWS key', 'hardcoded-aws-key',
+    await check('AWS key', 'hardcoded-aws-key',
       'const k = "AKIAIOSFODNN7EXAMPLE1"', 'src/a.ts', 'typescript')
-    check('eval', 'eval-usage',
+    await check('eval', 'eval-usage',
       'eval(userInput)', 'src/a.ts', 'typescript')
-    check('SQL injection', 'sql-injection',
+    await check('SQL injection', 'sql-injection',
       'query(`SELECT * FROM users WHERE id = ${userId}`)', 'src/a.ts', 'typescript')
-    check('innerHTML XSS', 'innerhtml-xss',
+    await check('innerHTML XSS', 'innerhtml-xss',
       'element.innerHTML = data', 'src/a.ts', 'typescript')
-    check('CORS wildcard', 'cors-wildcard',
+    await check('CORS wildcard', 'cors-wildcard',
       "res.setHeader('Access-Control-Allow-Origin', '*')", 'src/a.ts', 'typescript')
 
     const total = detectionTests.length

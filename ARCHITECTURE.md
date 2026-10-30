@@ -263,7 +263,7 @@ Each rule keeps at most `MAX_PER_RULE` (15) findings per scan; Tree-sitter rules
 - **Extension grouping**: Rules with a `fileFilter` are indexed under each applicable extension (e.g., `.ts`, `.py`). Rules with no `fileFilter` go into `universalRules` and apply to every file.
 - **Dead-rule pruning**: Rules whose `fileFilter` extensions don't appear in the codebase's `presentExtensions` set are skipped entirely.
 - **Single iteration**: `runRegexRules()` iterates each file once, merging universal rules with extension-specific rules, and tests each line against all applicable compiled regexes.
-- **Unscanned files**: The async scanner resolves source in bounded batches and reports paths that the backing store could not supply as `unscannedFileCount`. A loaded empty file remains distinct from unavailable source.
+- **Unscanned files**: The scanner resolves source in bounded batches and reports paths that the backing store could not supply as `unscannedFileCount`. A loaded empty file remains distinct from unavailable source.
 
 ### Rule Types
 
@@ -300,7 +300,7 @@ The scanner uses context classification (`context-classifier.ts`) to reduce fals
 
 ### Memoization
 
-`scanIssuesAsync()` is the authoritative scanner path. It memoizes successful complete scans by `CodeIndex` reference, analysis reference, and options using `WeakRef`, and deduplicates matching in-flight scans. Partial or failed scans are not cached.
+`scanIssuesAsync()` is the only scan orchestrator: the scanner worker, the in-thread fallback in `scanner-client.ts` and the AI `scanIssues` tool all call it. It memoizes successful complete scans by `CodeIndex` reference, analysis reference, and options using `WeakRef`, and deduplicates matching in-flight scans. Partial or failed scans are not cached.
 
 ## Docs Generation
 

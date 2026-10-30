@@ -16,7 +16,7 @@ export type {
 
 export type { ScanOptions, AsyncScanOptions } from './scanner'
 
-export { scanIssues, scanIssuesAsync, getAllRules, clearScanCache } from './scanner'
+export { scanIssuesAsync, getAllRules, clearScanCache } from './scanner'
 
 export { scanWithTreeSitter } from './tree-sitter-scanner'
 

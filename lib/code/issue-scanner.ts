@@ -1,5 +1,5 @@
 // Issue Scanner — explicit re-exports for tree-shaking.
-// Heavy symbols (scanIssues, AST-analyzer, taint-tracker) are NOT re-exported;
+// Heavy symbols (scanIssuesAsync, AST-analyzer, taint-tracker) are NOT re-exported;
 // import them directly from './scanner/scanner', './scanner/ast-analyzer', or
 // './scanner/taint-tracker' when needed.
 

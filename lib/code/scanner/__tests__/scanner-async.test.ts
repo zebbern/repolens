@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { scanIssues, scanIssuesAsync, clearScanCache } from '@/lib/code/scanner/scanner'
+import { scanIssuesAsync, clearScanCache } from '@/lib/code/scanner/scanner'
+import { scan } from './scan-test-helpers'
 import {
   batchIndexMetadataOnly,
   createEmptyIndex,
@@ -67,29 +68,35 @@ describe('scanIssuesAsync', () => {
     mockedScanWithTreeSitter.mockResolvedValue({ issues: [], ruleOverflow: new Map() })
   })
 
-  it('returns same results as sync scanIssues for identical input', async () => {
+  it('returns the same results for inline and store-backed content', async () => {
+    const files = new Map([
+      ['src/danger.ts', 'const result = eval(userInput)'],
+      ['src/messy.ts', 'console.log("debug info")'],
+    ])
     let index = createEmptyIndex()
-    index = indexFile(index, 'src/danger.ts', 'const result = eval(userInput)', 'typescript')
-    index = indexFile(index, 'src/messy.ts', 'console.log("debug info")', 'typescript')
+    for (const [path, content] of files) index = indexFile(index, path, content, 'typescript')
+    const storeIndex = batchIndexMetadataOnly(
+      createEmptyIndexWithStore(new InMemoryContentStore(files)),
+      [...files.keys()].map(path => ({ path, language: 'typescript', lineCount: 1 })),
+    )
 
-    const syncResult = scanIssues(index, null)
+    const inlineResult = await scan(index, null)
     clearScanCache()
-    const asyncResult = await scanIssuesAsync(index, null)
+    const asyncResult = await scanIssuesAsync(storeIndex, null)
 
-    expect(asyncResult.issues.length).toBe(syncResult.issues.length)
-    expect(asyncResult.summary).toEqual(syncResult.summary)
-    expect(asyncResult.healthGrade).toBe(syncResult.healthGrade)
-    expect(asyncResult.healthScore).toBe(syncResult.healthScore)
-    expect(asyncResult.scannedFiles).toBe(syncResult.scannedFiles)
-    expect(asyncResult.rulesEvaluated).toBe(syncResult.rulesEvaluated)
-    expect(asyncResult.languagesDetected).toEqual(syncResult.languagesDetected)
-    expect(syncResult.diagnostics.engines['tree-sitter']).toBe('skipped')
+    expect(asyncResult.issues.length).toBe(inlineResult.issues.length)
+    expect(asyncResult.summary).toEqual(inlineResult.summary)
+    expect(asyncResult.healthGrade).toBe(inlineResult.healthGrade)
+    expect(asyncResult.healthScore).toBe(inlineResult.healthScore)
+    expect(asyncResult.scannedFiles).toBe(inlineResult.scannedFiles)
+    expect(asyncResult.rulesEvaluated).toBe(inlineResult.rulesEvaluated)
+    expect(asyncResult.languagesDetected).toEqual(inlineResult.languagesDetected)
     expect(asyncResult.diagnostics.engines['tree-sitter']).toBe('completed')
 
     // Issue IDs and severities match
-    const syncIds = syncResult.issues.map(i => i.id).sort()
+    const inlineIds = inlineResult.issues.map(i => i.id).sort()
     const asyncIds = asyncResult.issues.map(i => i.id).sort()
-    expect(asyncIds).toEqual(syncIds)
+    expect(asyncIds).toEqual(inlineIds)
   })
 
   it('rejects with AbortError when already aborted', async () => {
@@ -403,7 +410,7 @@ describe('scanIssuesAsync', () => {
     expect(treeSitterBatchSizes).toEqual([50, 50, 1])
   })
 
-  it('never caps security findings across content batches and matches the sync scan', async () => {
+  it('never caps security findings across content batches and matches an inline-content scan', async () => {
     const entries = new Map<string, string>()
     const metadata = Array.from({ length: 85 }, (_, index) => {
       const path = index < 50 ? `src/ast-${index}.ts` : index < 65 ? `src/regex-${index}.ts` : `src/log-${index}.ts`
@@ -425,11 +432,12 @@ describe('scanIssuesAsync', () => {
     expect(result.issues.filter(issue => issue.ruleId === 'console-log')).toHaveLength(15)
     expect(result.ruleOverflow.get('console-log')).toBe(5)
 
-    let syncIndex = createEmptyIndex()
-    for (const [path, content] of entries) syncIndex = indexFile(syncIndex, path, content, 'typescript')
-    const syncResult = scanIssues(syncIndex, null)
-    expect(result.issues.map(issue => issue.id).sort()).toEqual(syncResult.issues.map(issue => issue.id).sort())
-    expect([...result.ruleOverflow].sort()).toEqual([...syncResult.ruleOverflow].sort())
+    let inlineIndex = createEmptyIndex()
+    for (const [path, content] of entries) inlineIndex = indexFile(inlineIndex, path, content, 'typescript')
+    // One batch holds all 85 files, so the reference is a single pass, not the same 50-file split.
+    const inlineResult = await scan(inlineIndex, null, { batchSize: 100 })
+    expect(result.issues.map(issue => issue.id).sort()).toEqual(inlineResult.issues.map(issue => issue.id).sort())
+    expect([...result.ruleOverflow].sort()).toEqual([...inlineResult.ruleOverflow].sort())
   })
 
   it('reports partial AST and taint coverage when an eligible file cannot be parsed', async () => {
@@ -437,11 +445,6 @@ describe('scanIssuesAsync', () => {
     index = indexFile(index, 'src/conflicted.ts', '<<<<<<< CONFLICT', 'typescript')
     index = indexFile(index, 'src/valid.ts', 'const value = 1', 'typescript')
 
-    const syncResult = scanIssues(index, null)
-    expect(syncResult.diagnostics.engines.ast).toBe('partial')
-    expect(syncResult.diagnostics.engines.taint).toBe('partial')
-
-    clearScanCache()
     const result = await scanIssuesAsync(index, null)
 
     expect(result.diagnostics.engines.ast).toBe('partial')
@@ -452,7 +455,7 @@ describe('scanIssuesAsync', () => {
     ]))
   })
 
-  it('retains every path omitted from partial engine coverage', () => {
+  it('retains every path omitted from partial engine coverage', async () => {
     const unavailablePaths = Array.from(
       { length: 6 },
       (_, index) => `src/unavailable-${index}.ts`,
@@ -462,7 +465,7 @@ describe('scanIssuesAsync', () => {
       index = indexFile(index, path, '<<<<<<< CONFLICT', 'typescript')
     }
 
-    const result = scanIssues(index, null)
+    const result = await scan(index, null)
 
     expect(result.diagnostics.failures).toEqual(expect.arrayContaining([
       {
@@ -486,11 +489,6 @@ describe('scanIssuesAsync', () => {
     let index = createEmptyIndex()
     index = indexFile(index, 'src/large.ts', content, 'typescript')
 
-    const syncResult = scanIssues(index, null)
-    expect(syncResult.diagnostics.engines.ast).toBe('completed')
-    expect(syncResult.diagnostics.engines.taint).toBe('partial')
-
-    clearScanCache()
     const result = await scanIssuesAsync(index, null)
 
     expect(result.diagnostics.engines.ast).toBe('completed')

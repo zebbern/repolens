@@ -5,8 +5,11 @@
  * Pattern: scanCode(filename, code, lang) → assert ruleId, severity, cwe.
  */
 
-import { describe, it, expect } from 'vitest'
-import { scanIssues } from '@/lib/code/scanner/scanner'
+import { describe, it, expect, vi } from 'vitest'
+
+vi.mock('@/lib/parsers/tree-sitter', () => import('@/lib/code/scanner/__tests__/tree-sitter-mock'))
+
+import { scan } from '@/lib/code/scanner/__tests__/scan-test-helpers'
 import { createEmptyIndex, indexFile } from '@/lib/code/code-index'
 import type { CodeIssue } from '@/lib/code/scanner/types'
 
@@ -14,10 +17,10 @@ import type { CodeIssue } from '@/lib/code/scanner/types'
 // Helpers
 // ============================================================================
 
-function scanCode(filename: string, code: string, lang?: string) {
+async function scanCode(filename: string, code: string, lang?: string) {
   let index = createEmptyIndex()
   index = indexFile(index, filename, code, lang)
-  return scanIssues(index, null)
+  return scan(index, null)
 }
 
 function issuesForRule(issues: CodeIssue[], ruleId: string) {
@@ -29,80 +32,80 @@ function issuesForRule(issues: CodeIssue[], ruleId: string) {
 // ============================================================================
 
 describe('React / Next.js Framework Rules', () => {
-  it('detects javascript: URI in href', () => {
+  it('detects javascript: URI in href', async () => {
     const code = `<a href="javascript:alert(1)">click</a>`
-    const result = scanCode('src/Link.tsx', code, 'tsx')
+    const result = await scanCode('src/Link.tsx', code, 'tsx')
     const hits = issuesForRule(result.issues, 'react-href-javascript')
     expect(hits.length).toBeGreaterThanOrEqual(1)
     expect(hits[0].severity).toBe('warning')
     expect(hits[0].cwe).toBe('CWE-79')
   })
 
-  it('detects javascript:void(0) in href attribute', () => {
+  it('detects javascript:void(0) in href attribute', async () => {
     const code = `<a href="javascript:void(0)">click</a>`
-    const result = scanCode('src/Link.tsx', code, 'tsx')
+    const result = await scanCode('src/Link.tsx', code, 'tsx')
     const hits = issuesForRule(result.issues, 'react-href-javascript')
     expect(hits.length).toBeGreaterThanOrEqual(1)
   })
 
-  it('detects target="_blank" without rel="noopener"', () => {
+  it('detects target="_blank" without rel="noopener"', async () => {
     const code = `<a href="https://example.com" target="_blank">external</a>`
-    const result = scanCode('src/ExternalLink.tsx', code, 'tsx')
+    const result = await scanCode('src/ExternalLink.tsx', code, 'tsx')
     const hits = issuesForRule(result.issues, 'react-target-blank-noopener')
     expect(hits.length).toBeGreaterThanOrEqual(1)
     expect(hits[0].severity).toBe('warning')
     expect(hits[0].cwe).toBe('CWE-1022')
   })
 
-  it('does not flag target="_blank" with rel="noopener"', () => {
+  it('does not flag target="_blank" with rel="noopener"', async () => {
     const code = `<a href="https://example.com" target="_blank" rel="noopener noreferrer">external</a>`
-    const result = scanCode('src/ExternalLink.tsx', code, 'tsx')
+    const result = await scanCode('src/ExternalLink.tsx', code, 'tsx')
     const hits = issuesForRule(result.issues, 'react-target-blank-noopener')
     expect(hits).toHaveLength(0)
   })
 
-  it('detects API route without auth check', () => {
+  it('detects API route without auth check', async () => {
     const code = `export async function GET(request: Request) {\n  return Response.json({ data: [] });\n}`
-    const result = scanCode('app/api/users/route.ts', code, 'typescript')
+    const result = await scanCode('app/api/users/route.ts', code, 'typescript')
     const hits = issuesForRule(result.issues, 'nextjs-api-no-auth')
     expect(hits.length).toBeGreaterThanOrEqual(1)
     expect(hits[0].severity).toBe('info')
     expect(hits[0].cwe).toBe('CWE-306')
   })
 
-  it('does not flag API route with auth check in file', () => {
+  it('does not flag API route with auth check in file', async () => {
     // Composite rule checks entire file for auth mitigations
     const code = `import { getServerSession } from 'next-auth'\nexport async function GET(request: Request) {\n  const session = await getServerSession();\n  return Response.json({ data: [] });\n}`
-    const result = scanCode('app/api/users/route.ts', code, 'typescript')
+    const result = await scanCode('app/api/users/route.ts', code, 'typescript')
     const hits = issuesForRule(result.issues, 'nextjs-api-no-auth')
     expect(hits).toHaveLength(0)
   })
 
-  it('suppresses nextjs-api-no-auth for health/status routes', () => {
+  it('suppresses nextjs-api-no-auth for health/status routes', async () => {
     const code = `export async function GET() {\n  return Response.json({ status: 'ok' });\n}`
-    const result = scanCode('app/api/health/route.ts', code, 'typescript')
+    const result = await scanCode('app/api/health/route.ts', code, 'typescript')
     const hits = issuesForRule(result.issues, 'nextjs-api-no-auth')
     expect(hits).toHaveLength(0)
   })
 
-  it('detects UNSAFE_componentWillMount', () => {
+  it('detects UNSAFE_componentWillMount', async () => {
     const code = `class MyComponent extends React.Component {\n  UNSAFE_componentWillMount() { this.fetchData(); }\n}`
-    const result = scanCode('src/Legacy.tsx', code, 'tsx')
+    const result = await scanCode('src/Legacy.tsx', code, 'tsx')
     const hits = issuesForRule(result.issues, 'react-unsafe-lifecycle')
     expect(hits.length).toBeGreaterThanOrEqual(1)
     expect(hits[0].severity).toBe('warning')
   })
 
-  it('detects UNSAFE_componentWillUpdate', () => {
+  it('detects UNSAFE_componentWillUpdate', async () => {
     const code = `UNSAFE_componentWillUpdate() { this.sync(); }`
-    const result = scanCode('src/Legacy.tsx', code, 'tsx')
+    const result = await scanCode('src/Legacy.tsx', code, 'tsx')
     const hits = issuesForRule(result.issues, 'react-unsafe-lifecycle')
     expect(hits.length).toBeGreaterThanOrEqual(1)
   })
 
-  it('detects UNSAFE_componentWillReceiveProps', () => {
+  it('detects UNSAFE_componentWillReceiveProps', async () => {
     const code = `UNSAFE_componentWillReceiveProps(nextProps) { this.update(nextProps); }`
-    const result = scanCode('src/Legacy.tsx', code, 'tsx')
+    const result = await scanCode('src/Legacy.tsx', code, 'tsx')
     const hits = issuesForRule(result.issues, 'react-unsafe-lifecycle')
     expect(hits.length).toBeGreaterThanOrEqual(1)
   })
@@ -113,55 +116,55 @@ describe('React / Next.js Framework Rules', () => {
 // ============================================================================
 
 describe('Express.js Framework Rules', () => {
-  it('detects express.json() without limit', () => {
+  it('detects express.json() without limit', async () => {
     const code = `app.use(express.json());`
-    const result = scanCode('src/server.ts', code, 'typescript')
+    const result = await scanCode('src/server.ts', code, 'typescript')
     const hits = issuesForRule(result.issues, 'express-body-parser-no-limit')
     expect(hits.length).toBeGreaterThanOrEqual(1)
     expect(hits[0].severity).toBe('warning')
     expect(hits[0].cwe).toBe('CWE-400')
   })
 
-  it('detects bodyParser.json() without limit', () => {
+  it('detects bodyParser.json() without limit', async () => {
     const code = `app.use(bodyParser.json());`
-    const result = scanCode('src/server.ts', code, 'typescript')
+    const result = await scanCode('src/server.ts', code, 'typescript')
     const hits = issuesForRule(result.issues, 'express-body-parser-no-limit')
     expect(hits.length).toBeGreaterThanOrEqual(1)
   })
 
-  it('does not flag express.json with limit', () => {
+  it('does not flag express.json with limit', async () => {
     const code = `app.use(express.json({ limit: '1mb' }));`
-    const result = scanCode('src/server.ts', code, 'typescript')
+    const result = await scanCode('src/server.ts', code, 'typescript')
     const hits = issuesForRule(result.issues, 'express-body-parser-no-limit')
     expect(hits).toHaveLength(0)
   })
 
-  it('detects CORS wildcard origin with credentials', () => {
+  it('detects CORS wildcard origin with credentials', async () => {
     const code = `app.use(cors({ origin: '*', credentials: true }));`
-    const result = scanCode('src/server.ts', code, 'typescript')
+    const result = await scanCode('src/server.ts', code, 'typescript')
     const hits = issuesForRule(result.issues, 'express-cors-credentials-wildcard')
     expect(hits.length).toBeGreaterThanOrEqual(1)
     expect(hits[0].severity).toBe('warning')
     expect(hits[0].cwe).toBe('CWE-942')
   })
 
-  it('detects express.static without dotfiles option', () => {
+  it('detects express.static without dotfiles option', async () => {
     const code = `app.use(express.static('public'));`
-    const result = scanCode('src/server.ts', code, 'typescript')
+    const result = await scanCode('src/server.ts', code, 'typescript')
     const hits = issuesForRule(result.issues, 'express-static-dotfiles')
     expect(hits.length).toBeGreaterThanOrEqual(1)
   })
 
-  it('does not flag express.static with dotfiles option', () => {
+  it('does not flag express.static with dotfiles option', async () => {
     const code = `app.use(express.static('public', { dotfiles: 'deny' }));`
-    const result = scanCode('src/server.ts', code, 'typescript')
+    const result = await scanCode('src/server.ts', code, 'typescript')
     const hits = issuesForRule(result.issues, 'express-static-dotfiles')
     expect(hits).toHaveLength(0)
   })
 
-  it('detects methodOverride usage', () => {
+  it('detects methodOverride usage', async () => {
     const code = `app.use(methodOverride('_method'));`
-    const result = scanCode('src/server.ts', code, 'typescript')
+    const result = await scanCode('src/server.ts', code, 'typescript')
     const hits = issuesForRule(result.issues, 'express-method-override-before-csrf')
     expect(hits.length).toBeGreaterThanOrEqual(1)
   })
@@ -172,32 +175,32 @@ describe('Express.js Framework Rules', () => {
 // ============================================================================
 
 describe('Quality Rules — JS/TS', () => {
-  it('detects magic numbers (3+ digits)', () => {
+  it('detects magic numbers (3+ digits)', async () => {
     const code = `if (count === 1000) { doSomething(); }`
-    const result = scanCode('src/logic.ts', code, 'typescript')
+    const result = await scanCode('src/logic.ts', code, 'typescript')
     const hits = issuesForRule(result.issues, 'magic-number')
     expect(hits.length).toBeGreaterThanOrEqual(1)
     expect(hits[0].severity).toBe('info')
   })
 
-  it('does not flag magic numbers in const declarations', () => {
+  it('does not flag magic numbers in const declarations', async () => {
     const code = `const MAX_RETRIES = 1000;`
-    const result = scanCode('src/logic.ts', code, 'typescript')
+    const result = await scanCode('src/logic.ts', code, 'typescript')
     const hits = issuesForRule(result.issues, 'magic-number')
     expect(hits).toHaveLength(0)
   })
 
-  it('detects TODO without issue reference', () => {
+  it('detects TODO without issue reference', async () => {
     const code = `const x = 1; // TODO refactor this function`
-    const result = scanCode('src/utils.ts', code, 'typescript')
+    const result = await scanCode('src/utils.ts', code, 'typescript')
     const hits = issuesForRule(result.issues, 'todo-fixme')
     expect(hits.length).toBeGreaterThanOrEqual(1)
     expect(hits[0].severity).toBe('info')
   })
 
-  it('does not flag TODO with issue reference', () => {
+  it('does not flag TODO with issue reference', async () => {
     const code = `// TODO(#123): refactor this function`
-    const result = scanCode('src/utils.ts', code, 'typescript')
+    const result = await scanCode('src/utils.ts', code, 'typescript')
     const hits = issuesForRule(result.issues, 'todo-fixme')
     // todo-fixme does not distinguish issue references, so it may still match
     // This test verifies the rule itself still works
@@ -209,26 +212,26 @@ describe('Quality Rules — JS/TS', () => {
 // ============================================================================
 
 describe('Quality Rules — Python', () => {
-  it('detects os.system() usage', () => {
+  it('detects os.system() usage', async () => {
     const code = `os.system('ls -la')`
-    const result = scanCode('src/runner.py', code, 'python')
+    const result = await scanCode('src/runner.py', code, 'python')
     const hits = issuesForRule(result.issues, 'python-os-system')
     expect(hits.length).toBeGreaterThanOrEqual(1)
     expect(hits[0].severity).toBe('warning')
     expect(hits[0].cwe).toBe('CWE-78')
   })
 
-  it('detects assert in production code', () => {
+  it('detects assert in production code', async () => {
     const code = `assert user.is_authenticated, "User must be logged in"`
-    const result = scanCode('src/views.py', code, 'python')
+    const result = await scanCode('src/views.py', code, 'python')
     const hits = issuesForRule(result.issues, 'python-assert-production')
     expect(hits.length).toBeGreaterThanOrEqual(1)
     expect(hits[0].severity).toBe('info')
   })
 
-  it('does not flag assert in test files', () => {
+  it('does not flag assert in test files', async () => {
     const code = `assert result == expected`
-    const result = scanCode('tests/test_views.py', code, 'python')
+    const result = await scanCode('tests/test_views.py', code, 'python')
     const hits = issuesForRule(result.issues, 'python-assert-production')
     expect(hits).toHaveLength(0)
   })
@@ -239,18 +242,18 @@ describe('Quality Rules — Python', () => {
 // ============================================================================
 
 describe('Quality Rules — Go', () => {
-  it('detects goroutine without recover', () => {
+  it('detects goroutine without recover', async () => {
     const code = `go func() {\n  doSomething()\n}()`
-    const result = scanCode('src/server.go', code, 'go')
+    const result = await scanCode('src/server.go', code, 'go')
     const hits = issuesForRule(result.issues, 'go-goroutine-no-recover')
     expect(hits.length).toBeGreaterThanOrEqual(1)
     expect(hits[0].category).toBe('reliability')
   })
 
-  it('does not flag goroutine with recover on same line', () => {
+  it('does not flag goroutine with recover on same line', async () => {
     // excludePattern /recover/ tests the matched line content
     const code = `go func() { defer func() { recover() }(); doSomething() }()`
-    const result = scanCode('src/server.go', code, 'go')
+    const result = await scanCode('src/server.go', code, 'go')
     const hits = issuesForRule(result.issues, 'go-goroutine-no-recover')
     expect(hits).toHaveLength(0)
   })
@@ -261,18 +264,18 @@ describe('Quality Rules — Go', () => {
 // ============================================================================
 
 describe('Quality Rules — Rust', () => {
-  it('detects unsafe block without SAFETY comment', () => {
+  it('detects unsafe block without SAFETY comment', async () => {
     const code = `fn main() {\n  unsafe {\n    *ptr = 42;\n  }\n}`
-    const result = scanCode('src/main.rs', code, 'rust')
+    const result = await scanCode('src/main.rs', code, 'rust')
     const hits = issuesForRule(result.issues, 'rust-unsafe-block')
     expect(hits.length).toBeGreaterThanOrEqual(1)
     expect(hits[0].category).toBe('reliability')
   })
 
-  it('does not flag unsafe block with // SAFETY comment on same line', () => {
+  it('does not flag unsafe block with // SAFETY comment on same line', async () => {
     // excludePattern /\/\/\s*SAFETY/ requires // comment style, not /* */
     const code = `fn main() { // SAFETY: pointer valid unsafe { *ptr = 42; } }`
-    const result = scanCode('src/main.rs', code, 'rust')
+    const result = await scanCode('src/main.rs', code, 'rust')
     const hits = issuesForRule(result.issues, 'rust-unsafe-block')
     expect(hits).toHaveLength(0)
   })
@@ -283,18 +286,18 @@ describe('Quality Rules — Rust', () => {
 // ============================================================================
 
 describe('Quality Rules — Java', () => {
-  it('detects System.exit() in production code', () => {
+  it('detects System.exit() in production code', async () => {
     const code = `public class App {\n  public void shutdown() {\n    System.exit(1);\n  }\n}`
-    const result = scanCode('src/App.java', code, 'java')
+    const result = await scanCode('src/App.java', code, 'java')
     const hits = issuesForRule(result.issues, 'java-system-exit')
     expect(hits.length).toBeGreaterThanOrEqual(1)
     expect(hits[0].severity).toBe('warning')
     expect(hits[0].category).toBe('bad-practice')
   })
 
-  it('does not flag System.exit() in test files', () => {
+  it('does not flag System.exit() in test files', async () => {
     const code = `System.exit(0);`
-    const result = scanCode('src/AppTest.java', code, 'java')
+    const result = await scanCode('src/AppTest.java', code, 'java')
     const hits = issuesForRule(result.issues, 'java-system-exit')
     expect(hits).toHaveLength(0)
   })
@@ -305,9 +308,9 @@ describe('Quality Rules — Java', () => {
 // ============================================================================
 
 describe('Quality Rules — Kotlin', () => {
-  it('detects lateinit var usage', () => {
+  it('detects lateinit var usage', async () => {
     const code = `class Service {\n  lateinit var repo: Repository\n}`
-    const result = scanCode('src/Service.kt', code, 'kotlin')
+    const result = await scanCode('src/Service.kt', code, 'kotlin')
     const hits = issuesForRule(result.issues, 'kotlin-lateinit-abuse')
     expect(hits.length).toBeGreaterThanOrEqual(1)
     expect(hits[0].severity).toBe('info')

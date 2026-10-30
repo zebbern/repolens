@@ -5,6 +5,7 @@ import {
   useContext,
   useState,
   useCallback,
+  useMemo,
   useRef,
   type ReactNode,
 } from "react"
@@ -145,13 +146,17 @@ export function PRReviewProvider({ children }: { children: ReactNode }) {
     setIsFileTruncated(false)
   }, [])
 
+  // Explicit: React Compiler skips this component (see the provider test), so it
+  // would not memoize the value and every consumer would re-render with the provider.
+  const stateValue = useMemo(
+    () => ({ pr, files, status, error, availablePRs, isFileTruncated }),
+    [pr, files, status, error, availablePRs, isFileTruncated],
+  )
+  const actionsValue = useMemo(() => ({ loadPRList, selectPR, reset }), [loadPRList, selectPR, reset])
+
   return (
-    <PRReviewStateContext.Provider
-      value={{ pr, files, status, error, availablePRs, isFileTruncated }}
-    >
-      <PRReviewActionsContext.Provider
-        value={{ loadPRList, selectPR, reset }}
-      >
+    <PRReviewStateContext.Provider value={stateValue}>
+      <PRReviewActionsContext.Provider value={actionsValue}>
         {children}
       </PRReviewActionsContext.Provider>
     </PRReviewStateContext.Provider>

@@ -5,6 +5,7 @@ import {
   useContext,
   useState,
   useCallback,
+  useMemo,
   useRef,
   useEffect,
   type ReactNode,
@@ -322,18 +323,20 @@ export function ComparisonProvider({ children }: { children: ReactNode }) {
     return Array.from(reposRef.current.values())
   }, [])
 
+  // Explicit: React Compiler skips this component (see the provider test), so it
+  // would not memoize the value and every consumer would re-render with the provider.
+  const value = useMemo(() => ({
+    repos,
+    isAtCapacity,
+    addRepo,
+    removeRepo,
+    retryRepo,
+    clearAll,
+    getRepoList,
+  }), [repos, isAtCapacity, addRepo, removeRepo, retryRepo, clearAll, getRepoList])
+
   return (
-    <ComparisonContext.Provider
-      value={{
-        repos,
-        isAtCapacity,
-        addRepo,
-        removeRepo,
-        retryRepo,
-        clearAll,
-        getRepoList,
-      }}
-    >
+    <ComparisonContext.Provider value={value}>
       {children}
     </ComparisonContext.Provider>
   )

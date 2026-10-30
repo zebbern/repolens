@@ -338,6 +338,40 @@ describe('repo-cache (IndexedDB)', () => {
     }
   })
 
+  // An in-memory-tier record holds every file's content, so touching it on each
+  // hit rewrote up to tens of MB to IndexedDB just to bump a timestamp.
+  it('does not rewrite a cached record on a hit shortly after its last write', async () => {
+    const now = vi.spyOn(Date, 'now').mockReturnValue(1_000_000)
+    try {
+      await setCachedRepo('owner', 'touched', 'sha', SAMPLE_FILES, SAMPLE_TREE, SAMPLE_COVERAGE)
+      const put = vi.spyOn(FakeIDBObjectStore.prototype, 'put')
+      now.mockReturnValue(1_000_000 + 60_000)
+
+      expect(await getCachedRepo('owner', 'touched')).not.toBeNull()
+
+      expect(put).not.toHaveBeenCalled()
+      expect((await listCachedRepos()).find(repo => repo.repo === 'touched')?.timestamp).toBe(1_000_000)
+      put.mockRestore()
+    } finally {
+      now.mockRestore()
+    }
+  })
+
+  it('still refreshes the LRU timestamp on a hit once the touch interval has passed', async () => {
+    const now = vi.spyOn(Date, 'now').mockReturnValue(1_000_000)
+    try {
+      await setCachedRepo('owner', 'touched', 'sha', SAMPLE_FILES, SAMPLE_TREE, SAMPLE_COVERAGE)
+      const later = 1_000_000 + 11 * 60_000
+      now.mockReturnValue(later)
+
+      expect(await getCachedRepo('owner', 'touched')).not.toBeNull()
+
+      expect((await listCachedRepos()).find(repo => repo.repo === 'touched')?.timestamp).toBe(later)
+    } finally {
+      now.mockRestore()
+    }
+  })
+
   it('LRU eviction removes evicted repository content but preserves retained repos', async () => {
     const stores: IDBContentStore[] = []
     for (let i = 1; i <= 6; i++) {

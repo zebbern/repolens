@@ -93,6 +93,19 @@ describe('GitHubTokenProvider', () => {
   mockUseSession.mockReturnValue({ data: null, status: 'unauthenticated' })
 })
 
+  // React Compiler skips this provider (try/finally), so memoization is manual.
+  it('keeps the same context value when it re-renders with nothing changed', async () => {
+    const { result, rerender } = renderHook(() => useGitHubToken(), {
+      wrapper: ({ children }: { children: ReactNode }) => <GitHubTokenProvider>{children}</GitHubTokenProvider>,
+    })
+    await act(async () => {})
+    const before = result.current
+
+    rerender()
+
+    expect(result.current).toBe(before)
+  })
+
   // -----------------------------------------------------------------------
   // Hydration
   // -----------------------------------------------------------------------

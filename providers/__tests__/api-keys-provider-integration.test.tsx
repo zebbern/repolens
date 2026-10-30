@@ -56,6 +56,17 @@ describe('APIKeysProvider', () => {
     localStorage.clear()
   })
 
+  // React Compiler skips this provider (try/finally), so memoization is manual.
+  it('keeps the same context value when it re-renders with nothing changed', async () => {
+    const { result, rerender } = renderHook(() => useAPIKeys(), { wrapper })
+    await waitFor(() => expect(result.current.isHydrated).toBe(true))
+    const before = result.current
+
+    rerender()
+
+    expect(result.current).toBe(before)
+  })
+
   // -----------------------------------------------------------------------
   // Async localStorage hydration
   // -----------------------------------------------------------------------

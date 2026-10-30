@@ -1,6 +1,6 @@
 "use client"
 
-import { createContext, useContext, useState, useEffect, useCallback, useRef, type ReactNode } from "react"
+import { createContext, useContext, useState, useEffect, useCallback, useMemo, useRef, type ReactNode } from "react"
 import { toast } from "sonner"
 import type { AIProvider, APIKeysState, ProviderModel } from "@/types/types"
 import {
@@ -346,24 +346,29 @@ export function APIKeysProvider({ children }: { children: ReactNode }) {
 
   const selectedProvider = selectedModel?.provider || null
 
+  // Explicit: React Compiler skips this component (see the provider test), so it
+  // would not memoize the value and every consumer would re-render with the provider.
+  const value = useMemo(() => ({
+    apiKeys,
+    models,
+    isLoadingModels,
+    isHydrated,
+    selectedProvider,
+    selectedModel,
+    modelFetchErrors,
+    setAPIKey,
+    validateAPIKey,
+    removeAPIKey,
+    fetchModels,
+    setSelectedModel,
+    getValidProviders,
+  }), [
+    apiKeys, models, isLoadingModels, isHydrated, selectedProvider, selectedModel, modelFetchErrors,
+    setAPIKey, validateAPIKey, removeAPIKey, fetchModels, getValidProviders,
+  ])
+
   return (
-    <APIKeysContext.Provider
-      value={{
-        apiKeys,
-        models,
-        isLoadingModels,
-        isHydrated,
-        selectedProvider,
-        selectedModel,
-        modelFetchErrors,
-        setAPIKey,
-        validateAPIKey,
-        removeAPIKey,
-        fetchModels,
-        setSelectedModel,
-        getValidProviders,
-      }}
-    >
+    <APIKeysContext.Provider value={value}>
       {children}
     </APIKeysContext.Provider>
   )

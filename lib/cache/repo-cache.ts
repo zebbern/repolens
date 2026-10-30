@@ -240,11 +240,19 @@ async function deleteRepoManifestIfIdentity(
   return removed
 }
 
+/**
+ * LRU recency only needs coarse precision across at most MAX_REPOS entries, and
+ * an in-memory-tier record carries every file's content, so a touch rewrites the
+ * whole record. Skip touches within this interval of the last one.
+ */
+const REPO_TOUCH_INTERVAL_MS = 10 * 60_000
+
 async function touchRepoTimestamp(
   db: IDBDatabase,
   entry: CachedRepo,
   signal?: AbortSignal,
 ): Promise<void> {
+  if (Date.now() - entry.timestamp < REPO_TOUCH_INTERVAL_MS) return
   const tx = db.transaction(STORE_NAME, 'readwrite', { durability: 'strict' })
   const done = transactionDone(tx, signal)
   const request = tx.objectStore(STORE_NAME).get(entry.key)

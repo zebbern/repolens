@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, act } from '@testing-library/react'
+import { render, renderHook, screen, act } from '@testing-library/react'
+import type { ReactNode } from 'react'
 import { useComparison, ComparisonProvider } from '../comparison-provider'
 import { MAX_COMPARISON_REPOS } from '@/types/comparison'
 import type { GitHubRepo } from '@/types/repository'
@@ -67,6 +68,18 @@ function TestConsumer({ onContext }: { onContext: (ctx: ReturnType<typeof useCom
 describe('ComparisonProvider', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+  })
+
+  // React Compiler skips this provider (value blocks in try/catch), so memoization is manual.
+  it('keeps the same context value when it re-renders with nothing changed', () => {
+    const { result, rerender } = renderHook(() => useComparison(), {
+      wrapper: ({ children }: { children: ReactNode }) => <ComparisonProvider>{children}</ComparisonProvider>,
+    })
+    const before = result.current
+
+    rerender()
+
+    expect(result.current).toBe(before)
   })
 
   it('provides initial state with empty repos and not at capacity', () => {

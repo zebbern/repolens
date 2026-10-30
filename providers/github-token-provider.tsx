@@ -1,6 +1,6 @@
 "use client"
 
-import { createContext, useContext, useState, useEffect, useCallback, useRef, type ReactNode } from "react"
+import { createContext, useContext, useState, useEffect, useCallback, useMemo, useRef, type ReactNode } from "react"
 import { useSession } from "next-auth/react"
 import { toast } from "sonner"
 import { GITHUB_TOKEN_STORAGE_KEY, loadGitHubToken, saveGitHubToken, removeGitHubToken } from "@/lib/github-token"
@@ -281,20 +281,22 @@ export function GitHubTokenProvider({ children }: { children: ReactNode }) {
     !credentialTransitioning &&
     appliedOAuthPrincipal === oauthPrincipal
 
+  // Explicit: React Compiler skips this component (see the provider test), so it
+  // would not memoize the value and every consumer would re-render with the provider.
+  const value = useMemo(() => ({
+    token,
+    isValid,
+    isValidating,
+    isHydrated,
+    username,
+    scopes,
+    setToken,
+    validateToken,
+    removeToken: removeTokenFn,
+  }), [token, isValid, isValidating, isHydrated, username, scopes, setToken, validateToken, removeTokenFn])
+
   return (
-    <GitHubTokenContext.Provider
-      value={{
-        token,
-        isValid,
-        isValidating,
-        isHydrated,
-        username,
-        scopes,
-        setToken,
-        validateToken,
-        removeToken: removeTokenFn,
-      }}
-    >
+    <GitHubTokenContext.Provider value={value}>
       {canRenderDescendants ? children : null}
     </GitHubTokenContext.Provider>
   )

@@ -145,8 +145,9 @@ describe('origin-wide repository cache publication', () => {
   })
 
   it('serializes a concurrent cache touch before LRU selection and revalidation', async () => {
+    // Each clock read advances past the touch interval, so the touch really writes.
     let now = 0
-    vi.spyOn(Date, 'now').mockImplementation(() => ++now)
+    vi.spyOn(Date, 'now').mockImplementation(() => (now += 11 * 60_000))
     for (let index = 1; index <= 5; index++) {
       await setCachedRepo('owner', `repo-${index}`, `sha-${index}`, [], TREE, COVERAGE)
     }

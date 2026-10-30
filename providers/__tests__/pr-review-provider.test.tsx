@@ -27,6 +27,16 @@ describe('PRReviewProvider', () => {
     github.fetchPullsViaProxy.mockResolvedValue([])
   })
 
+  it('keeps the same state and actions values when it re-renders with nothing changed', () => {
+    const { result, rerender } = renderHook(() => ({ state: usePRReviewState(), actions: usePRReviewActions() }), { wrapper })
+    const before = result.current
+
+    rerender()
+
+    expect(result.current.state).toBe(before.state)
+    expect(result.current.actions).toBe(before.actions)
+  })
+
   it('settles an empty pull-request list instead of leaving a loading state', async () => {
     const { result } = renderHook(() => ({ state: usePRReviewState(), actions: usePRReviewActions() }), { wrapper })
 

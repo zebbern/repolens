@@ -245,7 +245,7 @@ workproject/                    # Next.js application root
 │   ├── repository/             # Repository state types, indexing progress, coverage helpers
 │   ├── stubs/                  # Empty browser stubs for Node built-ins (turbopack resolveAlias)
 │   ├── lazy-recharts.ts        # Lazy Recharts loader
-│   └── parsers/                # tree-sitter.ts (web-tree-sitter AST, main thread + worker); typescript-parser.ts (regex-based, currently unused)
+│   └── parsers/                # tree-sitter.ts (web-tree-sitter AST, main thread + worker)
 ├── hooks/                      # Custom React hooks
 │   ├── use-changelog-engine.ts # Changelog generation lifecycle
 │   ├── use-docs-engine.ts      # Documentation generation hook

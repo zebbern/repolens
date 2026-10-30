@@ -987,40 +987,36 @@ exports[`generateDiagram topology characterization > pins the unavailable-conten
 
 exports[`generateDiagram topology characterization > returns the pinned import-graph diagram 1`] = `
 {
-  "edgeCount": 9,
+  "edgeCount": 7,
   "mermaid": "graph LR
-  src["src"] --> __core["./core"]
-  src["src"] --> __src_ui["@/src/ui"]
-  src_ui["src/ui"] --> ___core["../core"]
-  src_ui["src/ui"] --> _["."]
-  src_ui["src/ui"] --> __[".."]
-  src_core["src/core"] --> _["."]
-  src___tests__["src/__tests__"] --> ___ui["../ui"]
-  app["app"] --> __src_ui["@/src/ui"]
-  src_feature["src/feature"] --> ___core["../core"]
+  n0["src"] --> n1["src/core"]
+  n0["src"] --> n2["src/ui"]
+  n2["src/ui"] --> n1["src/core"]
+  n2["src/ui"] --> n0["src"]
+  n3["src/__tests__"] --> n2["src/ui"]
+  n4["app"] --> n2["src/ui"]
+  n5["src/feature"] --> n1["src/core"]
 ",
-  "nodeCount": 15,
-  "totalEdges": 9,
+  "nodeCount": 9,
+  "totalEdges": 7,
   "type": "import-graph",
 }
 `;
 
 exports[`generateDiagram topology characterization > returns the pinned topology diagram 1`] = `
 {
-  "edgeCount": 9,
+  "edgeCount": 7,
   "mermaid": "graph LR
-  src["src"] --> __core["./core"]
-  src["src"] --> __src_ui["@/src/ui"]
-  src_ui["src/ui"] --> ___core["../core"]
-  src_ui["src/ui"] --> _["."]
-  src_ui["src/ui"] --> __[".."]
-  src_core["src/core"] --> _["."]
-  src___tests__["src/__tests__"] --> ___ui["../ui"]
-  app["app"] --> __src_ui["@/src/ui"]
-  src_feature["src/feature"] --> ___core["../core"]
+  n0["src"] --> n1["src/core"]
+  n0["src"] --> n2["src/ui"]
+  n2["src/ui"] --> n1["src/core"]
+  n2["src/ui"] --> n0["src"]
+  n3["src/__tests__"] --> n2["src/ui"]
+  n4["app"] --> n2["src/ui"]
+  n5["src/feature"] --> n1["src/core"]
 ",
-  "nodeCount": 15,
-  "totalEdges": 9,
+  "nodeCount": 9,
+  "totalEdges": 7,
   "type": "topology",
 }
 `;

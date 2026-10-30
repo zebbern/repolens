@@ -67,12 +67,14 @@ The core layer is genuinely well-structured: the streaming zipball extractor (`z
 - **Effort:** S · **Confidence:** high
 
 ### [LOW] Python relative imports never resolve in the codebase analysis
+- **Status:** Fixed (2026-10-30): `lib/code/parser/languages/python.ts` resolves relative imports from the importer's package and absolute imports from the repository root, then the importer's directory.
 - **Where:** `lib/code/parser/languages/python.ts` (around line 23) passes the dotted module (`.services`, `..models`, `.`) to the JS-style path resolver.
 - **Problem:** Every relative Python import gets `resolvedPath: null`, even when `server/services/__init__.py` or `server/models.py` is indexed, so Python files look disconnected in the dependency graph, topology and structural findings.
 - **Recommendation:** Convert the leading dots and dotted path to a directory-relative path (package `__init__.py` or module `.py`) before resolving. The golden snapshot in `lib/code/parser/__tests__/analyzer-golden.test.ts` pins today's output and is marked as a known bug.
 - **Effort:** S · **Confidence:** high (found by the 2026-10 analysis characterization tests)
 
 ### [LOW] Topology and import-graph diagrams use raw, colliding module ids
+- **Status:** Fixed (2026-10-30): edges are resolved against the importing file (or the alias root) and nodes get sequential, collision-free ids.
 - **Where:** the `generateDiagram` topology / import-graph path in `lib/ai/client-tool-executor.ts`.
 - **Problem:** Nodes are labelled with unresolved specifiers (`./core`, `../core`, `.`), and the Mermaid id sanitizer is lossy, so `@/src/ui` and `./src/ui` both become `__src_ui` and merge into one node.
 - **Recommendation:** Key nodes by resolved path and make ids collision-free (for example a stable index). The characterization snapshot in `lib/ai/__tests__/repo-wide-tools-characterization.test.ts` pins today's output and is marked as a known bug.

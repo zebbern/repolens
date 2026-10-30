@@ -701,6 +701,48 @@ describe('F7: generateDiagram totalEdges vs edgeCount', () => {
   })
 })
 
+describe('generateDiagram topology edges point at real directories', () => {
+  /** Edge labels as `from --> to`, read back from the Mermaid source. */
+  function edgeLabels(mermaid: string): string[] {
+    return [...mermaid.matchAll(/\["([^"]+)"\] --> \w+\["([^"]+)"\]/g)].map(m => `${m[1]} --> ${m[2]}`)
+  }
+
+  it('resolves relative and alias imports against the importing file', async () => {
+    const index = buildIndex({
+      'src/app/main.ts': [
+        "import { core } from './core'",
+        "import { util } from '../lib/util'",
+        "import { Button } from '@/src/ui/button'",
+      ].join('\n'),
+      'src/app/core.ts': 'export const core = 1',
+      'src/lib/util.ts': 'export const util = 1',
+      'src/ui/button.ts': 'export const Button = 1',
+    })
+
+    const result = await exec('generateDiagram', { type: 'topology' }, index)
+
+    expect(edgeLabels(result.mermaid as string).sort()).toEqual([
+      'src/app --> src/lib',
+      'src/app --> src/ui',
+    ])
+  })
+
+  it('gives directories whose names sanitize alike their own nodes', async () => {
+    const index = buildIndex({
+      'app/main.ts': "import { a } from '../src/ui/a'\nimport { b } from '../src_ui/b'",
+      'src/ui/a.ts': 'export const a = 1',
+      'src_ui/b.ts': 'export const b = 1',
+    })
+
+    const mermaid = (await exec('generateDiagram', { type: 'topology' }, index)).mermaid as string
+    const ids = new Map([...mermaid.matchAll(/(\w+)\["([^"]+)"\]/g)].map(m => [m[2], m[1]]))
+
+    expect(ids.get('src/ui')).toBeDefined()
+    expect(ids.get('src_ui')).toBeDefined()
+    expect(ids.get('src/ui')).not.toBe(ids.get('src_ui'))
+  })
+})
+
 // ---------------------------------------------------------------------------
 // F3 — findSymbol partial-index warning
 // ---------------------------------------------------------------------------

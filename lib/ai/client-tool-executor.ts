@@ -1,6 +1,7 @@
 import type { CodeIndex, IndexedFile } from '@/lib/code/code-index'
 import { buildSearchRegex, createEmptyIndex, indexFile, searchIndexAsync, getFileContent, getFileContentSync, resolveFileContentBatches, resolveFileContents, validateSearchRegex } from '@/lib/code/code-index'
 import { yieldToEventLoop } from '@/lib/code/yield'
+import { normalizePath, resolveAliasImport, resolveRelativeImport } from '@/lib/code/parser/utils'
 import { LANG_EXTENSIONS } from '@/lib/code/scanner/constants'
 import { SYMBOL_PATTERNS } from '@/lib/ai/structural-index'
 import {
@@ -894,6 +895,7 @@ async function executeGenerateDiagram(
     // Resolve content in bounded batches, one per task. Any unavailable file
     // fails the whole diagram, so the partial graph is discarded in that case.
     const filePaths = [...codeIndex.files.keys()]
+    const indexedPaths = new Set(filePaths)
     let resolvedCount = 0
     let missingCount = 0
     for await (const batch of resolveFileContentBatches(codeIndex, filePaths)) {
@@ -901,16 +903,21 @@ async function executeGenerateDiagram(
       missingCount += batch.missingPaths.length
       if (missingCount > 0) continue
       for (const filePath of batch.paths) {
-        const dir = filePath.split('/').slice(0, -1).join('/') || '(root)'
+        const fileDir = filePath.split('/').slice(0, -1).join('/')
+        const dir = fileDir || '(root)'
         nodes.add(dir)
         const content = batch.contents.get(filePath)
         if (typeof content !== 'string') continue
         const importRegex = /import\s+.*from\s+['"](@\/[^'"]+|\.\.?\/[^'"]+)['"]/g
         let m
         while ((m = importRegex.exec(content)) !== null) {
-          const importPath = m[1].replace(/\.\w+$/, '')
-          const parts = importPath.split('/')
-          const targetDir = parts.slice(0, -1).join('/') || '(root)'
+          // Resolve the specifier against the importing file (or the alias root) so
+          // edges point at repository directories, not at './' or '../' fragments.
+          const specifier = m[1]
+          const target = specifier.startsWith('@/')
+            ? resolveAliasImport(specifier, indexedPaths) ?? normalizePath(specifier.slice(2))
+            : resolveRelativeImport(specifier, filePath, indexedPaths) ?? normalizePath(`${fileDir}/${specifier}`)
+          const targetDir = target.split('/').slice(0, -1).join('/') || '(root)'
           if (targetDir !== dir) {
             nodes.add(targetDir)
             edges.push({ from: dir, to: targetDir })
@@ -934,11 +941,19 @@ async function executeGenerateDiagram(
     const totalEdges = allUniqueEdges.length
     const uniqueEdges = allUniqueEdges.slice(0, 30)
 
+    // Sequential ids: sanitizing the label would merge e.g. 'src/ui' and 'src_ui'.
+    const nodeIds = new Map<string, string>()
+    const nodeId = (label: string) => {
+      let id = nodeIds.get(label)
+      if (!id) {
+        id = `n${nodeIds.size}`
+        nodeIds.set(label, id)
+      }
+      return id
+    }
     let mermaid = 'graph LR\n'
     for (const edge of uniqueEdges) {
-      const fromId = edge.from.replace(/[^a-zA-Z0-9]/g, '_')
-      const toId = edge.to.replace(/[^a-zA-Z0-9]/g, '_')
-      mermaid += `  ${fromId}["${edge.from}"] --> ${toId}["${edge.to}"]\n`
+      mermaid += `  ${nodeId(edge.from)}["${edge.from}"] --> ${nodeId(edge.to)}["${edge.to}"]\n`
     }
     return { type: input.type, mermaid, nodeCount: nodes.size, edgeCount: uniqueEdges.length, totalEdges }
   }

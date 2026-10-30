@@ -69,6 +69,43 @@ describe('extractPythonImports', () => {
     })
   })
 
+  describe('module resolution', () => {
+    const tree = new Set([
+      'server/app.py',
+      'server/models.py',
+      'server/services/__init__.py',
+      'server/services/user_service.py',
+      'server/api/__init__.py',
+      'server/api/routes.py',
+    ])
+    const resolve = (code: string, from: string) => extractPythonImports(code, from, tree)[0]
+
+    it.each([
+      ['a sibling package', 'from .services import UserService', 'server/app.py', 'server/services/__init__.py'],
+      ['a sibling module', 'from .models import User', 'server/app.py', 'server/models.py'],
+      ['a parent-package module', 'from ..models import User', 'server/api/routes.py', 'server/models.py'],
+      ['a module inside a parent-package package', 'from ..services.user_service import create', 'server/api/routes.py', 'server/services/user_service.py'],
+      ['a submodule named after a bare dot', 'from . import user_service', 'server/services/__init__.py', 'server/services/user_service.py'],
+      ['the current package for a bare dot', 'from . import helpers', 'server/services/__init__.py', 'server/services/__init__.py'],
+      ['an absolute module from a nested file', 'from server.models import User', 'server/api/routes.py', 'server/models.py'],
+      ['an absolute package import', 'import server.services', 'server/api/routes.py', 'server/services/__init__.py'],
+    ])('resolves %s', (_name, code, from, expected) => {
+      expect(resolve(code, from)).toMatchObject({ resolvedPath: expected, isExternal: false })
+    })
+
+    it('leaves an unknown relative module unresolved but not external', () => {
+      expect(resolve('from .missing import x', 'server/app.py')).toMatchObject({ resolvedPath: null, isExternal: false })
+    })
+
+    it('treats a third-party module as external', () => {
+      expect(resolve('from os.path import join', 'server/api/routes.py')).toMatchObject({ resolvedPath: null, isExternal: true })
+    })
+
+    it('does not climb above the repository root', () => {
+      expect(resolve('from ...models import User', 'server/app.py')).toMatchObject({ resolvedPath: null, isExternal: false })
+    })
+  })
+
   describe('deduplication', () => {
     it('deduplicates repeated from-imports of the same module', () => {
       const code = [

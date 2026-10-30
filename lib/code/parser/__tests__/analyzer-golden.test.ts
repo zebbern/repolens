@@ -220,10 +220,6 @@ async function analyzed(index: CodeIndex) {
 
 describe('analyzeCodebase golden output', () => {
   it('matches the stored reference for the core corpus', async () => {
-    // KNOWN BUG pinned here (pre-existing; docs/improvements/core-correctness-and-bugs.md):
-    // Python relative imports (`.services`, `..models`, `.`) resolve to null because
-    // languages/python.ts passes the dotted module to the JS-style resolver. Fixing it
-    // changes this snapshot on purpose — update it then.
     expect(await analyzed(inlineIndex(CORE_FILES))).toMatchSnapshot()
   })
 

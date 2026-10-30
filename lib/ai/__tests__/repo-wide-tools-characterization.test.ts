@@ -204,9 +204,6 @@ describe('generateDiagram topology characterization', () => {
   it.each(['topology', 'import-graph'])('returns the pinned %s diagram', async type => {
     const files = corpus()
     const inline = await run('generateDiagram', { type }, inlineIndex(files))
-    // KNOWN BUG pinned here (pre-existing; docs/improvements/core-correctness-and-bugs.md):
-    // diagram nodes use raw unresolved specifiers ('./core', '../core', '.') and lossy
-    // mermaid ids, so '@/src/ui' and './src/ui' collide. A fix changes this snapshot.
     expect(inline).toMatchSnapshot()
     expect(await run('generateDiagram', { type }, storeIndex(files))).toStrictEqual(inline)
   })

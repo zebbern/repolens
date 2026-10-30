@@ -9,7 +9,7 @@ exports[`analyzeCodebase golden output > matches the stored reference digest for
     ],
   ],
   "detectedFramework": "Next.js",
-  "edgeCount": 288,
+  "edgeCount": 291,
   "externalDeps": [
     [
       "next",
@@ -395,6 +395,12 @@ exports[`analyzeCodebase golden output > matches the stored reference digest for
         "src/gen/mod129.ts",
       ],
       [
+        "server/app.py",
+        "server/services/user_service.py",
+        "server/services/__init__.py",
+        "server/models.py",
+      ],
+      [
         "src/legacy.js",
         "src/helper.js",
       ],
@@ -403,6 +409,8 @@ exports[`analyzeCodebase golden output > matches the stored reference digest for
       "components/header.tsx",
       "src/store.ts",
       "app/dashboard/page.tsx",
+      "server/services/user_service.py",
+      "server/services/__init__.py",
     ],
     "depthMap": [
       [
@@ -949,12 +957,25 @@ exports[`analyzeCodebase golden output > matches the stored reference digest for
         "src/helper.js",
         1,
       ],
+      [
+        "server/services/__init__.py",
+        1,
+      ],
+      [
+        "server/services/user_service.py",
+        2,
+      ],
+      [
+        "server/models.py",
+        3,
+      ],
     ],
     "entryPoints": [
       "app/dashboard/page.tsx",
       "components/ui/index.ts",
       "src/gen/mod129.ts",
       "src/legacy.js",
+      "server/app.py",
     ],
     "hubs": [
       "lib/utils.ts",
@@ -966,13 +987,10 @@ exports[`analyzeCodebase golden output > matches the stored reference digest for
       "lib/utils.ts",
       "src/models/user.ts",
       "src/helper.js",
+      "server/models.py",
     ],
     "maxDepth": 129,
     "orphans": [
-      "server/app.py",
-      "server/services/user_service.py",
-      "server/services/__init__.py",
-      "server/models.py",
       "cmd/main.go",
       "internal/api/api.go",
       "README.md",
@@ -1447,7 +1465,7 @@ export const Button = ({ label }: { label: string }) => <button className={cn(la
           {
             "isDefault": false,
             "isExternal": false,
-            "resolvedPath": null,
+            "resolvedPath": "server/services/__init__.py",
             "source": ".services",
             "specifiers": [
               "user_service",
@@ -1504,7 +1522,7 @@ export const Button = ({ label }: { label: string }) => <button className={cn(la
           {
             "isDefault": false,
             "isExternal": false,
-            "resolvedPath": null,
+            "resolvedPath": "server/models.py",
             "source": "..models",
             "specifiers": [
               "User",
@@ -1526,7 +1544,7 @@ export const Button = ({ label }: { label: string }) => <button className={cn(la
           {
             "isDefault": false,
             "isExternal": false,
-            "resolvedPath": null,
+            "resolvedPath": "server/services/user_service.py",
             "source": ".",
             "specifiers": [
               "user_service",
@@ -1729,15 +1747,21 @@ export const Button = ({ label }: { label: string }) => <button className={cn(la
       ],
       [
         "server/app.py",
-        [],
+        [
+          "server/services/__init__.py",
+        ],
       ],
       [
         "server/services/user_service.py",
-        [],
+        [
+          "server/models.py",
+        ],
       ],
       [
         "server/services/__init__.py",
-        [],
+        [
+          "server/services/user_service.py",
+        ],
       ],
       [
         "server/models.py",
@@ -1880,6 +1904,24 @@ export const Button = ({ label }: { label: string }) => <button className={cn(la
           "src/legacy.js",
         ],
       ],
+      [
+        "server/services/__init__.py",
+        [
+          "server/app.py",
+        ],
+      ],
+      [
+        "server/models.py",
+        [
+          "server/services/user_service.py",
+        ],
+      ],
+      [
+        "server/services/user_service.py",
+        [
+          "server/services/__init__.py",
+        ],
+      ],
     ],
   },
   "primaryLanguage": "typescript",
@@ -1896,6 +1938,12 @@ export const Button = ({ label }: { label: string }) => <button className={cn(la
         "src/models/user.ts",
       ],
       [
+        "server/app.py",
+        "server/services/user_service.py",
+        "server/services/__init__.py",
+        "server/models.py",
+      ],
+      [
         "src/legacy.js",
         "src/helper.js",
       ],
@@ -1905,6 +1953,8 @@ export const Button = ({ label }: { label: string }) => <button className={cn(la
       "components/header.tsx",
       "src/store.ts",
       "app/dashboard/page.tsx",
+      "server/services/user_service.py",
+      "server/services/__init__.py",
     ],
     "depthMap": [
       [
@@ -1935,11 +1985,24 @@ export const Button = ({ label }: { label: string }) => <button className={cn(la
         "src/helper.js",
         1,
       ],
+      [
+        "server/services/__init__.py",
+        1,
+      ],
+      [
+        "server/services/user_service.py",
+        2,
+      ],
+      [
+        "server/models.py",
+        3,
+      ],
     ],
     "entryPoints": [
       "app/dashboard/page.tsx",
       "components/ui/index.ts",
       "src/legacy.js",
+      "server/app.py",
     ],
     "hubs": [
       "components/header.tsx",
@@ -1949,13 +2012,10 @@ export const Button = ({ label }: { label: string }) => <button className={cn(la
       "lib/utils.ts",
       "src/models/user.ts",
       "src/helper.js",
+      "server/models.py",
     ],
     "maxDepth": 3,
     "orphans": [
-      "server/app.py",
-      "server/services/user_service.py",
-      "server/services/__init__.py",
-      "server/models.py",
       "cmd/main.go",
       "internal/api/api.go",
       "README.md",

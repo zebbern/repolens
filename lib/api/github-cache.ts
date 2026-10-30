@@ -80,9 +80,13 @@ export function withGitHubCachePolicy<TArgs extends unknown[]>(
 
     const response = await handler(request, accessToken, ...args)
 
+    // Only successes are shared through the CDN: an error (one client's rate
+    // limit, a GitHub outage) must not be served to every anonymous user. A
+    // route can also opt a success out with its own CDN-Cache-Control: no-store.
+    const shareable = response.ok && response.headers.get('CDN-Cache-Control') !== 'no-store'
     return applyGitHubCacheHeaders(
       response,
-      getGitHubCacheHeaders(accessToken, cdnCacheControl),
+      getGitHubCacheHeaders(accessToken, shareable ? cdnCacheControl : 'no-store'),
     )
   }
 }

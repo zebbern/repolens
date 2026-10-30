@@ -43,16 +43,34 @@ describe('fetcher error messages', () => {
     )
   })
 
-  it('throws with "add a GitHub Personal Access Token in Settings" for 403 responses', async () => {
+  it('throws with "add a GitHub Personal Access Token in Settings" for rate-limit 403 responses', async () => {
     mockFetch.mockResolvedValueOnce({
       ok: false,
       status: 403,
       statusText: 'Forbidden',
+      headers: new Headers({ 'X-RateLimit-Remaining': '0' }),
     })
 
     await expect(fetchRepoMetadata('owner', 'repo')).rejects.toThrow(
       'add a GitHub Personal Access Token in Settings',
     )
+  })
+
+  it('reports a 403 that is not a rate limit as forbidden, without GitHub\'s text', async () => {
+    mockFetch.mockResolvedValueOnce(new Response(
+      JSON.stringify({ message: 'Resource protected by organization SAML enforcement.' }),
+      { status: 403, statusText: 'Forbidden', headers: { 'Content-Type': 'application/json' } },
+    ))
+
+    const error = await fetchRepoMetadata('owner', 'repo').catch((e: unknown) => e)
+
+    expect(error).toMatchObject({
+      name: 'GitHubError',
+      kind: 'forbidden',
+      upstreamStatus: 403,
+      upstreamMessage: 'Resource protected by organization SAML enforcement.',
+    })
+    expect((error as Error).message).not.toContain('SAML')
   })
 
   it('does NOT mention "is public" in the 404 error message', async () => {
@@ -97,7 +115,7 @@ describe('fetcher error messages', () => {
       statusText: 'Not Found',
     }))
 
-    await expect(fetchFileContent('owner', 'repo', 'main', 'src/missing.ts')).rejects.toThrow('Not Found')
+    await expect(fetchFileContent('owner', 'repo', 'main', 'src/missing.ts')).rejects.toThrow('File not found: src/missing.ts')
     expect(cancel).toHaveBeenCalled()
   })
 
@@ -112,6 +130,7 @@ describe('fetcher error messages', () => {
       .mockResolvedValueOnce(new Response(new ReadableStream<Uint8Array>({ cancel: tagsCancel }), {
         status: 403,
         statusText: 'Forbidden',
+        headers: { 'X-RateLimit-Remaining': '0' },
       }))
 
     await expect(fetchRepoMetadata('owner', 'repo')).rejects.toThrow('Repository not found')

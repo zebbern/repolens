@@ -4,6 +4,7 @@ import { z } from "zod"
 import { withGitHubCachePolicy } from "@/lib/api/github-cache"
 import { fetchCommits } from "@/lib/github/fetcher"
 import { apiError } from "@/lib/api/error"
+import { gitHubErrorResponse } from "@/lib/api/github-error-response"
 import { GITHUB_NAME_RE } from "@/lib/github/validation"
 import { applyRateLimit } from "@/lib/api/rate-limit"
 
@@ -56,16 +57,10 @@ export const GET = withGitHubCachePolicy(async function GET(request: NextRequest
 
     return NextResponse.json(commits)
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Failed to fetch commits"
-
-    if (message.includes("not found")) {
-      return apiError('REPO_NOT_FOUND', message, 404)
-    }
-    if (message.includes("Rate limit")) {
-      return apiError('RATE_LIMIT', message, 403)
-    }
-
-    console.error('[commits] GitHub API error:', message)
-    return apiError('GITHUB_ERROR', 'Failed to fetch commits', 500)
+    return gitHubErrorResponse(request, error, {
+      tag: 'commits',
+      fallback: 'Failed to fetch commits',
+      notFoundCode: 'REPO_NOT_FOUND',
+    })
   }
 }, 's-maxage=300, stale-while-revalidate=60')

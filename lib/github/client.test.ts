@@ -442,7 +442,12 @@ describe('Direct GitHub API calls (PAT mode)', () => {
 
       const result = await fetchTreeViaProxy('X', 'Y', 'main')
 
-      expect(result).toMatchObject({ status: 'partial', reasons: ['limit-exceeded'] })
+      // Like the server fetcher, the body is cancelled unread and the failure is a fetch error.
+      expect(result).toMatchObject({
+        status: 'partial',
+        reasons: ['fetch-failed'],
+        failureDetails: [{ message: 'Failed to fetch repository tree' }],
+      })
       expect(cancel).toHaveBeenCalled()
     })
 
@@ -483,24 +488,49 @@ describe('Direct GitHub API calls (PAT mode)', () => {
   describe('Error handling (direct mode)', () => {
     beforeEach(() => { setGitHubPAT('ghp_errors') })
 
-    it('throws descriptive error for 404', async () => {
-      mockFetch.mockResolvedValueOnce(jsonResponse({ message: 'Not Found' }, 404))
-      await expect(fetchRepoViaProxy('X', 'missing')).rejects.toThrow('Not Found')
+    /** A GitHub error response as the browser receives it. */
+    function githubError(status: number, message: string, headers: Record<string, string> = {}): Response {
+      return new Response(JSON.stringify({ message }), {
+        status,
+        headers: { 'Content-Type': 'application/json; charset=utf-8', ...headers },
+      })
+    }
+
+    it('throws the proxy route\'s not-found message for 404, not GitHub\'s text', async () => {
+      mockFetch.mockResolvedValueOnce(githubError(404, 'Not Found'))
+      await expect(fetchRepoViaProxy('X', 'missing')).rejects.toMatchObject({
+        name: 'GitHubError',
+        kind: 'not_found',
+        message: "Repository not found. Make sure the repository exists. If it's private, add a GitHub token in Settings.",
+        upstreamMessage: 'Not Found',
+      })
     })
 
-    it('throws rate-limit error for 403', async () => {
-      mockFetch.mockResolvedValueOnce(jsonResponse({ message: 'API rate limit exceeded' }, 403))
-      await expect(fetchRepoViaProxy('X', 'Y')).rejects.toThrow('API rate limit exceeded')
+    it('throws a rate-limit error with the reset for an exhausted 403', async () => {
+      mockFetch.mockResolvedValueOnce(githubError(403, 'API rate limit exceeded', {
+        'X-RateLimit-Remaining': '0',
+        'X-RateLimit-Reset': String(Math.ceil(Date.now() / 1000) + 120),
+      }))
+      const error = await fetchRepoViaProxy('X', 'Y').catch((e: unknown) => e)
+      expect(error).toMatchObject({ kind: 'rate_limited', message: expect.stringContaining('Rate limit exceeded') })
+      expect((error as { retryAfter: number }).retryAfter).toBeGreaterThan(100)
     })
 
-    it('throws generic error for 500', async () => {
-      mockFetch.mockResolvedValueOnce(jsonResponse({ message: 'Internal Server Error' }, 500))
-      await expect(fetchRepoViaProxy('X', 'Y')).rejects.toThrow('Internal Server Error')
+    it('keeps SAML and permission text out of a forbidden 403 message', async () => {
+      mockFetch.mockResolvedValueOnce(githubError(403, 'Resource protected by organization SAML enforcement.'))
+      const error = await fetchRepoViaProxy('X', 'Y').catch((e: unknown) => e)
+      expect(error).toMatchObject({ kind: 'forbidden', upstreamMessage: 'Resource protected by organization SAML enforcement.' })
+      expect((error as Error).message).not.toContain('SAML')
     })
 
-    it('throws default message when error body has no message', async () => {
+    it('throws the generic upstream message for 5xx', async () => {
+      mockFetch.mockResolvedValueOnce(githubError(500, 'Internal Server Error'))
+      await expect(fetchRepoViaProxy('X', 'Y')).rejects.toMatchObject({ kind: 'upstream', message: 'Failed to fetch repository' })
+    })
+
+    it('throws the same message when the error body has no message', async () => {
       mockFetch.mockResolvedValueOnce({ ok: false, status: 502, statusText: 'Bad Gateway', json: () => Promise.resolve({}) } as unknown as Response)
-      await expect(fetchRepoViaProxy('X', 'Y')).rejects.toThrow('Request failed: Bad Gateway')
+      await expect(fetchRepoViaProxy('X', 'Y')).rejects.toMatchObject({ kind: 'upstream', message: 'Failed to fetch repository' })
     })
 
     it('throws for 404 on file fetch via proxy', async () => {
@@ -548,7 +578,7 @@ describe('Direct GitHub API calls (PAT mode)', () => {
 
       fireDeadline(GITHUB_REQUEST_TIMEOUT_MS)
 
-      await expect(pending).rejects.toHaveProperty('name', 'TimeoutError')
+      await expect(pending).rejects.toMatchObject({ name: 'GitHubError', kind: 'timeout' })
     })
 
     it('bounds each direct tree request with the server request deadline', async () => {
@@ -581,7 +611,7 @@ describe('Direct GitHub API calls (PAT mode)', () => {
 
       fireDeadline(5_000)
 
-      await expect(pending).rejects.toHaveProperty('name', 'TimeoutError')
+      await expect(pending).rejects.toMatchObject({ name: 'GitHubError', kind: 'timeout' })
     })
   })
 
@@ -618,10 +648,14 @@ describe('Direct GitHub API calls (PAT mode)', () => {
       expect(result.isTruncated).toBe(false)
     })
 
-    it('throws when GraphQL response has errors', async () => {
+    it('throws when GraphQL response has errors, keeping GitHub\'s text out of the message', async () => {
       setGitHubPAT('ghp_gql')
       mockFetch.mockResolvedValueOnce(jsonResponse({ data: {}, errors: [{ message: 'Bad query' }] }))
-      await expect(fetchBlameViaProxy('X', 'Y', 'main', 'bad.ts')).rejects.toThrow('Bad query')
+      await expect(fetchBlameViaProxy('X', 'Y', 'main', 'bad.ts')).rejects.toMatchObject({
+        kind: 'upstream',
+        message: 'Failed to fetch blame data',
+        upstreamMessage: 'Bad query',
+      })
     })
 
     it('throws when blob is null (file not found)', async () => {

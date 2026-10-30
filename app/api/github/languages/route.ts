@@ -4,6 +4,7 @@ import { z } from "zod"
 import { withGitHubCachePolicy } from "@/lib/api/github-cache"
 import { fetchRepoLanguages } from "@/lib/github/fetcher"
 import { apiError } from "@/lib/api/error"
+import { gitHubErrorResponse } from "@/lib/api/github-error-response"
 import { GITHUB_NAME_RE } from "@/lib/github/validation"
 import { applyRateLimit } from "@/lib/api/rate-limit"
 
@@ -34,16 +35,10 @@ export const GET = withGitHubCachePolicy(async function GET(request: NextRequest
 
     return NextResponse.json(languages)
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Failed to fetch languages"
-
-    if (message.includes("not found")) {
-      return apiError('REPO_NOT_FOUND', message, 404)
-    }
-    if (message.includes("Rate limit")) {
-      return apiError('RATE_LIMIT', message, 403)
-    }
-
-    console.error('[languages] GitHub API error:', message)
-    return apiError('GITHUB_ERROR', 'Failed to fetch languages', 500)
+    return gitHubErrorResponse(request, error, {
+      tag: 'languages',
+      fallback: 'Failed to fetch languages',
+      notFoundCode: 'REPO_NOT_FOUND',
+    })
   }
 }, 's-maxage=600, stale-while-revalidate=120')

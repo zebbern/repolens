@@ -5,6 +5,7 @@ import { withGitHubCachePolicy } from "@/lib/api/github-cache"
 import { fetchTags, fetchBranches } from "@/lib/github/fetcher"
 import { GITHUB_LIST_MAX_PAGES, githubPagesFetched } from "@/lib/github/pagination"
 import { apiError } from "@/lib/api/error"
+import { gitHubErrorResponse } from "@/lib/api/github-error-response"
 import { GITHUB_NAME_RE } from "@/lib/github/validation"
 import { applyRateLimit, refundRateLimit } from "@/lib/api/rate-limit"
 
@@ -51,16 +52,10 @@ export const GET = withGitHubCachePolicy(async function GET(request: NextRequest
       branchesTruncated: branches.truncated,
     })
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Failed to fetch refs"
-
-    if (message.includes("not found")) {
-      return apiError('REPO_NOT_FOUND', message, 404)
-    }
-    if (message.includes("Rate limit")) {
-      return apiError('RATE_LIMIT', message, 403)
-    }
-
-    console.error('[refs] GitHub API error:', message)
-    return apiError('GITHUB_ERROR', 'Failed to fetch refs', 500)
+    return gitHubErrorResponse(request, error, {
+      tag: 'refs',
+      fallback: 'Failed to fetch refs',
+      notFoundCode: 'REPO_NOT_FOUND',
+    })
   }
 }, 's-maxage=300, stale-while-revalidate=60')

@@ -1,12 +1,16 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { NextRequest } from 'next/server'
+import { GitHubError } from '@/lib/github/errors'
 
 // An upstream/internal failure detail that must never reach the client.
 const SECRET = 'connect ECONNREFUSED 10.0.0.7:443 internal-upstream-detail'
 
-const { rejectWithSecret } = vi.hoisted(() => ({
-  rejectWithSecret: () => Promise.reject(new Error('connect ECONNREFUSED 10.0.0.7:443 internal-upstream-detail')),
-}))
+const { failure, rejectWithSecret } = vi.hoisted(() => {
+  const failure = {
+    create: (): unknown => new Error('connect ECONNREFUSED 10.0.0.7:443 internal-upstream-detail'),
+  }
+  return { failure, rejectWithSecret: () => Promise.reject(failure.create()) }
+})
 
 vi.mock('@/lib/auth/token', () => ({
   getAccessToken: () => Promise.resolve('gho_server_token'),
@@ -137,6 +141,40 @@ describe('GitHub proxy routes do not leak raw exception text', () => {
       expect(text).not.toContain('ECONNREFUSED')
       expect(JSON.parse(text).error.message).toEqual(expect.any(String))
       expect(consoleError.mock.calls.flat().map(String).join(' ')).toContain(SECRET)
+    },
+  )
+})
+
+describe('GitHub proxy routes keep upstream text of a GitHubError server-side', () => {
+  /** Routes whose GitHub failures come from lib/github/fetcher.ts. */
+  const FETCHER_ROUTES = ROUTES.filter(route => !['rate-limit', 'validate-token', 'zipball'].includes(route.name))
+  const createSecretError = () => new Error(SECRET)
+  let consoleWarn: ReturnType<typeof vi.spyOn>
+  let consoleError: ReturnType<typeof vi.spyOn>
+
+  beforeEach(() => {
+    consoleWarn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+  })
+
+  afterEach(() => {
+    failure.create = createSecretError
+    consoleWarn.mockRestore()
+    consoleError.mockRestore()
+  })
+
+  it.each(FETCHER_ROUTES.map(route => [route.name, route] as const))(
+    '%s returns the table message for a 4xx GitHubError and logs the upstream text',
+    async (_name, route) => {
+      failure.create = () => new GitHubError('forbidden', { resource: 'repository', upstreamStatus: 403, upstreamMessage: SECRET })
+      const handler = await route.load()
+      const response = await handler(route.request(), route.context)
+      const text = await response.text()
+
+      expect(response.status).toBe(403)
+      expect(JSON.parse(text).error).toEqual({ code: 'FORBIDDEN', message: expect.any(String) })
+      expect(text).not.toContain(SECRET)
+      expect(consoleWarn.mock.calls.flat().map(String).join(' ')).toContain(SECRET)
     },
   )
 })

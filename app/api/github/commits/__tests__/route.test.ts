@@ -26,6 +26,7 @@ vi.mock('@/lib/api/error', () => ({
 
 import { GET } from '@/app/api/github/commits/route'
 import { NextRequest } from 'next/server'
+import { GitHubError } from '@/lib/github/errors'
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -140,7 +141,7 @@ describe('GET /api/github/commits', () => {
   })
 
   it('returns 404 when repo not found', async () => {
-    mockFetchCommits.mockRejectedValue(new Error('Repository not found'))
+    mockFetchCommits.mockRejectedValue(new GitHubError('not_found', { resource: 'commits' }))
 
     const req = createRequest({ owner: 'o', name: 'missing' })
     const res = await GET(req)
@@ -149,7 +150,7 @@ describe('GET /api/github/commits', () => {
   })
 
   it('returns 403 on rate limit', async () => {
-    mockFetchCommits.mockRejectedValue(new Error('Rate limit exceeded'))
+    mockFetchCommits.mockRejectedValue(new GitHubError('rate_limited', { resource: 'commits' }))
 
     const req = createRequest({ owner: 'o', name: 'r' })
     const res = await GET(req)

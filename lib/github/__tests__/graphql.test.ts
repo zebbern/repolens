@@ -62,17 +62,17 @@ describe('githubGraphQL', () => {
     }))
   })
 
-  it('throws on 401 authentication error', async () => {
+  it('throws an unauthorized GitHubError on 401', async () => {
     mockFetch.mockResolvedValueOnce(
       mockJsonResponse(401, {}, 'Unauthorized'),
     )
 
     await expect(
       githubGraphQL('query { viewer { login } }', {}, 'bad-token'),
-    ).rejects.toThrow('Authentication required for this request')
+    ).rejects.toMatchObject({ name: 'GitHubError', kind: 'unauthorized', upstreamStatus: 401 })
   })
 
-  it('throws on GraphQL errors array', async () => {
+  it('maps the first GraphQL error to a kind and keeps its text for logging only', async () => {
     mockFetch.mockResolvedValueOnce(
       mockJsonResponse(200, {
         data: null,
@@ -83,27 +83,53 @@ describe('githubGraphQL', () => {
       }),
     )
 
-    await expect(
-      githubGraphQL('query { ... }', { owner: 'x', name: 'y' }, 'token'),
-    ).rejects.toThrow('Could not resolve to a Repository')
+    const error = await githubGraphQL('query { ... }', { owner: 'x', name: 'y' }, 'token').catch((e: unknown) => e)
+
+    expect(error).toMatchObject({
+      name: 'GitHubError',
+      kind: 'not_found',
+      upstreamMessage: 'Could not resolve to a Repository',
+    })
+    expect((error as Error).message).not.toContain('Could not resolve')
   })
 
-  it('throws on non-OK non-401 response', async () => {
+  it('maps a RATE_LIMITED GraphQL error to rate_limited', async () => {
+    mockFetch.mockResolvedValueOnce(
+      mockJsonResponse(200, { data: null, errors: [{ message: 'API rate limit exceeded', type: 'RATE_LIMITED' }] }),
+    )
+
+    await expect(
+      githubGraphQL('query { ... }', {}, 'token'),
+    ).rejects.toMatchObject({ kind: 'rate_limited' })
+  })
+
+  it('throws an upstream GitHubError on non-OK non-401 response', async () => {
     mockFetch.mockResolvedValueOnce(
       mockJsonResponse(500, {}, 'Internal Server Error'),
     )
 
     await expect(
       githubGraphQL('query { ... }', {}, 'token'),
-    ).rejects.toThrow('GraphQL request failed: Internal Server Error')
+    ).rejects.toMatchObject({ kind: 'upstream', message: 'Failed to fetch GitHub data', upstreamStatus: 500 })
   })
 
-  it('propagates network errors from fetch', async () => {
+  it('wraps network errors from fetch as upstream', async () => {
     mockFetch.mockRejectedValueOnce(new TypeError('Failed to fetch'))
 
     await expect(
       githubGraphQL('query { ... }', {}, 'token'),
-    ).rejects.toThrow('Failed to fetch')
+    ).rejects.toMatchObject({ kind: 'upstream', upstreamMessage: 'Failed to fetch' })
+  })
+
+  it('rethrows a caller abort unchanged', async () => {
+    const controller = new AbortController()
+    const reason = new DOMException('navigated away', 'AbortError')
+    controller.abort(reason)
+    mockFetch.mockRejectedValueOnce(reason)
+
+    await expect(
+      githubGraphQL('query { ... }', {}, 'token', controller.signal),
+    ).rejects.toBe(reason)
   })
 
   // ---- Edge cases ---------------------------------------------------------
@@ -123,14 +149,14 @@ describe('githubGraphQL', () => {
     expect(result).toEqual(responseData)
   })
 
-  it('throws on rate limiting (403)', async () => {
+  it('treats a 403 without rate-limit signals as forbidden', async () => {
     mockFetch.mockResolvedValueOnce(
       mockJsonResponse(403, {}, 'Forbidden'),
     )
 
     await expect(
       githubGraphQL('query { ... }', {}, 'token'),
-    ).rejects.toThrow('GraphQL request failed: Forbidden')
+    ).rejects.toMatchObject({ kind: 'forbidden' })
   })
 
   it('throws when response.json() rejects (malformed JSON)', async () => {

@@ -34,6 +34,7 @@ vi.mock('@/lib/api/error', () => ({
 import { GET } from '@/app/api/github/tags/route'
 import { GITHUB_LIST_MAX_PAGES } from '@/lib/github/pagination'
 import { NextRequest } from 'next/server'
+import { GitHubError } from '@/lib/github/errors'
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -181,7 +182,7 @@ describe('GET /api/github/tags', () => {
   })
 
   it('returns 404 when repo not found', async () => {
-    mockFetchTags.mockRejectedValue(new Error('Repository not found'))
+    mockFetchTags.mockRejectedValue(new GitHubError('not_found', { resource: 'tags' }))
 
     const req = createRequest({ owner: 'owner', name: 'missing' })
     const res = await GET(req)
@@ -192,7 +193,7 @@ describe('GET /api/github/tags', () => {
   })
 
   it('returns 403 on rate limit', async () => {
-    mockFetchTags.mockRejectedValue(new Error('Rate limit exceeded'))
+    mockFetchTags.mockRejectedValue(new GitHubError('rate_limited', { resource: 'tags' }))
 
     const req = createRequest({ owner: 'owner', name: 'repo' })
     const res = await GET(req)

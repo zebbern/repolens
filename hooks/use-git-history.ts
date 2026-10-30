@@ -10,6 +10,7 @@ import {
   fetchFileCommitsViaProxy,
   fetchCommitDetailViaProxy,
 } from "@/lib/github/client"
+import { isGitHubError } from "@/lib/github/errors"
 import {
   groupCommitsByDate,
   computeBlameStats,
@@ -132,12 +133,10 @@ export function useGitHistory(
       setBlameData(data)
     } catch (err) {
       if (!isOperationCurrent(operation, requestSession)) return
-      const message = err instanceof Error ? err.message : 'Failed to load blame data'
-      // Detect auth errors
-      if (message.includes('401') || message.toLowerCase().includes('unauthorized') || message.toLowerCase().includes('authentication')) {
+      if (isGitHubError(err) && err.kind === 'unauthorized') {
         setError('Login required to view blame data. Blame uses the GitHub GraphQL API which requires authentication.')
       } else {
-        setError(message)
+        setError(err instanceof Error ? err.message : 'Failed to load blame data')
       }
     } finally {
       if (isOperationCurrent(operation, requestSession)) setIsLoading(false)

@@ -19,6 +19,7 @@ vi.mock('@/lib/github/client', () => ({
 }))
 
 import { useGitHistory } from '../use-git-history'
+import { GitHubError } from '@/lib/github/errors'
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -145,7 +146,7 @@ describe('useGitHistory', () => {
   })
 
   it('fetchBlame surfaces auth error message', async () => {
-    mockFetchBlame.mockRejectedValue(new Error('401 Unauthorized'))
+    mockFetchBlame.mockRejectedValue(new GitHubError('unauthorized', { resource: 'blame' }))
 
     const { result } = renderHook(() => useGitHistory())
 
@@ -155,6 +156,23 @@ describe('useGitHistory', () => {
 
     expect(result.current.error).toContain('Login required')
     expect(result.current.blameData).toBeNull()
+  })
+
+  it('decides the login prompt from the error kind, not its wording', async () => {
+    // A message with no "auth" in it, then auth wording on an untyped error.
+    mockFetchBlame.mockRejectedValueOnce(new GitHubError('unauthorized', { resource: 'repository' }))
+    mockFetchBlame.mockRejectedValueOnce(new Error('Authentication required to fetch blame data'))
+    const { result } = renderHook(() => useGitHistory())
+
+    await act(async () => {
+      await result.current.fetchBlame('owner', 'repo', 'main', 'src/index.ts')
+    })
+    expect(result.current.error).toContain('Login required')
+
+    await act(async () => {
+      await result.current.fetchBlame('owner', 'repo', 'main', 'src/other.ts')
+    })
+    expect(result.current.error).toBe('Authentication required to fetch blame data')
   })
 
   it('fetchCommitDetail sets selectedCommit and switches to commit-detail view', async () => {

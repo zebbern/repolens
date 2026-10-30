@@ -5,6 +5,7 @@ import { z } from "zod"
 import { withGitHubCachePolicy } from "@/lib/api/github-cache"
 import { fetchCommitDetail } from "@/lib/github/fetcher"
 import { apiError } from "@/lib/api/error"
+import { gitHubErrorResponse } from "@/lib/api/github-error-response"
 import { GITHUB_NAME_RE } from "@/lib/github/validation"
 import { applyRateLimit } from "@/lib/api/rate-limit"
 
@@ -46,16 +47,10 @@ export const GET = withGitHubCachePolicy(async function GET(
 
     return NextResponse.json(data)
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Failed to fetch commit detail"
-
-    if (message.includes("not found")) {
-      return apiError('NOT_FOUND', message, 404)
-    }
-    if (message.includes("Rate limit")) {
-      return apiError('RATE_LIMIT', message, 403)
-    }
-
-    console.error('[commit-detail] GitHub API error:', message)
-    return apiError('GITHUB_ERROR', 'Failed to fetch commit detail', 500)
+    return gitHubErrorResponse(request, error, {
+      tag: 'commit-detail',
+      fallback: 'Failed to fetch commit detail',
+      notFoundCode: 'NOT_FOUND',
+    })
   }
 })

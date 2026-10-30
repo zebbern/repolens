@@ -19,6 +19,14 @@ import {
   type PaginatedList,
 } from '@/lib/github/pagination'
 import { GITHUB_REQUEST_TIMEOUT_MS } from '@/lib/github/request-signal'
+import {
+  GitHubError,
+  gitHubErrorFromGraphQL,
+  gitHubErrorFromProxyResponse,
+  gitHubErrorFromResponse,
+  gitHubTransportError,
+  type GitHubErrorTarget,
+} from '@/lib/github/errors'
 
 // ---------------------------------------------------------------------------
 // TTL constants (milliseconds)
@@ -241,6 +249,40 @@ function mapProxyUrlToGitHubApi(proxyUrl: string): DirectUrlMapping | null {
   return null
 }
 
+const PROXY_PATH_RESOURCES: Record<string, GitHubErrorTarget['resource']> = {
+  '/api/github/repo': 'repository',
+  '/api/github/tree': 'tree',
+  '/api/github/file': 'file',
+  '/api/github/tags': 'tags',
+  '/api/github/branches': 'branches',
+  '/api/github/refs': 'refs',
+  '/api/github/commits': 'commits',
+  '/api/github/compare': 'comparison',
+  '/api/github/languages': 'languages',
+  '/api/github/pulls': 'pulls',
+  '/api/github/rate-limit': 'rate_limit',
+}
+
+/**
+ * What a proxy URL fetches, for GitHubError messages. Direct mode uses the
+ * same target for the GitHub URL it derives, so both modes word errors alike.
+ */
+function proxyErrorTarget(proxyUrl: string): GitHubErrorTarget {
+  const { pathname, searchParams } = new URL(proxyUrl, 'http://localhost')
+  const resource = PROXY_PATH_RESOURCES[pathname]
+  if (resource === 'file') return { resource, subject: searchParams.get('path') ?? undefined }
+  if (resource) return { resource }
+
+  const commit = pathname.match(/^\/api\/github\/commit\/([^/]+)$/)
+  if (commit) return { resource: 'commit', subject: decodeURIComponent(commit[1]) }
+  const pull = pathname.match(/^\/api\/github\/pulls\/(\d+)(?:\/(files|comments))?$/)
+  if (pull) {
+    const resource = pull[2] === 'files' ? 'pull_request_files' : pull[2] === 'comments' ? 'pull_request_comments' : 'pull_request'
+    return { resource, subject: pull[1] }
+  }
+  return { resource: 'github' }
+}
+
 /**
  * Fetch from the GitHub API directly with PAT authentication.
  * Handles JSON responses and common GitHub error codes.
@@ -290,21 +332,24 @@ function getDirectRequestSignal(options: ProxyRequestOptions): AbortSignal | und
 async function directFetch<T>(
   url: string,
   pat: string,
+  target: GitHubErrorTarget,
   options?: ProxyRequestOptions,
 ): Promise<T>
 async function directFetch<T>(
   url: string,
   pat: string,
+  target: GitHubErrorTarget,
   options: ProxyRequestOptions,
   maxResponseBytes: number,
 ): Promise<BoundedJsonResponse<T>>
 async function directFetch<T = unknown>(
   url: string,
   pat: string,
+  target: GitHubErrorTarget,
   options: ProxyRequestOptions = {},
   maxResponseBytes?: number,
 ): Promise<T | BoundedJsonResponse<T>> {
-  const response = await directFetchResponse(url, pat, options, maxResponseBytes)
+  const response = await directFetchResponse(url, pat, options, target)
 
   if (maxResponseBytes !== undefined) {
     return readBoundedJsonResponse<T>(response, maxResponseBytes)
@@ -319,21 +364,26 @@ async function directFetch<T = unknown>(
 async function directFetchAllPages<T>(
   url: string,
   pat: string,
+  target: GitHubErrorTarget,
   options: ProxyRequestOptions = {},
 ): Promise<PaginatedList<T>> {
   const signal = getRequestSignal(options)
   return collectGitHubPages(url, async (pageUrl) => {
-    const response = await directFetchResponse(pageUrl, pat, { signal })
+    const response = await directFetchResponse(pageUrl, pat, { signal }, target)
     return { items: (await response.json()) as T[], linkHeader: response.headers.get('Link') }
   })
 }
 
-/** Send an authenticated GitHub request and map common error statuses. */
+/**
+ * Send an authenticated GitHub request. Failures become the same GitHubError
+ * (kind and table message) the proxy route would report; GitHub's own text is
+ * kept only in `upstreamMessage`.
+ */
 async function directFetchResponse(
   url: string,
   pat: string,
   options: ProxyRequestOptions,
-  maxResponseBytes?: number,
+  target: GitHubErrorTarget,
 ): Promise<Response> {
   const fetchOptions: RequestInit = {
     headers: {
@@ -343,32 +393,14 @@ async function directFetchResponse(
     redirect: 'error',
     signal: getDirectRequestSignal(options),
   }
-  const response = await fetch(url, fetchOptions)
-
-  if (!response.ok) {
-    let body: unknown = {}
-    try {
-      body = maxResponseBytes === undefined
-        ? await response.json()
-        : (await readBoundedJsonResponse<Record<string, unknown>>(response, maxResponseBytes)).data
-    } catch (error) {
-      if (error instanceof Error && error.name === 'ResponseBodyTooLargeError') throw error
-    }
-    const ghMessage = (body as { message?: string }).message
-    if (response.status === 404) {
-      throw new Error(ghMessage ?? 'Not found. Make sure the repository exists.')
-    }
-    if (response.status === 401) {
-      throw new Error('Invalid or expired GitHub token. Check your PAT in Settings.')
-    }
-    if (response.status === 403) {
-      throw new Error(ghMessage ?? 'Rate limit exceeded. Try again later.')
-    }
-    if (response.status === 422) {
-      throw new Error(ghMessage ?? 'Invalid request.')
-    }
-    throw new Error(ghMessage ?? `Request failed: ${response.statusText}`)
+  let response: Response
+  try {
+    response = await fetch(url, fetchOptions)
+  } catch (error) {
+    throw gitHubTransportError(error, target, options.signal)
   }
+
+  if (!response.ok) throw await gitHubErrorFromResponse(response, target)
 
   return response
 }
@@ -660,7 +692,7 @@ interface BlameGraphQLResponse {
       } | null
     }
   }
-  errors?: Array<{ message: string }>
+  errors?: Array<{ message: string; type?: string }>
 }
 
 // ---------------------------------------------------------------------------
@@ -685,9 +717,10 @@ async function proxyFetch<T>(url: string, options: ProxyRequestOptions = {}): Pr
     const mapping = mapProxyUrlToGitHubApi(url)
     if (mapping) {
       // List endpoints walk Link pages so both modes return identical lists.
+      const target = proxyErrorTarget(url)
       const raw = mapping.endpoint === 'tags' || mapping.endpoint === 'branches'
-        ? await directFetchAllPages(mapping.url, pat, options)
-        : await directFetch(mapping.url, pat, options)
+        ? await directFetchAllPages(mapping.url, pat, target, options)
+        : await directFetch(mapping.url, pat, target, options)
       return normalizeDirectResponse<T>(raw, mapping.endpoint)
     }
   }
@@ -700,13 +733,7 @@ async function proxyFetch<T>(url: string, options: ProxyRequestOptions = {}): Pr
   const response = await fetch(url, fetchOptions)
 
   if (!response.ok) {
-    const body = await response.json().catch(() => ({}))
-    const parsed = body as { error?: string | { message?: string } }
-    const message =
-      typeof parsed.error === 'string'
-        ? parsed.error
-        : parsed.error?.message ?? `Request failed: ${response.statusText}`
-    throw new Error(message)
+    throw await gitHubErrorFromProxyResponse(response, proxyErrorTarget(url))
   }
 
   return response.json() as Promise<T>
@@ -794,6 +821,7 @@ export async function fetchTreeViaProxy(
       const bounded = await directFetch<RepoTree>(
         recursive ? `${base}?recursive=1` : base,
         pat,
+        { resource: 'tree' },
         { signal },
         TREE_RESOLUTION_MAX_RESPONSE_BYTES,
       )
@@ -1026,39 +1054,42 @@ async function fetchBlameFromApi(
   // Direct mode: PAT available — call GitHub GraphQL API directly
   const pat = getGitHubPAT()
   if (pat) {
+    // Same GitHubErrors as fetchBlame on the server (see lib/github/fetcher.ts).
     const expression = `${ref}:${path}`
-    const response = await fetch(GITHUB_GRAPHQL_ENDPOINT, {
-      method: 'POST',
-      redirect: 'error',
-      headers: {
-        'Authorization': `Bearer ${pat}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        query: BLAME_QUERY,
-        variables: { owner, name, expression },
-      }),
-      signal: getDirectRequestSignal(options),
-    })
-
-    if (response.status === 401) {
-      throw new Error('Authentication required to fetch blame data')
+    let response: Response
+    try {
+      response = await fetch(GITHUB_GRAPHQL_ENDPOINT, {
+        method: 'POST',
+        redirect: 'error',
+        headers: {
+          'Authorization': `Bearer ${pat}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          query: BLAME_QUERY,
+          variables: { owner, name, expression },
+        }),
+        signal: getDirectRequestSignal(options),
+      })
+    } catch (error) {
+      throw gitHubTransportError(error, { resource: 'blame' }, options.signal)
     }
+
     if (!response.ok) {
-      throw new Error(`GraphQL request failed: ${response.statusText}`)
+      throw await gitHubErrorFromResponse(response, { resource: 'blame' })
     }
 
     const body = (await response.json()) as BlameGraphQLResponse
     if (body.errors && body.errors.length > 0) {
-      throw new Error(body.errors[0].message)
+      throw gitHubErrorFromGraphQL(body.errors, { resource: 'blame' }, response.headers)
     }
 
     if (!body.data?.repository) {
-      throw new Error('Repository not found or inaccessible')
+      throw new GitHubError('not_found', { resource: 'blame' })
     }
     const blob = body.data.repository.object
     if (!blob) {
-      throw new Error(`File not found: ${path}`)
+      throw new GitHubError('not_found', { resource: 'file', subject: path })
     }
 
     return {
@@ -1078,13 +1109,7 @@ async function fetchBlameFromApi(
   })
 
   if (!response.ok) {
-    const body = await response.json().catch(() => ({}))
-    const parsed = body as { error?: string | { message?: string } }
-    const message =
-      typeof parsed.error === 'string'
-        ? parsed.error
-        : parsed.error?.message ?? `Request failed: ${response.statusText}`
-    throw new Error(message)
+    throw await gitHubErrorFromProxyResponse(response, { resource: 'blame' })
   }
 
   return response.json() as Promise<BlameData>

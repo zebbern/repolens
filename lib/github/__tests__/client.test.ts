@@ -292,12 +292,27 @@ describe('GitHub client — caching integration', () => {
       await expect(fetchRepoViaProxy('a', 'b')).rejects.toThrow('Internal server error')
     })
 
-    it('falls back to statusText when body has no error field', async () => {
+    it('falls back to the table message when body has no error field', async () => {
       mockFetch.mockResolvedValueOnce(
         mockErrorResponse(502, {}),
       )
 
-      await expect(fetchRepoViaProxy('a', 'b')).rejects.toThrow('Request failed: Error 502')
+      await expect(fetchRepoViaProxy('a', 'b')).rejects.toMatchObject({
+        name: 'GitHubError',
+        kind: 'upstream',
+        message: 'Failed to fetch repository',
+      })
+    })
+
+    it('rebuilds the GitHubError kind from the route error code', async () => {
+      mockFetch.mockResolvedValueOnce(
+        mockErrorResponse(401, { error: { code: 'AUTH_REQUIRED', message: 'Invalid or expired GitHub token.' } }),
+      )
+
+      await expect(fetchRepoViaProxy('a', 'b')).rejects.toMatchObject({
+        kind: 'unauthorized',
+        message: 'Invalid or expired GitHub token.',
+      })
     })
   })
 })

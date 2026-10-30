@@ -103,8 +103,16 @@ describe('fetchTags / fetchBranches Link pagination', () => {
   it('maps a GitHub error on a later page through the shared error handler', async () => {
     mockFetch
       .mockResolvedValueOnce(listPage([rawTag('v2')], `${TAGS_PAGE_URL}?per_page=100&page=2`))
-      .mockResolvedValueOnce(new Response(null, { status: 403, statusText: 'Forbidden' }))
+      .mockResolvedValueOnce(new Response(null, {
+        status: 403,
+        statusText: 'Forbidden',
+        headers: { 'X-RateLimit-Remaining': '0' },
+      }))
 
-    await expect(fetchTags('owner', 'repo')).rejects.toThrow('Rate limit exceeded')
+    await expect(fetchTags('owner', 'repo')).rejects.toMatchObject({
+      name: 'GitHubError',
+      kind: 'rate_limited',
+      message: 'Rate limit exceeded. Please try again later or add a GitHub token.',
+    })
   })
 })

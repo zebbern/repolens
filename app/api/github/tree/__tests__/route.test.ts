@@ -37,6 +37,32 @@ describe('GET /api/github/tree', () => {
     })
   })
 
+  const partial = (reasons: string[]) => ({
+    status: 'partial', sha: 'root', tree: [], truncated: true, requestCount: 1, reasons,
+    failedSubtrees: ['.'], failureDetails: reasons.map(reason => ({ path: '.', reason, message: 'x' })),
+  })
+
+  it.each([['fetch-failed'], ['time-budget-exceeded']])(
+    'keeps a partial tree caused by %s out of the CDN cache',
+    async (reason) => {
+      mockFetchRepoTree.mockResolvedValue(partial([reason]))
+
+      const res = await GET(new NextRequest('http://localhost/api/github/tree?owner=acme&name=repo'))
+
+      expect(res.status).toBe(200)
+      expect(res.headers.get('CDN-Cache-Control')).toBe('no-store')
+    },
+  )
+
+  it('leaves complete trees and request-budget partials to the default cache policy', async () => {
+    const complete = await GET(new NextRequest('http://localhost/api/github/tree?owner=acme&name=repo'))
+    mockFetchRepoTree.mockResolvedValue(partial(['request-budget-exceeded']))
+    const budget = await GET(new NextRequest('http://localhost/api/github/tree?owner=acme&name=repo'))
+
+    expect(complete.headers.get('CDN-Cache-Control')).toBeNull()
+    expect(budget.headers.get('CDN-Cache-Control')).toBeNull()
+  })
+
   it('propagates caller cancellation instead of returning a 500 response', async () => {
     const reason = new DOMException('Client disconnected', 'AbortError')
     mockFetchRepoTree.mockRejectedValue(reason)

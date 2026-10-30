@@ -26,6 +26,7 @@ vi.mock('@/lib/api/error', () => ({
 
 import { GET } from '@/app/api/github/compare/route'
 import { NextRequest } from 'next/server'
+import { GitHubError } from '@/lib/github/errors'
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -112,7 +113,7 @@ describe('GET /api/github/compare', () => {
   })
 
   it('returns 404 when repo not found', async () => {
-    mockFetchCompare.mockRejectedValue(new Error('Repository not found'))
+    mockFetchCompare.mockRejectedValue(new GitHubError('not_found', { resource: 'comparison' }))
 
     const req = createRequest({ owner: 'o', name: 'missing', base: 'v1', head: 'v2' })
     const res = await GET(req)
@@ -121,7 +122,7 @@ describe('GET /api/github/compare', () => {
   })
 
   it('returns 422 for invalid request errors', async () => {
-    mockFetchCompare.mockRejectedValue(new Error('Invalid request: base and head must differ'))
+    mockFetchCompare.mockRejectedValue(new GitHubError('invalid', { resource: 'comparison', upstreamMessage: 'No common ancestor' }))
 
     const req = createRequest({ owner: 'o', name: 'r', base: 'v1', head: 'v1' })
     const res = await GET(req)
@@ -130,7 +131,7 @@ describe('GET /api/github/compare', () => {
   })
 
   it('returns 403 on rate limit', async () => {
-    mockFetchCompare.mockRejectedValue(new Error('Rate limit exceeded'))
+    mockFetchCompare.mockRejectedValue(new GitHubError('rate_limited', { resource: 'comparison' }))
 
     const req = createRequest({ owner: 'o', name: 'r', base: 'v1', head: 'v2' })
     const res = await GET(req)

@@ -58,6 +58,41 @@ describe('getGitHubCacheHeaders', () => {
     },
   )
 
+  it.each([401, 403, 404, 422, 429, 500, 502, 504])(
+    'never lets the CDN cache an anonymous %i response',
+    async (status) => {
+      mockGetAccessToken.mockResolvedValue(undefined)
+      const GET = withGitHubCachePolicy(async () => new Response(null, { status }), 's-maxage=600, stale-while-revalidate=120')
+
+      const response = await GET({} as Parameters<typeof GET>[0])
+
+      expect(response.status).toBe(status)
+      expect(response.headers.get('CDN-Cache-Control')).toBe('no-store')
+      expect(response.headers.get('Cache-Control')).toBe('public, max-age=0, must-revalidate')
+    },
+  )
+
+  it('keeps a route\'s own CDN no-store on an anonymous success', async () => {
+    mockGetAccessToken.mockResolvedValue(undefined)
+    const GET = withGitHubCachePolicy(
+      async () => new Response('{}', { headers: { 'CDN-Cache-Control': 'no-store' } }),
+      's-maxage=600, stale-while-revalidate=120',
+    )
+
+    const response = await GET({} as Parameters<typeof GET>[0])
+
+    expect(response.headers.get('CDN-Cache-Control')).toBe('no-store')
+  })
+
+  it('keeps the CDN policy on an anonymous success', async () => {
+    mockGetAccessToken.mockResolvedValue(undefined)
+    const GET = withGitHubCachePolicy(async () => new Response('{}'), 's-maxage=600, stale-while-revalidate=120')
+
+    const response = await GET({} as Parameters<typeof GET>[0])
+
+    expect(response.headers.get('CDN-Cache-Control')).toBe('s-maxage=600, stale-while-revalidate=120')
+  })
+
   it('preserves an existing Vary value while adding authentication cache keys', async () => {
     mockGetAccessToken.mockResolvedValue(undefined)
     const GET = withGitHubCachePolicy(async () => new Response(null, {

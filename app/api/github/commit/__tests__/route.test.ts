@@ -26,6 +26,7 @@ vi.mock('@/lib/api/error', () => ({
 
 import { GET } from '@/app/api/github/commit/[sha]/route'
 import { NextRequest } from 'next/server'
+import { GitHubError } from '@/lib/github/errors'
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -103,7 +104,7 @@ describe('GET /api/github/commit/[sha]', () => {
   })
 
   it('returns 404 when commit is not found', async () => {
-    mockFetchCommitDetail.mockRejectedValue(new Error('Commit not found: deadbeef'))
+    mockFetchCommitDetail.mockRejectedValue(new GitHubError('not_found', { resource: 'commit', subject: 'deadbeef' }))
 
     const req = createRequest('deadbeef', { owner: 'facebook', name: 'react' })
     const res = await GET(req, { params: createParams('deadbeef') })

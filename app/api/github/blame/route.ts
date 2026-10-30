@@ -5,6 +5,7 @@ import { z } from "zod"
 import { getAccessToken } from "@/lib/auth/token"
 import { fetchBlame } from "@/lib/github/fetcher"
 import { apiError } from "@/lib/api/error"
+import { gitHubErrorResponse } from "@/lib/api/github-error-response"
 import { readBoundedJsonBody } from "@/lib/api/json-body"
 import { GITHUB_NAME_RE } from "@/lib/github/validation"
 import { applyRateLimit } from "@/lib/api/rate-limit"
@@ -45,19 +46,10 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json(data)
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Failed to fetch blame data"
-
-    if (message.includes("not found")) {
-      return apiError('NOT_FOUND', message, 404)
-    }
-    if (message.includes("Rate limit")) {
-      return apiError('RATE_LIMIT', message, 403)
-    }
-    if (message.includes("Authentication")) {
-      return apiError('AUTH_REQUIRED', message, 401)
-    }
-
-    console.error('[blame] GitHub API error:', message)
-    return apiError('GITHUB_ERROR', 'Failed to fetch blame data', 500)
+    return gitHubErrorResponse(request, error, {
+      tag: 'blame',
+      fallback: 'Failed to fetch blame data',
+      notFoundCode: 'NOT_FOUND',
+    })
   }
 }

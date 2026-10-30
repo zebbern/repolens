@@ -27,6 +27,7 @@ vi.mock('@/lib/api/rate-limit', () => ({
 import { GET } from '@/app/api/github/refs/route'
 import { GITHUB_LIST_MAX_PAGES } from '@/lib/github/pagination'
 import { NextRequest } from 'next/server'
+import { GitHubError } from '@/lib/github/errors'
 
 function createRequest(params: Record<string, string>): NextRequest {
   const url = new URL('http://localhost/api/github/refs')
@@ -86,7 +87,7 @@ describe('GET /api/github/refs', () => {
   })
 
   it('maps a missing repository to 404', async () => {
-    mockFetchTags.mockRejectedValue(new Error('Tags not found.'))
+    mockFetchTags.mockRejectedValue(new GitHubError('not_found', { resource: 'tags' }))
 
     const res = await GET(createRequest({ owner: 'facebook', name: 'missing' }))
 

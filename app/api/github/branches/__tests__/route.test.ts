@@ -34,6 +34,7 @@ vi.mock('@/lib/api/rate-limit', () => ({
 import { GET } from '@/app/api/github/branches/route'
 import { GITHUB_LIST_MAX_PAGES } from '@/lib/github/pagination'
 import { NextRequest } from 'next/server'
+import { GitHubError } from '@/lib/github/errors'
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -247,7 +248,7 @@ describe('GET /api/github/branches', () => {
   })
 
   it('returns 404 when repo not found', async () => {
-    mockFetchBranches.mockRejectedValue(new Error('Repository not found'))
+    mockFetchBranches.mockRejectedValue(new GitHubError('not_found', { resource: 'branches' }))
 
     const req = createRequest({ owner: 'o', name: 'missing' })
     const res = await GET(req)
@@ -256,7 +257,7 @@ describe('GET /api/github/branches', () => {
   })
 
   it('returns 403 on rate limit', async () => {
-    mockFetchBranches.mockRejectedValue(new Error('Rate limit exceeded'))
+    mockFetchBranches.mockRejectedValue(new GitHubError('rate_limited', { resource: 'branches' }))
 
     const req = createRequest({ owner: 'o', name: 'r' })
     const res = await GET(req)

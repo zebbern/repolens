@@ -8,6 +8,14 @@ import { githubGraphQL } from './graphql'
 import { resolveRepoTree, TREE_RESOLUTION_MAX_RESPONSE_BYTES } from './tree-resolver'
 import { fetchGitHub } from './request-signal'
 import { collectGitHubPages, GITHUB_LIST_PAGE_SIZE, type PaginatedList } from './pagination'
+import {
+  GitHubError,
+  gitHubErrorFromResponse,
+  gitHubTransportError,
+  isGitHubError,
+  withGitHubResource,
+  type GitHubErrorTarget,
+} from './errors'
 import { readBoundedJsonResponse } from '@/lib/api/json-body'
 
 const GITHUB_API_BASE = 'https://api.github.com'
@@ -15,6 +23,21 @@ const GITHUB_API_BASE = 'https://api.github.com'
 interface FetchOptions {
   token?: string
   signal?: AbortSignal
+}
+
+/**
+ * fetchGitHub that throws a GitHubError for a non-OK response, a network
+ * failure or the request deadline. A caller abort is rethrown unchanged.
+ */
+async function requestGitHub(url: string, init: RequestInit, target: GitHubErrorTarget): Promise<Response> {
+  let response: Response
+  try {
+    response = await fetchGitHub(url, init)
+  } catch (error) {
+    throw gitHubTransportError(error, target, init.signal)
+  }
+  if (!response.ok) throw await gitHubErrorFromResponse(response, target)
+  return response
 }
 
 export const MAX_FILE_RESPONSE_BYTES = 2_000_000
@@ -81,19 +104,8 @@ export async function fetchRepoMetadata(
     headers['Authorization'] = `Bearer ${options.token}`
   }
   
-  const response = await fetchGitHub(buildRepoApiUrl(owner, repo), { headers, signal: options.signal })
-  
-  if (!response.ok) {
-    void response.body?.cancel().catch(() => {})
-    if (response.status === 404) {
-      throw new Error('Repository not found. Make sure the repository exists. If it\'s private, add a GitHub token in Settings.')
-    }
-    if (response.status === 403) {
-      throw new Error('Rate limit exceeded. Try again later or add a GitHub Personal Access Token in Settings for higher limits.')
-    }
-    throw new Error(`Failed to fetch repository: ${response.statusText}`)
-  }
-  
+  const response = await requestGitHub(buildRepoApiUrl(owner, repo), { headers, signal: options.signal }, { resource: 'repository' })
+
   const data = await response.json()
   
   return {
@@ -135,11 +147,7 @@ export async function fetchRepoTree(
   }
   
   return resolveRepoTree(sha, async ({ sha: treeSha, recursive, signal }) => {
-    const response = await fetchGitHub(buildTreeApiUrl(owner, repo, treeSha, recursive), { headers, signal })
-    if (!response.ok) {
-      await response.body?.cancel().catch(() => {})
-      throw new Error(`Failed to fetch repository tree: ${response.statusText}`)
-    }
+    const response = await requestGitHub(buildTreeApiUrl(owner, repo, treeSha, recursive), { headers, signal }, { resource: 'tree' })
     const bounded = await readBoundedJsonResponse<RepoTree>(response, TREE_RESOLUTION_MAX_RESPONSE_BYTES)
     return { tree: bounded.data, bytes: bounded.bytes }
   }, { signal: options.signal })
@@ -162,13 +170,8 @@ export async function fetchFileContent(
   }
   
   const url = buildRawContentUrl(owner, repo, branch, path)
-  const response = await fetchGitHub(url, { headers, signal: options.signal })
+  const response = await requestGitHub(url, { headers, signal: options.signal }, { resource: 'file', subject: path })
 
-  if (!response.ok) {
-    await response.body?.cancel().catch(() => {})
-    throw new Error(`Failed to fetch file: ${response.statusText}`)
-  }
-  
   return readTextBounded(response, MAX_FILE_RESPONSE_BYTES)
 }
 
@@ -186,38 +189,17 @@ function buildHeaders(token?: string): HeadersInit {
 }
 
 /**
- * Handle common GitHub API error responses.
- */
-function handleGitHubError(response: Response, context: string): never {
-  void response.body?.cancel().catch(() => {})
-  if (response.status === 404) {
-    throw new Error(`${context} not found.`)
-  }
-  if (response.status === 403) {
-    throw new Error('Rate limit exceeded. Please try again later or add a GitHub token.')
-  }
-  if (response.status === 422) {
-    throw new Error(`Invalid request for ${context.toLowerCase()}.`)
-  }
-  throw new Error(`Failed to fetch ${context.toLowerCase()}: ${response.statusText}`)
-}
-
-/**
  * Fetch a GitHub list endpoint, following `Link` pagination up to the page cap.
  */
 async function fetchAllPages<T>(
   url: string,
   options: FetchOptions,
-  context: string,
+  target: GitHubErrorTarget,
   mapItem: (item: Record<string, unknown>) => T,
 ): Promise<PaginatedList<T>> {
   const headers = buildHeaders(options.token)
   return collectGitHubPages(url, async (pageUrl) => {
-    const response = await fetchGitHub(pageUrl, { headers, signal: options.signal })
-
-    if (!response.ok) {
-      handleGitHubError(response, context)
-    }
+    const response = await requestGitHub(pageUrl, { headers, signal: options.signal }, target)
 
     const data = (await response.json()) as Array<Record<string, unknown>>
     return { items: data.map(mapItem), linkHeader: response.headers.get('Link') }
@@ -236,7 +218,7 @@ export async function fetchTags(
   const page = options.page ?? 1
 
   const url = `${GITHUB_API_BASE}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/tags?per_page=${perPage}&page=${page}`
-  return fetchAllPages(url, options, 'Tags', (tag) => ({
+  return fetchAllPages(url, options, { resource: 'tags' }, (tag) => ({
     name: tag.name as string,
     commitSha: (tag.commit as Record<string, string>).sha,
     commitUrl: (tag.commit as Record<string, string>).url,
@@ -256,11 +238,7 @@ export async function fetchRepoLanguages(
 ): Promise<Record<string, number>> {
   const headers = buildHeaders(options.token)
   const url = `${GITHUB_API_BASE}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/languages`
-  const response = await fetchGitHub(url, { headers, signal: options.signal })
-
-  if (!response.ok) {
-    handleGitHubError(response, 'Languages')
-  }
+  const response = await requestGitHub(url, { headers, signal: options.signal }, { resource: 'languages' })
 
   return response.json()
 }
@@ -277,7 +255,7 @@ export async function fetchBranches(
   const page = options.page ?? 1
 
   const url = `${GITHUB_API_BASE}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/branches?per_page=${perPage}&page=${page}`
-  return fetchAllPages(url, options, 'Branches', (branch) => ({
+  return fetchAllPages(url, options, { resource: 'branches' }, (branch) => ({
     name: branch.name as string,
     commitSha: (branch.commit as Record<string, string>).sha,
     isProtected: (branch.protected as boolean) ?? false,
@@ -313,11 +291,7 @@ export async function fetchCommits(
   if (options.path) params.set('path', options.path)
 
   const url = `${GITHUB_API_BASE}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/commits?${params.toString()}`
-  const response = await fetchGitHub(url, { headers, signal: options.signal })
-
-  if (!response.ok) {
-    handleGitHubError(response, 'Commits')
-  }
+  const response = await requestGitHub(url, { headers, signal: options.signal }, { resource: 'commits' })
 
   const data = await response.json()
   return mapCommits(data as Array<Record<string, unknown>>)
@@ -336,11 +310,7 @@ export async function fetchCompare(
   const headers = buildHeaders(options.token)
 
   const url = `${GITHUB_API_BASE}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/compare/${encodeURIComponent(base)}...${encodeURIComponent(head)}`
-  const response = await fetchGitHub(url, { headers, signal: options.signal })
-
-  if (!response.ok) {
-    handleGitHubError(response, 'Comparison')
-  }
+  const response = await requestGitHub(url, { headers, signal: options.signal }, { resource: 'comparison' })
 
   const data = (await response.json()) as Record<string, unknown>
 
@@ -411,7 +381,7 @@ interface BlameGraphQLResponse {
         ranges: BlameData['ranges']
       }
     } | null
-  }
+  } | null
 }
 
 /**
@@ -426,17 +396,25 @@ export async function fetchBlame(
   options: FetchOptions = {},
 ): Promise<BlameData> {
   if (!options.token) {
-    throw new Error('Authentication required to fetch blame data')
+    throw new GitHubError('unauthorized', { resource: 'blame' })
   }
 
   const expression = `${ref}:${path}`
-  const data = options.signal
-    ? await githubGraphQL<BlameGraphQLResponse>(BLAME_QUERY, { owner, name, expression }, options.token, options.signal)
-    : await githubGraphQL<BlameGraphQLResponse>(BLAME_QUERY, { owner, name, expression }, options.token)
+  let data: BlameGraphQLResponse | null
+  try {
+    data = options.signal
+      ? await githubGraphQL<BlameGraphQLResponse>(BLAME_QUERY, { owner, name, expression }, options.token, options.signal)
+      : await githubGraphQL<BlameGraphQLResponse>(BLAME_QUERY, { owner, name, expression }, options.token)
+  } catch (error) {
+    throw isGitHubError(error) ? withGitHubResource(error, { resource: 'blame' }) : error
+  }
 
+  if (!data?.repository) {
+    throw new GitHubError('not_found', { resource: 'blame' })
+  }
   const blob = data.repository.object
   if (!blob) {
-    throw new Error(`File not found: ${path}`)
+    throw new GitHubError('not_found', { resource: 'file', subject: path })
   }
 
   return {
@@ -458,15 +436,7 @@ export async function fetchCommitDetail(
   const headers = buildHeaders(options.token)
 
   const url = `${GITHUB_API_BASE}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/commits/${encodeURIComponent(sha)}`
-  const response = await fetchGitHub(url, { headers, signal: options.signal })
-
-  if (!response.ok) {
-    if (response.status === 404) {
-      void response.body?.cancel().catch(() => {})
-      throw new Error(`Commit not found: ${sha}`)
-    }
-    handleGitHubError(response, 'Commit')
-  }
+  const response = await requestGitHub(url, { headers, signal: options.signal }, { resource: 'commit', subject: sha })
 
   const data = (await response.json()) as Record<string, unknown>
   const commit = data.commit as Record<string, unknown>
@@ -683,11 +653,7 @@ export async function fetchPulls(
 
   const qs = params.toString()
   const url = `${GITHUB_API_BASE}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/pulls${qs ? `?${qs}` : ''}`
-  const response = await fetchGitHub(url, { headers, signal: options.signal })
-
-  if (!response.ok) {
-    handleGitHubError(response, 'Pull requests')
-  }
+  const response = await requestGitHub(url, { headers, signal: options.signal }, { resource: 'pulls' })
 
   const raw = (await response.json()) as Array<Record<string, unknown>>
   return raw.map(mapPullRequest)
@@ -704,15 +670,7 @@ export async function fetchPullRequest(
 ): Promise<PRMetadata> {
   const headers = buildHeaders(options.token)
   const url = `${GITHUB_API_BASE}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/pulls/${number}`
-  const response = await fetchGitHub(url, { headers, signal: options.signal })
-
-  if (!response.ok) {
-    if (response.status === 404) {
-      void response.body?.cancel().catch(() => {})
-      throw new Error(`Pull request #${number} not found`)
-    }
-    handleGitHubError(response, 'Pull request')
-  }
+  const response = await requestGitHub(url, { headers, signal: options.signal }, { resource: 'pull_request', subject: String(number) })
 
   const data = (await response.json()) as Record<string, unknown>
   return mapPullRequest(data)
@@ -734,15 +692,7 @@ export async function fetchPullRequestFiles(
 
   const qs = params.toString()
   const url = `${GITHUB_API_BASE}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/pulls/${number}/files${qs ? `?${qs}` : ''}`
-  const response = await fetchGitHub(url, { headers, signal: options.signal })
-
-  if (!response.ok) {
-    if (response.status === 404) {
-      void response.body?.cancel().catch(() => {})
-      throw new Error(`Pull request #${number} not found`)
-    }
-    handleGitHubError(response, 'Pull request files')
-  }
+  const response = await requestGitHub(url, { headers, signal: options.signal }, { resource: 'pull_request_files', subject: String(number) })
 
   const raw = (await response.json()) as Array<Record<string, unknown>>
   return raw.map((file): PRFile => ({
@@ -773,15 +723,7 @@ export async function fetchPullRequestComments(
 
   const qs = params.toString()
   const url = `${GITHUB_API_BASE}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/pulls/${number}/comments${qs ? `?${qs}` : ''}`
-  const response = await fetchGitHub(url, { headers, signal: options.signal })
-
-  if (!response.ok) {
-    if (response.status === 404) {
-      void response.body?.cancel().catch(() => {})
-      throw new Error(`Pull request #${number} not found`)
-    }
-    handleGitHubError(response, 'Pull request comments')
-  }
+  const response = await requestGitHub(url, { headers, signal: options.signal }, { resource: 'pull_request_comments', subject: String(number) })
 
   const raw = (await response.json()) as Array<Record<string, unknown>>
   return raw.map((comment): PRComment => {

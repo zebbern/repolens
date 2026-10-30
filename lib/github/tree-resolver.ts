@@ -4,6 +4,7 @@ import type {
   ResolvedRepoTree,
   TreeResolutionReason,
 } from '@/types/repository'
+import { isGitHubError } from './errors'
 
 export const TREE_RESOLUTION_CONCURRENCY = 4
 export const TREE_RESOLUTION_MAX_REQUESTS = 32
@@ -224,7 +225,8 @@ export async function resolveRepoTree(
       } else if (error instanceof Error && error.name === 'ResponseBodyTooLargeError') {
         markLimit(path, 'Tree response exceeded the per-response byte ceiling')
       } else {
-        addFailure(path, 'fetch-failed', error instanceof Error ? error.message : 'Tree request failed')
+        // Only typed errors carry a client-safe message; anything else may hold upstream text.
+        addFailure(path, 'fetch-failed', isGitHubError(error) ? error.message : 'Tree request failed')
       }
       return null
     } finally {

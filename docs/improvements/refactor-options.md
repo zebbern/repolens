@@ -302,6 +302,8 @@ Stale claims in the reports, now fixed:
 - The direct commits mapping now passes page (client.ts:221).
 FOLLOWUP row 19 and the matching core-correctness items are therefore out of date.
 
+Status: (5) closed every error divergence below and the null-repository blame case; both modes now throw the same GitHubError kind and message. mode-parity.test.ts KNOWN_DIVERGENCES lists only the redirect policy and the commit-detail stats default.
+
 Remaining divergences, measured with a probe that sent each upstream response through both modes:
 - 404: the proxy says 'Repository not found. Make sure the repository exists. If it's private, add a GitHub token in Settings.' Direct mode says 'Not Found'.
 - 401: the proxy returns 500 'Failed to fetch repository/tags/...'. Direct mode says 'Invalid or expired GitHub token...'.
@@ -400,6 +402,8 @@ Do Option A now: about 1 day, low risk, and it is the safety net for both this r
 - Delete the routes and client functions that have no production consumer (/api/github/rate-limit, /api/github/refs, /api/github/languages, fetchPullRequestCommentsViaProxy), or keep them as public API?
 
 ## (5) Typed GitHub error contract instead of HTTP status from error-message substrings
+
+Status: done, Option C (typed GitHubError end to end), with the owner's decisions: GitHub rate limits including the secondary-limit 429 stay 403 RATE_LIMIT; a non-rate-limit 403 returns a fixed FORBIDDEN message in both modes, never GitHub's text. The section below records the state before the change. The contract is pinned by app/api/github/__tests__/route-error-contract.test.ts and lib/github/__tests__/mode-parity.test.ts.
 
 ### Current state
 

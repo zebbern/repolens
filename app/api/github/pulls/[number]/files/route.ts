@@ -4,6 +4,7 @@ import { z } from "zod"
 import { withGitHubCachePolicy } from "@/lib/api/github-cache"
 import { fetchPullRequestFiles } from "@/lib/github/fetcher"
 import { apiError } from "@/lib/api/error"
+import { gitHubErrorResponse } from "@/lib/api/github-error-response"
 import { GITHUB_NAME_RE } from "@/lib/github/validation"
 import { applyRateLimit } from "@/lib/api/rate-limit"
 
@@ -52,16 +53,10 @@ export const GET = withGitHubCachePolicy(async function GET(
     })
     return NextResponse.json(files)
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Failed to fetch pull request files"
-
-    if (message.includes("not found")) {
-      return apiError('NOT_FOUND', message, 404)
-    }
-    if (message.includes("Rate limit")) {
-      return apiError('RATE_LIMIT', message, 403)
-    }
-
-    console.error('[pull-request-files] GitHub API error:', message)
-    return apiError('GITHUB_ERROR', 'Failed to fetch pull request files', 500)
+    return gitHubErrorResponse(request, error, {
+      tag: 'pull-request-files',
+      fallback: 'Failed to fetch pull request files',
+      notFoundCode: 'NOT_FOUND',
+    })
   }
 }, 's-maxage=60, stale-while-revalidate=30')

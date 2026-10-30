@@ -4,6 +4,7 @@ import { z } from "zod"
 import { withGitHubCachePolicy } from "@/lib/api/github-cache"
 import { fetchRepoTree } from "@/lib/github/fetcher"
 import { apiError } from "@/lib/api/error"
+import { gitHubErrorResponse } from "@/lib/api/github-error-response"
 import { GITHUB_NAME_RE } from "@/lib/github/validation"
 import { applyRateLimit } from "@/lib/api/rate-limit"
 import { TREE_RESOLUTION_MAX_REQUESTS } from "@/lib/github/tree-resolver"
@@ -42,12 +43,13 @@ export const GET = withGitHubCachePolicy(async function GET(request: NextRequest
       signal: request.signal,
     })
 
-    return NextResponse.json(tree)
+    // A tree cut short by a failed or slow request may resolve fully next time,
+    // so it must not be shared through the CDN; budget-limited trees can be.
+    const transient = tree.status === 'partial'
+      && tree.reasons.some(reason => reason === 'fetch-failed' || reason === 'time-budget-exceeded')
+    return NextResponse.json(tree, transient ? { headers: { 'CDN-Cache-Control': 'no-store' } } : undefined)
   } catch (error) {
-    if (request.signal.aborted) throw request.signal.reason ?? error
-    if (error instanceof Error && error.name === 'AbortError') throw error
-    const message = error instanceof Error ? error.message : "Failed to fetch tree"
-    console.error('[tree] GitHub API error:', message)
-    return apiError('GITHUB_ERROR', 'Failed to fetch tree', 500)
+    // Upstream failures arrive as a partial tree; this catches aborts and the unexpected.
+    return gitHubErrorResponse(request, error, { tag: 'tree', fallback: 'Failed to fetch tree' })
   }
 }, 's-maxage=600, stale-while-revalidate=120')

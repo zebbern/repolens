@@ -5,6 +5,7 @@ import { withGitHubCachePolicy } from "@/lib/api/github-cache"
 import { fetchTags } from "@/lib/github/fetcher"
 import { GITHUB_LIST_MAX_PAGES, githubPagesFetched } from "@/lib/github/pagination"
 import { apiError } from "@/lib/api/error"
+import { gitHubErrorResponse } from "@/lib/api/github-error-response"
 import { GITHUB_NAME_RE } from "@/lib/github/validation"
 import { applyRateLimit, refundRateLimit } from "@/lib/api/rate-limit"
 
@@ -49,16 +50,10 @@ export const GET = withGitHubCachePolicy(async function GET(request: NextRequest
 
     return NextResponse.json({ tags: tags.items, truncated: tags.truncated })
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Failed to fetch tags"
-
-    if (message.includes("not found")) {
-      return apiError('REPO_NOT_FOUND', message, 404)
-    }
-    if (message.includes("Rate limit")) {
-      return apiError('RATE_LIMIT', message, 403)
-    }
-
-    console.error('[tags] GitHub API error:', message)
-    return apiError('GITHUB_ERROR', 'Failed to fetch tags', 500)
+    return gitHubErrorResponse(request, error, {
+      tag: 'tags',
+      fallback: 'Failed to fetch tags',
+      notFoundCode: 'REPO_NOT_FOUND',
+    })
   }
 }, 's-maxage=600, stale-while-revalidate=120')

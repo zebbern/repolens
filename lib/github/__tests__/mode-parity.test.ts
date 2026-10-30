@@ -42,6 +42,7 @@ import {
   fetchTreeViaProxy,
   setGitHubPAT,
 } from '../client'
+import { isGitHubError, type GitHubErrorKind } from '../errors'
 import { GET as repoRoute } from '@/app/api/github/repo/route'
 import { GET as treeRoute } from '@/app/api/github/tree/route'
 import { GET as tagsRoute } from '@/app/api/github/tags/route'
@@ -354,7 +355,8 @@ async function serve(input: RequestInfo | URL, init: RequestInit = {}): Promise<
 // ---------------------------------------------------------------------------
 
 type Mode = 'proxy' | 'direct'
-type Outcome = { ok: true; value: unknown } | { ok: false; error: string }
+/** A failure is compared by message and GitHubError kind (undefined for other errors). */
+type Outcome = { ok: true; value: unknown } | { ok: false; error: string; kind?: GitHubErrorKind }
 type Call = () => Promise<unknown>
 
 async function run(mode: Mode, upstream: Scenario, call: Call): Promise<Outcome> {
@@ -367,7 +369,11 @@ async function run(mode: Mode, upstream: Scenario, call: Call): Promise<Outcome>
   try {
     outcome = { ok: true, value: await call() }
   } catch (error) {
-    outcome = { ok: false, error: error instanceof Error ? error.message : String(error) }
+    outcome = {
+      ok: false,
+      error: error instanceof Error ? error.message : String(error),
+      kind: isGitHubError(error) ? error.kind : undefined,
+    }
   }
 
   // Each mode must really use its own transport.
@@ -391,12 +397,15 @@ const ENDPOINTS = {
   blame: () => fetchBlameViaProxy('X', 'Y', 'main', 'src/a.ts'),
 } satisfies Record<string, Call>
 
-/** Success-only fixture variants that exercise optional or unusual GitHub data. */
+/** `ok`-scenario fixture variants that exercise optional or unusual GitHub data. */
 const SUCCESS_VARIANTS = {
   'tree (truncated root, subtree walk)': () => fetchTreeViaProxy('X', 'Y', 'big'),
   'commit detail (no stats)': () => fetchCommitDetailViaProxy('X', 'Y', 'feedface'),
   'blame (null repository)': () => fetchBlameViaProxy('X', 'Y', 'main', 'null-repo.ts'),
 } satisfies Record<string, Call>
+
+/** Variants whose GitHub data both modes must report as the same failure. */
+const FAILING_VARIANTS = new Set(['blame (null repository) / ok'])
 
 interface Cell {
   key: string
@@ -423,8 +432,8 @@ interface Divergence {
   direct: Expected
 }
 
-function failed(error: string): Outcome {
-  return { ok: false, error }
+function failed(error: string, kind?: GitHubErrorKind): Outcome {
+  return { ok: false, error, kind }
 }
 
 /** Tree resolution does not reject: a failed root fetch yields a partial tree. */
@@ -448,170 +457,31 @@ function succeeded(partial: Record<string, unknown>): Outcome {
   return { ok: true, value: expect.objectContaining(partial) }
 }
 
-type RestFailure = Exclude<Scenario, 'ok'>
-
 /**
- * Direct mode passes GitHub's own REST error text through (except for 401),
- * and a redirect fails in the browser because direct requests use
- * `redirect: 'error'`.
+ * Redirects: the server follows GitHub's 301 for a renamed or transferred
+ * repository, while direct requests use `redirect: 'error'` (commit 9f58af3),
+ * so the browser's network failure surfaces as an upstream GitHubError.
+ * GraphQL is not redirected, so blame has no redirect row.
  */
-const DIRECT_REST_ERRORS: Record<RestFailure, string> = {
-  '404': 'Not Found',
-  '401': 'Invalid or expired GitHub token. Check your PAT in Settings.',
-  '403-rate': 'API rate limit exceeded for user ID 1.',
-  '403-forbidden': SAML_MESSAGE,
-  '422': 'Validation Failed',
-  '429': SECONDARY_LIMIT_MESSAGE,
-  '5xx': 'Server Error',
-  redirect: 'Failed to fetch',
+function redirectDivergence(failure: string, toOutcome: (message: string) => Outcome = message => failed(message, 'upstream')): Divergence {
+  return { proxy: 'success', direct: toOutcome(failure) }
 }
-
-/**
- * Rows for a REST endpoint, given what proxy mode reports for each upstream
- * failure. `toOutcome` shapes both sides (tree failures are partial trees).
- */
-function restDivergences(
-  endpoint: keyof typeof ENDPOINTS,
-  proxy: Record<RestFailure, string | 'success'>,
-  toOutcome: (message: string) => Outcome = failed,
-): Record<string, Divergence> {
-  return Object.fromEntries((Object.keys(proxy) as RestFailure[]).map(upstream => [
-    `${endpoint} / ${upstream}`,
-    {
-      proxy: proxy[upstream] === 'success' ? 'success' : toOutcome(proxy[upstream]),
-      direct: toOutcome(DIRECT_REST_ERRORS[upstream]),
-    },
-  ]))
-}
-
-/** The server fetchers report any 403 (rate limit or SAML) as a rate limit. */
-const PROXY_RATE_LIMIT = 'Rate limit exceeded. Please try again later or add a GitHub token.'
-const PROXY_REPO_RATE_LIMIT = 'Rate limit exceeded. Try again later or add a GitHub Personal Access Token in Settings for higher limits.'
-const PROXY_BLAME_FAILURE = 'Failed to fetch blame data'
 
 const KNOWN_DIVERGENCES: Record<string, Divergence> = {
-  ...restDivergences('repo', {
-    '404': "Repository not found. Make sure the repository exists. If it's private, add a GitHub token in Settings.",
-    '401': 'Failed to fetch repository',
-    '403-rate': PROXY_REPO_RATE_LIMIT,
-    '403-forbidden': PROXY_REPO_RATE_LIMIT,
-    '422': 'Failed to fetch repository',
-    '429': 'Failed to fetch repository',
-    '5xx': 'Failed to fetch repository',
-    redirect: 'success',
-  }),
-  ...restDivergences('tree', {
-    '404': 'Failed to fetch repository tree: Not Found',
-    '401': 'Failed to fetch repository tree: Unauthorized',
-    '403-rate': 'Failed to fetch repository tree: Forbidden',
-    '403-forbidden': 'Failed to fetch repository tree: Forbidden',
-    '422': 'Failed to fetch repository tree: Unprocessable Entity',
-    '429': 'Failed to fetch repository tree: Too Many Requests',
-    '5xx': 'Failed to fetch repository tree: Bad Gateway',
-    redirect: 'success',
-  }, treeFailure),
-  ...restDivergences('tags', {
-    '404': 'Tags not found.',
-    '401': 'Failed to fetch tags',
-    '403-rate': PROXY_RATE_LIMIT,
-    '403-forbidden': PROXY_RATE_LIMIT,
-    '422': 'Failed to fetch tags',
-    '429': 'Failed to fetch tags',
-    '5xx': 'Failed to fetch tags',
-    redirect: 'success',
-  }),
-  ...restDivergences('branches', {
-    '404': 'Branches not found.',
-    '401': 'Failed to fetch branches',
-    '403-rate': PROXY_RATE_LIMIT,
-    '403-forbidden': PROXY_RATE_LIMIT,
-    '422': 'Failed to fetch branches',
-    '429': 'Failed to fetch branches',
-    '5xx': 'Failed to fetch branches',
-    redirect: 'success',
-  }),
-  ...restDivergences('commits', {
-    '404': 'Commits not found.',
-    '401': 'Failed to fetch commits',
-    '403-rate': PROXY_RATE_LIMIT,
-    '403-forbidden': PROXY_RATE_LIMIT,
-    '422': 'Failed to fetch commits',
-    '429': 'Failed to fetch commits',
-    '5xx': 'Failed to fetch commits',
-    redirect: 'success',
-  }),
-  ...restDivergences('file commits', {
-    '404': 'Commits not found.',
-    '401': 'Failed to fetch commits',
-    '403-rate': PROXY_RATE_LIMIT,
-    '403-forbidden': PROXY_RATE_LIMIT,
-    '422': 'Failed to fetch commits',
-    '429': 'Failed to fetch commits',
-    '5xx': 'Failed to fetch commits',
-    redirect: 'success',
-  }),
-  ...restDivergences('compare', {
-    '404': 'Comparison not found.',
-    '401': 'Failed to fetch comparison',
-    '403-rate': PROXY_RATE_LIMIT,
-    '403-forbidden': PROXY_RATE_LIMIT,
-    '422': 'Invalid request for comparison.',
-    '429': 'Failed to fetch comparison',
-    '5xx': 'Failed to fetch comparison',
-    redirect: 'success',
-  }),
-  ...restDivergences('commit detail', {
-    '404': 'Commit not found: abc1234',
-    '401': 'Failed to fetch commit detail',
-    '403-rate': PROXY_RATE_LIMIT,
-    '403-forbidden': PROXY_RATE_LIMIT,
-    '422': 'Failed to fetch commit detail',
-    '429': 'Failed to fetch commit detail',
-    '5xx': 'Failed to fetch commit detail',
-    redirect: 'success',
-  }),
+  'repo / redirect': redirectDivergence('Failed to fetch repository'),
+  'tree / redirect': redirectDivergence('Failed to fetch repository tree', treeFailure),
+  'tags / redirect': redirectDivergence('Failed to fetch tags'),
+  'branches / redirect': redirectDivergence('Failed to fetch branches'),
+  'commits / redirect': redirectDivergence('Failed to fetch commits'),
+  'file commits / redirect': redirectDivergence('Failed to fetch commits'),
+  'compare / redirect': redirectDivergence('Failed to fetch comparison'),
+  'commit detail / redirect': redirectDivergence('Failed to fetch commit detail'),
 
-  // Blame: the blame route maps only messages containing "not found",
-  // "Rate limit" or "Authentication", so GitHub's GraphQL errors become a
-  // generic 500. GraphQL is not redirected, so blame has no redirect row.
-  'blame / 404': {
-    proxy: failed(PROXY_BLAME_FAILURE),
-    direct: failed("Could not resolve to a Repository with the name 'X/Y'."),
-  },
-  'blame / 401': {
-    proxy: failed('Authentication required for this request'),
-    direct: failed('Authentication required to fetch blame data'),
-  },
-  'blame / 403-rate': {
-    proxy: failed(PROXY_BLAME_FAILURE),
-    direct: failed('API rate limit exceeded for user ID 1.'),
-  },
-  'blame / 403-forbidden': {
-    proxy: failed(PROXY_BLAME_FAILURE),
-    direct: failed('GraphQL request failed: Forbidden'),
-  },
-  'blame / 422': {
-    proxy: failed(PROXY_BLAME_FAILURE),
-    direct: failed('GraphQL request failed: Unprocessable Entity'),
-  },
-  'blame / 429': {
-    proxy: failed(PROXY_BLAME_FAILURE),
-    direct: failed('GraphQL request failed: Too Many Requests'),
-  },
-  'blame / 5xx': {
-    proxy: failed(PROXY_BLAME_FAILURE),
-    direct: failed('GraphQL request failed: Bad Gateway'),
-  },
-
-  // Unusual success data: the server fetchers throw a TypeError (reported as
-  // a generic 500) where direct mode has a fallback.
+  // Unusual success data: the server fetcher throws a TypeError (reported as
+  // a generic 500) where direct mode defaults the missing stats to zeros.
   'commit detail (no stats) / ok': {
-    proxy: failed('Failed to fetch commit detail'),
+    proxy: failed('Failed to fetch commit detail', 'upstream'),
     direct: succeeded({ sha: 'feedface', stats: { additions: 0, deletions: 0, total: 0 } }),
-  },
-  'blame (null repository) / ok': {
-    proxy: failed(PROXY_BLAME_FAILURE),
-    direct: failed('Repository not found or inaccessible'),
   },
 }
 
@@ -632,6 +502,7 @@ beforeEach(() => {
   clearGitHubCache()
   // Routes log upstream failures; the outcomes are asserted instead.
   vi.spyOn(console, 'error').mockImplementation(() => {})
+  vi.spyOn(console, 'warn').mockImplementation(() => {})
 })
 
 describe('GitHub access parity: proxy mode vs PAT direct mode', () => {
@@ -641,7 +512,7 @@ describe('GitHub access parity: proxy mode vs PAT direct mode', () => {
     const known = KNOWN_DIVERGENCES[key]
 
     if (!known) {
-      if (upstream === 'ok') expect(proxy.ok, `${key}: fixture must succeed`).toBe(true)
+      if (upstream === 'ok') expect(proxy.ok, `${key}: fixture must succeed`).toBe(!FAILING_VARIANTS.has(key))
       expect(direct, `${key}: new divergence; fix it or list it in KNOWN_DIVERGENCES`).toEqual(proxy)
       return
     }
@@ -656,6 +527,28 @@ describe('GitHub access parity: proxy mode vs PAT direct mode', () => {
   it('lists only divergences for cells the suite runs', () => {
     const keys = new Set(CELLS.map(cell => cell.key))
     expect(Object.keys(KNOWN_DIVERGENCES).filter(key => !keys.has(key))).toEqual([])
+  })
+
+  it('reports each upstream failure as the decided GitHubError kind', async () => {
+    const failures = ['404', '401', '403-rate', '403-forbidden', '422', '429', '5xx'] as const
+    const kinds: Record<string, unknown> = {}
+    for (const upstream of failures) {
+      for (const [endpoint, call] of [['repo', ENDPOINTS.repo], ['blame', ENDPOINTS.blame]] as const) {
+        const outcome = await run('direct', upstream, call)
+        kinds[`${endpoint} / ${upstream}`] = outcome.ok ? 'success' : outcome.kind
+      }
+    }
+
+    // Parity makes proxy mode report the same kinds.
+    expect(kinds).toEqual(Object.fromEntries(['repo', 'blame'].flatMap(endpoint => [
+      [`${endpoint} / 404`, 'not_found'],
+      [`${endpoint} / 401`, 'unauthorized'],
+      [`${endpoint} / 403-rate`, 'rate_limited'],
+      [`${endpoint} / 403-forbidden`, 'forbidden'],
+      [`${endpoint} / 422`, 'invalid'],
+      [`${endpoint} / 429`, 'rate_limited'],
+      [`${endpoint} / 5xx`, 'upstream'],
+    ])))
   })
 
   it('sends the same blame GraphQL query in both modes', async () => {

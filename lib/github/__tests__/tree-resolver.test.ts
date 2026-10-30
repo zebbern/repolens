@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { RepoTree } from '@/types/repository'
 import { resolveRepoTree } from '../tree-resolver'
+import { GitHubError } from '../errors'
 
 const blob = (path: string, sha = path): RepoTree['tree'][number] => ({ path, sha, mode: '100644', type: 'blob', size: 1 })
 const dir = (path: string, sha = path): RepoTree['tree'][number] => ({ path, sha, mode: '040000', type: 'tree' })
@@ -60,8 +61,34 @@ describe('resolveRepoTree', () => {
     expect(result).toMatchObject({ status: 'partial', reasons: ['fetch-failed'], failedSubtrees: ['src'] })
     if (result.status === 'partial') {
       expect(result.failureDetails).toEqual([
-        { path: 'src', reason: 'fetch-failed', message: 'child unavailable' },
+        { path: 'src', reason: 'fetch-failed', message: 'Tree request failed' },
       ])
+    }
+  })
+
+  it('never reports raw upstream text, such as an HTML body that failed to parse', async () => {
+    const fetchTree = vi.fn(async () => {
+      throw new SyntaxError('Unexpected token \'<\', "<html>secret-upstream" is not valid JSON')
+    })
+
+    const result = await resolveRepoTree('root', fetchTree)
+
+    expect(JSON.stringify(result)).not.toContain('secret-upstream')
+    if (result.status === 'partial') {
+      expect(result.failureDetails).toEqual([{ path: '.', reason: 'fetch-failed', message: 'Tree request failed' }])
+    }
+  })
+
+  it('reports the fixed message of a typed GitHub error', async () => {
+    const fetchTree = vi.fn(async () => {
+      throw new GitHubError('rate_limited', { resource: 'tree', upstreamMessage: 'secret-upstream' })
+    })
+
+    const result = await resolveRepoTree('root', fetchTree)
+
+    expect(JSON.stringify(result)).not.toContain('secret-upstream')
+    if (result.status === 'partial') {
+      expect(result.failureDetails[0].message).toBe(new GitHubError('rate_limited', { resource: 'tree' }).message)
     }
   })
 

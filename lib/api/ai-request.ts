@@ -33,10 +33,16 @@ function malformedRequest(message: string, details?: string): AIRequestResult<ne
 }
 
 export function aiRequestSchemaError(error: ZodError): Response {
+  // Zod also runs an array's max-length check against a mistyped string, so a
+  // `too_big` beside an `invalid_type` on the same field is a type error, not size.
+  const mistypedPaths = new Set(error.issues
+    .filter(issue => issue.code === 'invalid_type')
+    .map(issue => issue.path.join('.')))
   const hasSizeOverflow = error.issues.some(issue => (
     issue.code === 'too_big'
     && ((issue as { origin?: string }).origin === 'string'
       || (issue as { origin?: string }).origin === 'array')
+    && !mistypedPaths.has(issue.path.join('.'))
   ))
   return apiError(
     hasSizeOverflow ? 'PAYLOAD_TOO_LARGE' : 'VALIDATION_ERROR',
